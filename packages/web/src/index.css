@@ -1,11 +1,18 @@
+@import "./tokens/tokens.css";
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 @import "@xterm/xterm/css/xterm.css";
 
+/*
+ * Legacy accent RGB triplets — retained for P1 back-compat.
+ * tokens.css now defines these too (remapped to terra cotta). Any further
+ * override from applyPrefs() in prefs.ts still takes precedence via :root
+ * specificity. P1-E will reconcile and remove.
+ */
 :root {
-  /* Default accent = orange. Overridden by applyPrefs() when user changes. */
   --accent-300: 253 186 116;
   --accent-400: 251 146 60;
   --accent-500: 249 115 22;
@@ -17,13 +24,9 @@ body,
 #root {
   height: 100%;
   margin: 0;
-  font-family:
-    ui-sans-serif,
-    -apple-system,
-    "SF Pro",
-    "PingFang SC",
-    system-ui,
-    sans-serif;
+  background: rgb(var(--bg-page));
+  color: rgb(var(--text-primary));
+  font-family: var(--font-serif);
   -webkit-font-smoothing: antialiased;
 }
 

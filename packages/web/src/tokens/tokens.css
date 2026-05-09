@@ -1,0 +1,103 @@
+/**
+ * RCC v0.2 design tokens — light + dark.
+ * Values are stored as RGB triplets so Tailwind's
+ * `rgb(var(--token) / <alpha-value>)` opacity pattern works.
+ * Design spec locked 2026-05-09 (see FEATURES.md "设计锁定").
+ */
+
+:root {
+  /* ── surfaces ─────────────────────────────────────── */
+  --bg-page: 238 236 226;            /* #eeece2 warm cream */
+  --bg-surface: 250 249 246;         /* #faf9f6 cards / inputs */
+  --bg-surface-strong: 245 243 236;  /* #f5f3ec nested */
+
+  /* ── borders ──────────────────────────────────────── */
+  --border-subtle: 228 224 212;      /* #e4e0d4 */
+  --border-strong: 212 207 192;      /* #d4cfc0 */
+
+  /* ── text ─────────────────────────────────────────── */
+  --text-primary: 61 57 41;          /* #3d3929 warm dark brown */
+  --text-secondary: 107 101 88;      /* #6b6558 */
+  --text-muted: 143 138 124;         /* #8f8a7c */
+
+  /* ── accent (Claude terra cotta) ──────────────────── */
+  --accent: 218 119 86;              /* #da7756 */
+  --accent-hover: 189 93 58;         /* #bd5d3a */
+  --accent-bg: 253 241 234;          /* #fdf1ea selected peach */
+
+  /* ── semantic signals ─────────────────────────────── */
+  --success: 61 139 94;              /* #3d8b5e */
+  --warn: 200 138 46;                /* #c88a2e */
+  --danger: 184 72 56;               /* #b84838 */
+
+  /* ── chat specifics ───────────────────────────────── */
+  --code-bg: 243 241 232;            /* #f3f1e8 */
+  --user-bubble: 240 236 224;        /* #f0ece0 */
+
+  /* ── back-compat: legacy accent-300/400/500/600 ──
+   * Existing code (packages/web/src/**) uses bg-accent-500 etc.
+   * Remap to terra cotta shades so v0.1 classes still render.
+   * P1-E will reconcile usage. */
+  --accent-300: 235 171 148;         /* light */
+  --accent-400: 227 144 117;
+  --accent-500: 218 119 86;          /* base == --accent */
+  --accent-600: 189 93 58;           /* dark  == --accent-hover */
+
+  /* ── typography ───────────────────────────────────── */
+  --font-serif: "Charter", "Bitstream Charter", "Sitka Text",
+    Cambria, Georgia, "Times New Roman", serif;
+  --font-sans: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", "SF Mono", ui-monospace, Menlo, monospace;
+
+  /* ── radii ────────────────────────────────────────── */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
+
+  /* ── motion ───────────────────────────────────────── */
+  --duration-fast: 150ms;
+  --duration-drawer: 220ms;
+  --easing: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/**
+ * Dark mode — applied when <html data-theme="dark">.
+ * Only tokens that differ are redeclared.
+ */
+[data-theme="dark"] {
+  --bg-page: 26 24 22;               /* #1a1816 */
+  --bg-surface: 36 34 30;            /* #24221e */
+  --bg-surface-strong: 46 43 37;     /* #2e2b25 */
+
+  --border-subtle: 54 51 44;         /* #36332c */
+  --border-strong: 54 51 44;         /* #36332c (same; spec omits strong dark) */
+
+  --text-primary: 232 228 214;       /* #e8e4d6 */
+  --text-secondary: 168 162 144;     /* #a8a290 */
+  --text-muted: 111 107 94;          /* #6f6b5e */
+
+  --accent: 224 137 104;             /* #e08968 brighter terra cotta */
+  --accent-hover: 212 120 85;        /* #d47855 */
+  --accent-bg: 54 40 32;             /* darkened peach backdrop */
+
+  --code-bg: 42 40 34;               /* #2a2822 */
+  --user-bubble: 46 43 37;           /* #2e2b25 */
+
+  /* legacy aliases track dark accent */
+  --accent-300: 236 170 140;
+  --accent-400: 230 155 122;
+  --accent-500: 224 137 104;
+  --accent-600: 212 120 85;
+}
+
+/**
+ * Reduced motion — collapse transitions to 0 but keep tokens defined
+ * so `transition: var(--duration-fast) var(--easing)` stays valid.
+ */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --duration-fast: 0ms;
+    --duration-drawer: 0ms;
+  }
+}
