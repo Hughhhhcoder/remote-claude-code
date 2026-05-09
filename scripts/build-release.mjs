@@ -276,10 +276,19 @@ function stripRepos(nm) {
 }
 
 function writeLaunchers() {
+  const resolveSelf = `SELF="$0"
+while [ -L "$SELF" ]; do
+  LINK=$(readlink "$SELF")
+  case "$LINK" in
+    /*) SELF="$LINK" ;;
+    *) SELF="$(dirname "$SELF")/$LINK" ;;
+  esac
+done
+DIR=$(cd "$(dirname "$SELF")/.." && pwd)`;
   const hostLauncher = `#!/bin/sh
 # rcc host launcher
 set -eu
-DIR=$(cd "$(dirname "$0")/.." && pwd)
+${resolveSelf}
 if ! command -v node >/dev/null 2>&1; then
   echo "rcc: node is required (>= 20). Install from https://nodejs.org" >&2
   exit 1
@@ -298,7 +307,7 @@ exec node --no-deprecation "$DIR/lib/host/index.js" "$@"
   const cliLauncher = `#!/bin/sh
 # rcc CLI launcher
 set -eu
-DIR=$(cd "$(dirname "$0")/.." && pwd)
+${resolveSelf}
 if ! command -v node >/dev/null 2>&1; then
   echo "rcc: node is required (>= 20). Install from https://nodejs.org" >&2
   exit 1
@@ -311,7 +320,7 @@ exec node --no-deprecation "$DIR/lib/cli/dist/index.js" "$@"
   const adminLauncher = `#!/bin/sh
 # rcc admin launcher (trust store CLI)
 set -eu
-DIR=$(cd "$(dirname "$0")/.." && pwd)
+${resolveSelf}
 if ! command -v node >/dev/null 2>&1; then
   echo "rcc: node is required (>= 20)" >&2
   exit 1
