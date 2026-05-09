@@ -1,6 +1,6 @@
 {
   "name": "@rcc/host",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "type": "module",
   "bin": {
     "rcc-host": "./src/index.ts",

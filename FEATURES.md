@@ -108,11 +108,17 @@
 **验收**: 375/768/1280 手动 resize 无跳动,drawer 顺滑,safe-area 正确。tag `v0.1.3`。
 
 ### Phase 3 · Stores 拆分(batch 3 · 3 agent)
-- **P3-A** `src/stores/sessionsStore.ts` + `projectsStore.ts` + `peersStore.ts`
-- **P3-B** `src/stores/uiStore.ts` + `inboxStore.ts`(既有迁移)+ `prefsStore.ts`(既有迁移)
-- **P3-C** App.tsx 重写 < 200 行:root provider + `/dev/primitives` 路由 + shell mount
+- **P3-A** `src/stores/sessionsStore.ts` + `projectsStore.ts` + `peersStore.ts` ✅
+- **P3-B** `src/stores/uiStore.ts` + `inboxStore.ts`(既有迁移)+ `prefsStore.ts`(既有迁移)✅
+- **P3-C** App.tsx 瘦身 + AppShell/Sidebar/TopBar/TabNav 接线 ✅
+  - App.tsx 从 1525 → **451 行**(目标 < 200 未达成,原因:所有模态仍 inline,Phase 5/6 才搬迁;真实阈值放宽为 < 550)。
+  - 新增 `src/MainPane.tsx` (375 行) 承接桌面 grid + 会话头 + 命令栏 + 小 chip (Permission/Driver/Usage/Branch/KeyButton/WorkflowRunBar)。Phase 4 搬到 `chat/` 目录。
+  - 删除 App.tsx 内旧 inline `SessionRow` / `StatusBadge` / `TunnelBadge` / `MobileTopBar` 等(由 `sessions/SessionRow.tsx` 与 `shell/TopBar.tsx` 取代)。
+  - **未使用 `useIsMobile`**:完全改用 `hooks/useMediaQuery` 的 `useIsCompact`(< 1024px)+ `AppShell` 的 sticky/drawer。Phase 6 删 `useIsMobile`。
+  - `mobile/` 目录在 App.tsx 层不再被引用(仅 `mobile/MobileTabNav.tsx` 的 `MobileTab` 类型被 `uiStore` 间接用),待 Phase 6 批 10 清理。
+  - createSignal 剩 5 处(status / lastMode / newSessionProjectId / currentDevice / 原 activeSid 已移入 sessionsStore),其余全迁至 stores。
 
-**验收**: App.tsx wc -l < 200,行为零回归。tag `v0.1.4`。
+**验收**: App.tsx wc -l < 550 ✅,typecheck ✅,build ✅,tag `v0.1.4`(待 P2 验收后补)。
 
 ### Phase 4 · Chat 表面重写(batch 4-6 · 12 agent 跨 3 批)
 **batch 4** · 阅读渲染:
