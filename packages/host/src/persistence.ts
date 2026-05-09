@@ -1,12 +1,19 @@
 import { chmod, mkdir, readFile, readdir, rename, unlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import type { ChatMessage, SessionMeta } from "@rcc/protocol";
+import type { ChatMessage, SessionMeta, SessionSummary } from "@rcc/protocol";
 
 export interface SessionSnapshot {
   meta: SessionMeta & { lastActiveAt: number };
   chat: ChatMessage[];
   ringTail: string;
+  /**
+   * Added in M6 batch 9: AI-generated session summary. Optional — snapshots
+   * written by older host versions omit this and the host re-generates on
+   * next exit. Also mirrored onto `meta.summary` so SessionMeta stays the
+   * single source of truth for clients.
+   */
+  summary?: SessionSummary;
 }
 
 export const SESSIONS_DIR = join(homedir(), ".rcc", "sessions");
@@ -19,6 +26,17 @@ function fileFor(sid: string): string {
   return join(SESSIONS_DIR, `${sid}.json`);
 }
 
+function isSummary(v: unknown): v is SessionSummary {
+  if (!v || typeof v !== "object") return false;
+  const s = v as Partial<SessionSummary>;
+  return (
+    typeof s.title === "string" &&
+    Array.isArray(s.bullets) &&
+    s.bullets.every((b) => typeof b === "string") &&
+    typeof s.updatedAt === "number"
+  );
+}
+
 async function ensureDir(): Promise<void> {
   await mkdir(SESSIONS_DIR, { recursive: true, mode: 0o700 });
 }
@@ -27,7 +45,7 @@ function trimSnapshot(snap: SessionSnapshot): SessionSnapshot {
   const chat = snap.chat.slice(-MAX_CHAT);
   let ringTail = snap.ringTail;
   if (ringTail.length > MAX_RING_TAIL) ringTail = ringTail.slice(-MAX_RING_TAIL);
-  let out: SessionSnapshot = { meta: snap.meta, chat, ringTail };
+  let out: SessionSnapshot = { meta: snap.meta, chat, ringTail, summary: snap.summary };
   let buf = Buffer.byteLength(JSON.stringify(out), "utf8");
   // Fallback: drop older chat in chunks if a huge message still blows the cap.
   while (buf > MAX_FILE_BYTES && out.chat.length > 0) {
@@ -90,10 +108,21 @@ export async function loadAllSnapshots(): Promise<SessionSnapshot[]> {
       const ringTail = typeof parsed.ringTail === "string" ? parsed.ringTail : "";
       const lastActiveAt =
         typeof meta.lastActiveAt === "number" ? meta.lastActiveAt : Date.now();
+      const summary = isSummary(parsed.summary)
+        ? (parsed.summary as SessionSummary)
+        : isSummary((meta as SessionMeta).summary)
+          ? ((meta as SessionMeta).summary as SessionSummary)
+          : undefined;
       out.push({
-        meta: { ...meta, lastActiveAt, status: "exited" },
+        meta: {
+          ...meta,
+          lastActiveAt,
+          status: "exited",
+          ...(summary ? { summary } : {}),
+        },
         chat,
         ringTail,
+        ...(summary ? { summary } : {}),
       });
     } catch {
       // corrupt or unreadable — skip

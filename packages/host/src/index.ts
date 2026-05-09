@@ -27,6 +27,8 @@ import { ProjectStore } from "./projects.ts";
 import { TrustStore, PairingCodes, type PairedDevice } from "./trust.ts";
 import { handlePairRoute } from "./pair.ts";
 import { handleWhisperRoute } from "./whisper.ts";
+import { summarizeSession } from "./summary.ts";
+import { SearchIndex } from "./search.ts";
 import {
   Debouncer,
   deleteSnapshot,
@@ -90,12 +92,18 @@ import {
 } from "./marketplace.ts";
 import { PrefsStore } from "./prefs.ts";
 import { metrics } from "./metrics.ts";
+import { ShareStore } from "./shares.ts";
+import { GitWatcher } from "./git-watcher.ts";
+import { runGit, isReadOnlyGitArgs, getStatus as getGitStatus } from "./git.ts";
 
 interface WsState {
   attached: Set<string>;
   unsubs: Map<string, () => void>;
   device: PairedDevice | null;
   metricsSubscribed: boolean;
+  /** When set, this connection is a share-token guest: read-only, pinned to
+   * a single sid, no E2E, all mutation frames rejected. */
+  share: { id: string; sid: string; expiresAt: number } | null;
 }
 
 const CLAUDE_COMMAND = process.env.RCC_CLAUDE_CMD ?? "claude";
@@ -180,6 +188,7 @@ const trust = await TrustStore.load();
 const codes = new PairingCodes();
 const push = await PushService.load();
 const prefs = await PrefsStore.load();
+const shares = await ShareStore.load();
 await ensureSodiumReady();
 const hostKeys = await loadOrCreateHostKeys();
 const webauthn = new WebAuthnService(trust);
@@ -305,6 +314,8 @@ const approvalWatchers = new Map<string, ApprovalWatcher>();
 function broadcastApproval(frame: Frame): void {
   for (const client of wss.clients) {
     if (client.readyState !== WebSocket.OPEN) continue;
+    const share = (client as E2EWebSocket).rccShare;
+    if (share && !isFrameAllowedForShare(frame, share.sid)) continue;
     try {
       client.send(frameForClient(client as E2EWebSocket, frame));
     } catch {
@@ -384,6 +395,7 @@ function attachApprovalWatcher(session: AnySession): void {
 function attachChatBroadcast(session: AnySession): void {
   const unsub = session.chat.onMessage((message) => {
     metrics.incr("chat.msgs");
+    indexChatAppend(session, message);
     broadcast({ v: 1, t: "chat.append", sid: session.id, message });
   });
   // SDK driver also fires streaming segment updates; CLI driver never does.
@@ -410,6 +422,96 @@ function attachMetricsTap(session: AnySession): void {
     if (chunk.data) metrics.incr("pty.bytes.out", Buffer.byteLength(chunk.data, "utf8"));
   });
   session.onExit(() => unsub());
+}
+
+function attachSummaryOnExit(session: AnySession): void {
+  if (session instanceof DeadSession) return;
+  session.onExit(() => {
+    void generateAndBroadcastSummary(session.id);
+  });
+}
+
+// [git] Per-session GitWatcher. Polls branch/dirty/HEAD every 5s and broadcasts
+// `git.status` on change; on new HEAD pushes a `git.commits` frame + appends a
+// "✓ N commits during this session" system message into the chat. Non-git
+// cwds silently report null status (client hides the widget).
+const gitWatchers = new Map<string, GitWatcher>();
+
+const searchIndex = new SearchIndex();
+const sessionSummaries = new Map<string, import("@rcc/protocol").SessionSummary>();
+const chatBySid = new Map<string, import("@rcc/protocol").ChatMessage[]>();
+
+function indexChatAppend(session: AnySession, message: import("@rcc/protocol").ChatMessage): void {
+  const list = chatBySid.get(session.id) ?? [];
+  list.push(message);
+  if (list.length > 200) list.shift();
+  chatBySid.set(session.id, list);
+  searchIndex.update(session.id, list, { id: session.id, title: session.meta().title, summaryTitle: sessionSummaries.get(session.id)?.title });
+}
+
+function sessionMetaWithSummary(session: AnySession): import("@rcc/protocol").SessionMeta {
+  const base = session.meta();
+  const summary = sessionSummaries.get(session.id);
+  return summary ? { ...base, summary } : base;
+}
+
+async function generateAndBroadcastSummary(sid: string): Promise<void> {
+  const chat = chatBySid.get(sid) ?? [];
+  if (chat.length === 0) return;
+  try {
+    const summary = await summarizeSession({ sid, chat });
+    sessionSummaries.set(sid, summary);
+    const session = registry.get(sid);
+    if (session) {
+      searchIndex.setMeta(sid, { id: sid, title: session.meta().title, summaryTitle: summary.title });
+    }
+    broadcast({ v: 1, t: "summary", sid, summary });
+    broadcast({ v: 1, t: "session.list", sessions: registry.list().map(sessionMetaWithSummary) });
+  } catch (err) {
+    console.warn(`[rcc-host] summarize failed for ${sid}:`, err);
+  }
+}
+
+
+function gitLangFor(sub: string): string {
+  if (sub === "diff" || sub === "show") return "diff";
+  return "";
+}
+
+function attachGitWatcher(session: AnySession): void {
+  if (session instanceof DeadSession) return;
+  const watcher = new GitWatcher(session.cwd, {
+    onStatus: (status) => {
+      broadcast({ v: 1, t: "git.status", sid: session.id, status });
+    },
+    onCommits: (commits) => {
+      broadcast({ v: 1, t: "git.commits", sid: session.id, commits });
+      const lines = commits
+        .slice(0, 20)
+        .map((c) => `${c.hash}  ${c.subject}`)
+        .join("\n");
+      const more = commits.length > 20 ? `\n…(+${commits.length - 20} more)` : "";
+      session.chat.appendMessage({
+        id: `git-commit-${commits[0]!.hash}`,
+        sid: session.id,
+        role: "system",
+        segments: [
+          {
+            kind: "text",
+            content: `✓ ${commits.length} commit${commits.length === 1 ? "" : "s"} during this session`,
+          },
+          { kind: "code", lang: "", content: lines + more },
+        ],
+        timestamp: Date.now(),
+      });
+    },
+  });
+  gitWatchers.set(session.id, watcher);
+  void watcher.start();
+  session.onExit(() => {
+    watcher.dispose();
+    gitWatchers.delete(session.id);
+  });
 }
 
 // Pinned slash command ids — loaded once from ~/.rcc/pinned-commands.json, kept
@@ -439,10 +541,23 @@ for (const snap of snapshots) {
       ringTail: snap.ringTail,
     });
     registry.add(dead);
+    chatBySid.set(snap.meta.id, [...snap.chat]);
+    if (snap.meta.summary) sessionSummaries.set(snap.meta.id, snap.meta.summary);
   } catch (err) {
     console.warn(`[rcc-host] failed to hydrate snapshot ${snap.meta.id}:`, err);
   }
 }
+searchIndex.rebuild(
+  [...chatBySid.entries()].map(([sid, chat]) => ({
+    sid,
+    chat,
+    meta: {
+      id: sid,
+      title: registry.get(sid)?.meta().title,
+      summaryTitle: sessionSummaries.get(sid)?.title,
+    },
+  })),
+);
 if (snapshots.length > 0) {
   console.log(`[rcc-host] restored ${snapshots.length} session snapshot(s) from disk`);
 }
@@ -461,6 +576,8 @@ if (registry.list().length === 0) {
   attachApprovalWatcher(boot);
   attachChatBroadcast(boot);
   attachMetricsTap(boot);
+  attachGitWatcher(boot);
+  attachSummaryOnExit(boot);
   wirePersistence(boot);
   console.log(
     `[rcc-host] bootstrapped session ${boot.id} at ${boot.cwd} (permission: ${boot.permissionMode})`,
@@ -476,6 +593,9 @@ type E2EWebSocket = WebSocket & {
   /** Per-connection replay state for inbound frames. Only populated when the
    * connection has a shared key (i.e. E2E is active). */
   rccReplay?: ReplayWindow;
+  /** When set, this ws is a readonly share-token guest. No E2E, no mutations,
+   * no frames for other sids ever get written. */
+  rccShare?: { id: string; sid: string; expiresAt: number } | null;
 };
 
 /**
@@ -493,8 +613,33 @@ function frameForClient(ws: E2EWebSocket, frame: Frame): string {
   return encode(frame);
 }
 
+/**
+ * Fan-out helper that honours both E2E and share-guest filtering. Every
+ * broadcast* function should route through this instead of hand-rolling a
+ * `wss.clients` loop, otherwise share guests may leak config/mutation frames
+ * they shouldn't see.
+ */
+function broadcastFiltered(frame: Frame): void {
+  for (const client of wss.clients) {
+    if (client.readyState !== WebSocket.OPEN) continue;
+    const share = (client as E2EWebSocket).rccShare;
+    if (share && !isFrameAllowedForShare(frame, share.sid)) continue;
+    try {
+      const payload = frameForClient(client as E2EWebSocket, frame);
+      client.send(payload);
+      metrics.incr("ws.bytes.out", Buffer.byteLength(payload, "utf8"));
+      metrics.incr("ws.msgs.out");
+    } catch {
+      // ignore
+    }
+  }
+}
+
 function send(ws: WebSocket, frame: Frame): void {
   if (ws.readyState !== WebSocket.OPEN) return;
+  // Share guests only receive frames scoped to their sid. Drop anything else.
+  const share = (ws as E2EWebSocket).rccShare;
+  if (share && !isFrameAllowedForShare(frame, share.sid)) return;
   try {
     const payload = frameForClient(ws as E2EWebSocket, frame);
     ws.send(payload);
@@ -502,6 +647,30 @@ function send(ws: WebSocket, frame: Frame): void {
     metrics.incr("ws.msgs.out");
   } catch (err) {
     console.error("[rcc-host] send error", err);
+  }
+}
+
+/**
+ * Filter outbound frames to what a readonly share guest is allowed to see.
+ * Only frames scoped to the pinned sid (and benign meta like pong/error)
+ * pass through. `session.list` is rewritten before reaching here — we don't
+ * re-broadcast the full list to share guests; `send()` just drops it.
+ */
+function isFrameAllowedForShare(frame: Frame, sid: string): boolean {
+  switch (frame.t) {
+    case "pong":
+    case "error":
+    case "hello":
+      return true;
+    case "chat.append":
+    case "chat.update":
+    case "chat.list":
+    case "chat.resetted":
+    case "pty.out":
+    case "session.exited":
+      return frame.sid === sid;
+    default:
+      return false;
   }
 }
 
@@ -524,6 +693,41 @@ function attach(ws: WebSocket, state: WsState, session: AnySession, since: numbe
 }
 
 function handle(ws: WebSocket, state: WsState, frame: Frame): void {
+  if (state.share) {
+    // Readonly share guest. Only a tiny whitelist of frames is tolerated —
+    // everything else (pty.in, session.*, approval.*, any config mutation)
+    // is silently ignored. This is defense-in-depth: the client UI also
+    // guards against sending these.
+    switch (frame.t) {
+      case "ping": {
+        send(ws, { v: 1, t: "pong", ts: frame.ts });
+        return;
+      }
+      case "session.attach": {
+        // Only the pinned sid. Otherwise drop.
+        if (frame.sid !== state.share.sid) return;
+        const s = registry.get(state.share.sid);
+        if (!s) return;
+        if (s instanceof DeadSession) {
+          send(ws, { v: 1, t: "chat.list", sid: s.id, messages: s.chat.list() });
+        }
+        attach(ws, state, s, frame.since ?? null);
+        return;
+      }
+      case "chat.list.request": {
+        if (frame.sid !== state.share.sid) return;
+        const s = registry.get(frame.sid);
+        if (!s) {
+          send(ws, { v: 1, t: "chat.list", sid: frame.sid, messages: [] });
+          return;
+        }
+        send(ws, { v: 1, t: "chat.list", sid: frame.sid, messages: s.chat.list() });
+        return;
+      }
+      default:
+        return;
+    }
+  }
   switch (frame.t) {
     case "session.new": {
       // Project binding rules:
@@ -550,6 +754,8 @@ function handle(ws: WebSocket, state: WsState, frame: Frame): void {
       attachApprovalWatcher(s);
       attachChatBroadcast(s);
       attachMetricsTap(s);
+      attachGitWatcher(s);
+      attachSummaryOnExit(s);
       wirePersistence(s);
       send(ws, { v: 1, t: "session.created", session: s.meta() });
       send(ws, { v: 1, t: "session.list", sessions: registry.list().map((x) => x.meta()) });
@@ -640,6 +846,8 @@ function handle(ws: WebSocket, state: WsState, frame: Frame): void {
       attachApprovalWatcher(live);
       attachChatBroadcast(live);
       attachMetricsTap(live);
+      attachGitWatcher(live);
+      attachSummaryOnExit(live);
       wirePersistence(live);
       // Notify every client so their sidebars flip running/dot colour.
       broadcast({ v: 1, t: "session.resumed", session: live.meta() });
@@ -691,6 +899,76 @@ function handle(ws: WebSocket, state: WsState, frame: Frame): void {
     }
     case "metrics.unsubscribe": {
       state.metricsSubscribed = false;
+      return;
+    }
+    case "git.status.request": {
+      const s = registry.get(frame.sid);
+      if (!s) {
+        send(ws, { v: 1, t: "git.status", sid: frame.sid, status: null });
+        return;
+      }
+      // Fire a fresh read — the watcher may be seconds away from its next poll
+      // and the client asked for current state.
+      getGitStatus(s.cwd).then(
+        (status) => send(ws, { v: 1, t: "git.status", sid: frame.sid, status }),
+        () => send(ws, { v: 1, t: "git.status", sid: frame.sid, status: null }),
+      );
+      return;
+    }
+    case "git.exec.request": {
+      const s = registry.get(frame.sid);
+      if (!s) {
+        send(ws, {
+          v: 1,
+          t: "git.exec.result",
+          sid: frame.sid,
+          args: frame.args,
+          ok: false,
+          stdout: "",
+          stderr: "no such session",
+          code: null,
+        });
+        return;
+      }
+      if (!isReadOnlyGitArgs(frame.args)) {
+        send(ws, {
+          v: 1,
+          t: "git.exec.result",
+          sid: frame.sid,
+          args: frame.args,
+          ok: false,
+          stdout: "",
+          stderr: `refused: ${frame.args[0]} is not a read-only git subcommand`,
+          code: null,
+        });
+        return;
+      }
+      runGit(s.cwd, frame.args).then((r) => {
+        send(ws, {
+          v: 1,
+          t: "git.exec.result",
+          sid: frame.sid,
+          args: frame.args,
+          ok: r.ok,
+          stdout: r.stdout,
+          stderr: r.stderr,
+          code: r.code,
+        });
+        // Also drop the output into chat as a system message so it survives
+        // across clients and shows up in session history / persistence.
+        const label = `git ${frame.args.join(" ")}`;
+        const body = (r.ok ? r.stdout : r.stderr) || (r.ok ? "(no output)" : "(failed)");
+        s.chat.appendMessage({
+          id: `git-exec-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          sid: s.id,
+          role: "system",
+          segments: [
+            { kind: "text", content: label },
+            { kind: "code", lang: gitLangFor(frame.args[0]!), content: body },
+          ],
+          timestamp: Date.now(),
+        });
+      });
       return;
     }
     case "approval.response": {
@@ -1575,12 +1853,27 @@ function handle(ws: WebSocket, state: WsState, frame: Frame): void {
       for (const client of wss.clients) {
         if (client === ws) continue;
         if (client.readyState !== WebSocket.OPEN) continue;
+        if ((client as E2EWebSocket).rccShare) continue;
         try {
           client.send(frameForClient(client as E2EWebSocket, frame));
         } catch {
           // ignore
         }
       }
+      return;
+    }
+    case "summary.request": {
+      const summary = sessionSummaries.get(frame.sid) ?? null;
+      send(ws, { v: 1, t: "summary", sid: frame.sid, summary });
+      return;
+    }
+    case "summary.refresh": {
+      void generateAndBroadcastSummary(frame.sid);
+      return;
+    }
+    case "search.request": {
+      const matches = searchIndex.search(frame.query);
+      send(ws, { v: 1, t: "search.result", query: frame.query, matches });
       return;
     }
     case "crdt.sync.request": {
@@ -1688,19 +1981,19 @@ function handle(ws: WebSocket, state: WsState, frame: Frame): void {
       send(ws, { v: 1, t: "prefs", prefs: prefs.get() });
       return;
     }
+    case "share.list.request": {
+      send(ws, {
+        v: 1,
+        t: "share.list",
+        shares: shares.list(frame.sid ? { sid: frame.sid } : undefined).map(shareSummaryFor),
+      });
+      return;
+    }
     case "prefs.update": {
       prefs
         .update(frame.prefs)
         .then((next) => {
-          const broadcastFrame: Frame = { v: 1, t: "prefs", prefs: next };
-          for (const client of wss.clients) {
-            if (client.readyState !== WebSocket.OPEN) continue;
-            try {
-              client.send(frameForClient(client as E2EWebSocket, broadcastFrame));
-            } catch {
-              // ignore
-            }
-          }
+          broadcastFiltered({ v: 1, t: "prefs", prefs: next });
           send(ws, { v: 1, t: "prefs.updated", prefs: next });
         })
         .catch((err) => {
@@ -1719,26 +2012,11 @@ function handle(ws: WebSocket, state: WsState, frame: Frame): void {
 }
 
 function broadcastMcpList(servers: Parameters<typeof listMcp> extends any ? Awaited<ReturnType<typeof listMcp>> : never): void {
-  for (const client of wss.clients) {
-    if (client.readyState !== WebSocket.OPEN) continue;
-    try {
-      client.send(frameForClient(client as E2EWebSocket, { v: 1, t: "mcp.list", servers }));
-    } catch {
-      // ignore
-    }
-  }
+  broadcastFiltered({ v: 1, t: "mcp.list", servers });
 }
 
 function broadcastPinned(): void {
-  const frame: Frame = { v: 1, t: "cmd.pinned", ids: pinnedCommandsCache };
-  for (const client of wss.clients) {
-    if (client.readyState !== WebSocket.OPEN) continue;
-    try {
-      client.send(frameForClient(client as E2EWebSocket, frame));
-    } catch {
-      // ignore
-    }
-  }
+  broadcastFiltered({ v: 1, t: "cmd.pinned", ids: pinnedCommandsCache });
 }
 
 function broadcastCmdList(): void {
@@ -1751,15 +2029,7 @@ function broadcastCmdList(): void {
         scope: c.scope,
         pinned: c.pinned,
       }));
-      const frame: Frame = { v: 1, t: "cmd.list", commands: payload };
-      for (const client of wss.clients) {
-        if (client.readyState !== WebSocket.OPEN) continue;
-        try {
-          client.send(frameForClient(client as E2EWebSocket, frame));
-        } catch {
-          // ignore
-        }
-      }
+      broadcastFiltered({ v: 1, t: "cmd.list", commands: payload });
     })
     .catch(() => {});
 }
@@ -1775,15 +2045,7 @@ function broadcastSubagentList(): void {
         model: a.model,
         tools: a.tools,
       }));
-      const frame: Frame = { v: 1, t: "subagent.list", agents: payload };
-      for (const client of wss.clients) {
-        if (client.readyState !== WebSocket.OPEN) continue;
-        try {
-          client.send(frameForClient(client as E2EWebSocket, frame));
-        } catch {
-          // ignore
-        }
-      }
+      broadcastFiltered({ v: 1, t: "subagent.list", agents: payload });
     })
     .catch(() => {});
 }
@@ -1791,74 +2053,35 @@ function broadcastSubagentList(): void {
 function broadcastHookList(): void {
   listHooks("all", DEFAULT_CWD)
     .then((configs) => {
-      const frame: Frame = { v: 1, t: "hook.list", configs };
-      for (const client of wss.clients) {
-        if (client.readyState !== WebSocket.OPEN) continue;
-        try {
-          client.send(frameForClient(client as E2EWebSocket, frame));
-        } catch {
-          // ignore
-        }
-      }
+      broadcastFiltered({ v: 1, t: "hook.list", configs });
     })
     .catch(() => {});
 }
 
 function broadcastMcp(server: Awaited<ReturnType<typeof listMcp>>[number], kind: "added"): void {
-  for (const client of wss.clients) {
-    if (client.readyState !== WebSocket.OPEN) continue;
-    try {
-      if (kind === "added") {
-        client.send(frameForClient(client as E2EWebSocket, { v: 1, t: "mcp.added", server }));
-      }
-    } catch {
-      // ignore
-    }
-  }
+  if (kind === "added") broadcastFiltered({ v: 1, t: "mcp.added", server });
 }
 
 function broadcastMcpRemoved(name: string): void {
-  for (const client of wss.clients) {
-    if (client.readyState !== WebSocket.OPEN) continue;
-    try {
-      client.send(frameForClient(client as E2EWebSocket, { v: 1, t: "mcp.removed", name }));
-    } catch {
-      // ignore
-    }
-  }
+  broadcastFiltered({ v: 1, t: "mcp.removed", name });
 }
 
 function broadcastPermList(): void {
   listPermissions(DEFAULT_CWD)
     .then((configs) => {
-      const frame: Frame = { v: 1, t: "perm.list", configs };
-      for (const client of wss.clients) {
-        if (client.readyState !== WebSocket.OPEN) continue;
-        try {
-          client.send(frameForClient(client as E2EWebSocket, frame));
-        } catch {
-          // ignore
-        }
-      }
+      broadcastFiltered({ v: 1, t: "perm.list", configs });
     })
     .catch(() => {});
 }
 
 function broadcastProjectList(): void {
-  const frame: Frame = { v: 1, t: "project.list", projects: projects.list() };
-  for (const client of wss.clients) {
-    if (client.readyState !== WebSocket.OPEN) continue;
-    try {
-      client.send(frameForClient(client as E2EWebSocket, frame));
-    } catch {
-      // ignore
-    }
-  }
+  broadcastFiltered({ v: 1, t: "project.list", projects: projects.list() });
 }
 
 function broadcastDeviceList(): void {
   for (const client of wss.clients) {
     if (client.readyState !== WebSocket.OPEN) continue;
+    if ((client as E2EWebSocket).rccShare) continue;
     const d = (client as E2EWebSocket).rccDevice;
     try {
       client.send(
@@ -1904,6 +2127,111 @@ function readJsonBody<T>(req: import("node:http").IncomingMessage, max = 256 * 1
     });
     req.on("error", reject);
   });
+}
+
+async function handleShareRoute(
+  req: import("node:http").IncomingMessage,
+  res: import("node:http").ServerResponse,
+  createdBy: string | null,
+): Promise<void> {
+  const url = req.url ?? "";
+  const writeJson = (code: number, body: unknown) => {
+    res.writeHead(code, { "content-type": "application/json", "cache-control": "no-store" });
+    res.end(JSON.stringify(body));
+  };
+  if (url === "/share/new" && req.method === "POST") {
+    const body = await readJsonBody<{ sid?: string; ttlMinutes?: number }>(req);
+    if (!body.sid || typeof body.sid !== "string") {
+      writeJson(400, { error: "sid required" });
+      return;
+    }
+    const s = registry.get(body.sid);
+    if (!s) {
+      writeJson(404, { error: "no_such_session" });
+      return;
+    }
+    const ttl = Number.isFinite(body.ttlMinutes) ? Number(body.ttlMinutes) : 60;
+    if (ttl <= 0 || ttl > 60 * 24 * 7) {
+      writeJson(400, { error: "ttlMinutes out of range (1 .. 10080)" });
+      return;
+    }
+    const { entry, token } = await shares.create({
+      sid: body.sid,
+      ttlMinutes: ttl,
+      createdBy,
+    });
+    const host = (req.headers["host"] as string | undefined) ?? "localhost";
+    const proto = (req.headers["x-forwarded-proto"] as string | undefined) ?? "http";
+    const shareUrl = `${proto}://${host}/?share=${encodeURIComponent(token)}`;
+    writeJson(200, {
+      id: entry.id,
+      token,
+      url: shareUrl,
+      sid: entry.sid,
+      expiresAt: entry.expiresAt,
+    });
+    broadcastFiltered({
+      v: 1,
+      t: "share.list",
+      shares: shares.list().map(shareSummaryFor),
+    });
+    return;
+  }
+  if (url.startsWith("/share/list") && req.method === "GET") {
+    const qIdx = url.indexOf("?");
+    const params = qIdx >= 0 ? new URLSearchParams(url.slice(qIdx + 1)) : new URLSearchParams();
+    const sid = params.get("sid") ?? undefined;
+    writeJson(200, {
+      shares: shares.list({ sid }).map(shareSummaryFor),
+    });
+    return;
+  }
+  const matchDel = /^\/share\/([^/?]+)(?:\?.*)?$/.exec(url);
+  if (matchDel && req.method === "DELETE") {
+    const id = decodeURIComponent(matchDel[1]!);
+    const ok = await shares.revoke(id);
+    if (!ok) {
+      writeJson(404, { error: "unknown share" });
+      return;
+    }
+    // Kick any live share ws bound to this id so access ends immediately.
+    for (const client of wss.clients) {
+      const s = (client as E2EWebSocket).rccShare;
+      if (s && s.id === id) {
+        try {
+          client.close(4410, "share_revoked");
+        } catch {
+          // ignore
+        }
+      }
+    }
+    writeJson(200, { ok: true });
+    broadcastFiltered({
+      v: 1,
+      t: "share.list",
+      shares: shares.list().map(shareSummaryFor),
+    });
+    return;
+  }
+  writeJson(404, { error: "unknown share route" });
+}
+
+function shareSummaryFor(entry: import("./shares.ts").ShareEntry): {
+  id: string;
+  sid: string;
+  createdAt: number;
+  expiresAt: number;
+  createdBy: string | null;
+  revoked: boolean;
+} {
+  return {
+    id: entry.id,
+    sid: entry.sid,
+    createdAt: entry.createdAt,
+    expiresAt: entry.expiresAt,
+    createdBy: entry.createdBy,
+    revoked: entry.revoked,
+  };
 }
 
 async function handleWebAuthnRoute(
@@ -2060,6 +2388,31 @@ const httpServer = createServer(async (req, res) => {
     return;
   }
 
+  // [shares] — create / list / revoke readonly session share tokens.
+  // All routes require a real device token (loopback too, same as every
+  // other privileged endpoint). The resulting URL is built from the Host
+  // header so tunneled / named-tunnel hosts return the right absolute URL.
+  if (req.url?.startsWith("/share")) {
+    const auth = authenticate(req);
+    if (!auth.ok) {
+      res.writeHead(401, {
+        "content-type": "application/json",
+        "x-rcc-auth-reason": auth.reason,
+      });
+      res.end(JSON.stringify({ error: auth.reason }));
+      return;
+    }
+    try {
+      await handleShareRoute(req, res, auth.device?.id ?? null);
+    } catch (err: any) {
+      if (!res.headersSent) {
+        res.writeHead(500, { "content-type": "application/json" });
+        res.end(JSON.stringify({ error: err?.message ?? "share failed" }));
+      }
+    }
+    return;
+  }
+
   // WebAuthn: passkey registration + high-risk approval assertion. Both
   // require a valid device token; the RP ID is derived from the Host header
   // so the host works on both `localhost` and a cloudflared hostname.
@@ -2150,6 +2503,43 @@ httpServer.on("upgrade", (req, socket, head) => {
     socket.destroy();
     return;
   }
+  // Share-token path: look for ?share=<token> before device auth. If it
+  // verifies, skip the device token / E2E path entirely and stamp the ws
+  // readonly. Valid share tokens implicitly grant ws access.
+  const shareTok = shareTokenFromReq(req);
+  if (shareTok) {
+    const v = shares.verify(shareTok);
+    if (!v.ok) {
+      socket.write(
+        `HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\nX-RCC-Auth-Reason: share_${v.reason}\r\n\r\n`,
+      );
+      socket.destroy();
+      return;
+    }
+    // Session must still exist (it could have been closed after the share
+    // was minted). If so, reject rather than dropping into a broken hello.
+    const s = registry.get(v.entry.sid);
+    if (!s) {
+      socket.write(
+        `HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nX-RCC-Auth-Reason: share_session_gone\r\n\r\n`,
+      );
+      socket.destroy();
+      return;
+    }
+    wss.handleUpgrade(req, socket, head, (ws) => {
+      const eWs = ws as E2EWebSocket;
+      eWs.rccDevice = null;
+      eWs.rccSharedKey = null;
+      eWs.rccOutboundSeq = 0;
+      eWs.rccShare = {
+        id: v.entry.id,
+        sid: v.entry.sid,
+        expiresAt: v.entry.expiresAt,
+      };
+      wss.emit("connection", ws, req);
+    });
+    return;
+  }
   const auth = authenticate(req);
   if (!auth.ok) {
     socket.write(
@@ -2165,10 +2555,19 @@ httpServer.on("upgrade", (req, socket, head) => {
     eWs.rccDevice = auth.device;
     eWs.rccSharedKey = auth.device?.sharedKey ?? null;
     eWs.rccOutboundSeq = 0;
+    eWs.rccShare = null;
     if (eWs.rccSharedKey) eWs.rccReplay = new ReplayWindow();
     wss.emit("connection", ws, req);
   });
 });
+
+function shareTokenFromReq(req: { url?: string }): string | null {
+  if (!req.url) return null;
+  const qIdx = req.url.indexOf("?");
+  if (qIdx < 0) return null;
+  const params = new URLSearchParams(req.url.slice(qIdx + 1));
+  return params.get("share");
+}
 
 const tunnel: Tunnel | null = startTunnel(TUNNEL_CONFIG, PORT);
 
@@ -2183,15 +2582,16 @@ const wsStates = new WeakMap<WebSocket, WsState>();
 
 function broadcast(frame: Frame): void {
   for (const client of wss.clients) {
-    if (client.readyState === WebSocket.OPEN) {
-      try {
-        const payload = frameForClient(client as E2EWebSocket, frame);
-        client.send(payload);
-        metrics.incr("ws.bytes.out", Buffer.byteLength(payload, "utf8"));
-        metrics.incr("ws.msgs.out");
-      } catch {
-        // socket going away; ignore
-      }
+    if (client.readyState !== WebSocket.OPEN) continue;
+    const share = (client as E2EWebSocket).rccShare;
+    if (share && !isFrameAllowedForShare(frame, share.sid)) continue;
+    try {
+      const payload = frameForClient(client as E2EWebSocket, frame);
+      client.send(payload);
+      metrics.incr("ws.bytes.out", Buffer.byteLength(payload, "utf8"));
+      metrics.incr("ws.msgs.out");
+    } catch {
+      // socket going away; ignore
     }
   }
 }
@@ -2246,6 +2646,47 @@ installCrashHandler((frame) => {
   broadcast(frame);
 });
 
+// [shares] Sweep expired / revoked share ws every 30s. The host also
+// re-verifies against the ShareStore so an external revoke (file edit or
+// another paired device deleting the share) kicks in quickly. Code 4410 is
+// reused for every share termination so the client can show a friendly
+// "分享已过期或被撤销" message.
+const shareSweepTimer = setInterval(() => {
+  const now = Date.now();
+  for (const client of wss.clients) {
+    const share = (client as E2EWebSocket).rccShare;
+    if (!share) continue;
+    const entry = shares.findById(share.id);
+    if (!entry || entry.revoked || entry.expiresAt <= now) {
+      try {
+        client.close(4410, "share_expired");
+      } catch {
+        // ignore
+      }
+    }
+  }
+}, 30_000);
+if (typeof shareSweepTimer === "object" && shareSweepTimer && "unref" in shareSweepTimer) {
+  (shareSweepTimer as { unref: () => void }).unref();
+}
+
+shares.onExternalChange(() => {
+  // File-level change — re-check every live share ws.
+  const now = Date.now();
+  for (const client of wss.clients) {
+    const share = (client as E2EWebSocket).rccShare;
+    if (!share) continue;
+    const entry = shares.findById(share.id);
+    if (!entry || entry.revoked || entry.expiresAt <= now) {
+      try {
+        client.close(4410, "share_expired");
+      } catch {
+        // ignore
+      }
+    }
+  }
+});
+
 if (tunnel) {
   tunnel.on("status", (s) => {
     broadcast({ v: 1, t: "tunnel.status", tunnel: s });
@@ -2271,11 +2712,13 @@ trust.onExternalChange(() => {
 wss.on("connection", (ws) => {
   const eWs = ws as E2EWebSocket;
   const device = eWs.rccDevice ?? null;
+  const share = eWs.rccShare ?? null;
   const state: WsState = {
     attached: new Set(),
     unsubs: new Map(),
     device,
     metricsSubscribed: false,
+    share,
   };
   wsStates.set(ws, state);
   if (device && !eWs.rccSharedKey) {
@@ -2284,19 +2727,41 @@ wss.on("connection", (ws) => {
     );
   }
 
-  send(ws, {
-    v: 1,
-    t: "hello",
-    protocol: PROTOCOL_VERSION,
-    sessions: registry.list().map((s) => s.meta()),
-    tunnel: currentTunnelInfo(),
-    device: device ? { id: device.id, name: device.name, hasPasskey: !!device.passkey } : null,
-    pinnedCommands: pinnedCommandsCache,
-    projects: projects.list(),
-  });
-
-  // Deliver current prefs so new clients can apply them immediately.
-  send(ws, { v: 1, t: "prefs", prefs: prefs.get() });
+  if (share) {
+    // Share guests get a scoped hello — only the one session, and no tunnel /
+    // projects / pinned commands leak.
+    const s = registry.get(share.sid);
+    send(ws, {
+      v: 1,
+      t: "hello",
+      protocol: PROTOCOL_VERSION,
+      sessions: s ? [s.meta()] : [],
+      device: null,
+      sharedReadonly: true,
+      sharedSid: share.sid,
+      sharedExpiresAt: share.expiresAt,
+    });
+    // Auto-attach so the guest immediately sees chat history + live stream
+    // without having to send session.attach (they can't send any frames anyway
+    // besides ping).
+    if (s) {
+      send(ws, { v: 1, t: "chat.list", sid: s.id, messages: s.chat.list() });
+      attach(ws, state, s, null);
+    }
+  } else {
+    send(ws, {
+      v: 1,
+      t: "hello",
+      protocol: PROTOCOL_VERSION,
+      sessions: registry.list().map((s) => s.meta()),
+      tunnel: currentTunnelInfo(),
+      device: device ? { id: device.id, name: device.name, hasPasskey: !!device.passkey } : null,
+      pinnedCommands: pinnedCommandsCache,
+      projects: projects.list(),
+    });
+    // Deliver current prefs so new clients can apply them immediately.
+    send(ws, { v: 1, t: "prefs", prefs: prefs.get() });
+  }
 
   ws.on("message", (raw) => {
     let text: string;

@@ -5,11 +5,17 @@ import { loadE2EKey } from "./auth.ts";
 export type Listener = (frame: Frame) => void;
 export type StatusListener = (status: ConnStatus) => void;
 
-export type ConnStatus = "connecting" | "connected" | "closed" | "unauthorized";
+export type ConnStatus = "connecting" | "connected" | "closed" | "unauthorized" | "readonly";
 
 export interface RccClientOptions {
   url: string;
   token?: string | null;
+  /**
+   * When set, the client is a readonly share-token guest. The token travels
+   * as `?share=<token>` on the ws URL instead of `?token=` and no E2E is
+   * used. The client refuses to send mutation frames.
+   */
+  shareToken?: string | null;
 }
 
 interface E2EEnvelope {
@@ -104,9 +110,13 @@ export class RccClient {
   sessions: SessionMeta[] = [];
   tunnel: TunnelInfo | null = null;
   pinnedCommandIds: string[] = [];
+  /** Exposed so App can hide mutation UI when the host stamps us readonly. */
+  sharedReadonly = false;
+  sharedSid: string | null = null;
+  sharedExpiresAt: number | null = null;
 
   constructor(private readonly opts: RccClientOptions) {
-    void this.initSodium();
+    if (!opts.shareToken) void this.initSodium();
     this.connect();
   }
 
@@ -128,6 +138,7 @@ export class RccClient {
   }
 
   private encodeOutbound(frame: Frame): string {
+    if (this.opts.shareToken) return encode(frame);
     if (!this.e2eKey || !this.sodiumReady) return encode(frame);
     const nonce = sodium.randombytes_buf(sodium.crypto_secretbox_NONCEBYTES);
     const plain = sodium.from_string(encode(frame));
@@ -225,6 +236,14 @@ export class RccClient {
       if (frame.t === "hello" || frame.t === "session.list") {
         this.sessions = frame.sessions;
       }
+      if (frame.t === "hello") {
+        if (frame.sharedReadonly) {
+          this.sharedReadonly = true;
+          this.sharedSid = frame.sharedSid ?? null;
+          this.sharedExpiresAt = frame.sharedExpiresAt ?? null;
+          this.setStatus("readonly");
+        }
+      }
       if (frame.t === "hello" && frame.tunnel) {
         this.tunnel = frame.tunnel;
       }
@@ -261,6 +280,13 @@ export class RccClient {
         this.scheduleReconnect();
         return;
       }
+      if (ev.code === 4410) {
+        // Share token expired / revoked / session gone. Guest UI shows the
+        // terminal message — no reconnect.
+        this.closed = true;
+        this.setStatus("unauthorized");
+        return;
+      }
       this.probeAuth().then((needsAuth) => {
         if (needsAuth) {
           this.setStatus("unauthorized");
@@ -277,6 +303,10 @@ export class RccClient {
   }
 
   private buildUrl(): string {
+    if (this.opts.shareToken) {
+      const sep = this.opts.url.includes("?") ? "&" : "?";
+      return `${this.opts.url}${sep}share=${encodeURIComponent(this.opts.shareToken)}`;
+    }
     if (!this.opts.token) return this.opts.url;
     const sep = this.opts.url.includes("?") ? "&" : "?";
     return `${this.opts.url}${sep}token=${encodeURIComponent(this.opts.token)}`;
@@ -338,6 +368,17 @@ export class RccClient {
   }
 
   send(frame: Frame): void {
+    if (this.sharedReadonly || this.opts.shareToken) {
+      // Readonly guest — only ping / attach-to-pinned-sid / chat.list are
+      // tolerated by the host. Silently drop everything else.
+      if (
+        frame.t !== "ping" &&
+        frame.t !== "session.attach" &&
+        frame.t !== "chat.list.request"
+      ) {
+        return;
+      }
+    }
     if (frame.t === "session.attach") this.attachedSids.add(frame.sid);
     if (frame.t === "session.close") this.attachedSids.delete(frame.sid);
     this.sendNow(frame);

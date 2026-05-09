@@ -33,6 +33,10 @@ const BUILTIN: Array<{ name: string; description: string }> = [
   { name: "status", description: "查看当前会话状态" },
   { name: "model", description: "切换模型" },
   { name: "cost", description: "查看 token 消耗" },
+  { name: "git:status", description: "git status (read-only)" },
+  { name: "git:diff", description: "git diff (read-only)" },
+  { name: "git:log", description: "git log -n 10 (read-only)" },
+  { name: "git:branch", description: "git branch -a (read-only)" },
 ];
 
 const NAME_RE = /^[a-z0-9][a-z0-9_-]*$/i;

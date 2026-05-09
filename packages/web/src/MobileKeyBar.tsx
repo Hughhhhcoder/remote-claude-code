@@ -15,6 +15,16 @@ function dotForScope(scope: "builtin" | "user" | "project"): string {
   return "bg-violet-400";
 }
 
+function gitArgsForShortcut(sub: string): string[] {
+  const trimmed = sub.trim();
+  if (trimmed === "status") return ["status", "--short", "--branch"];
+  if (trimmed === "diff") return ["diff", "--stat"];
+  if (trimmed === "log") return ["log", "--oneline", "-n", "20"];
+  if (trimmed === "branch") return ["branch", "-a", "--no-color"];
+  const parts = trimmed.split(/\s+/);
+  return parts.length > 0 ? parts : ["status"];
+}
+
 export function MobileKeyBar(props: Props) {
   const [bottomOffset, setBottomOffset] = createSignal(0);
 
@@ -49,6 +59,14 @@ export function MobileKeyBar(props: Props) {
   function sendCommand(name: string) {
     const sid = props.sid;
     if (!sid) return;
+    // [git] Pinned `git:*` builtins dispatch through git.exec (read-only)
+    // instead of the pty so output lands in chat without waking Claude.
+    if (name.startsWith("git:")) {
+      const sub = name.slice(4).trim();
+      const args = gitArgsForShortcut(sub);
+      props.client.send({ v: 1, t: "git.exec.request", sid, args });
+      return;
+    }
     props.client.write(sid, `/${name}\r`);
   }
 

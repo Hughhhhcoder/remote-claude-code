@@ -2,7 +2,7 @@ import * as pty from "node-pty";
 import type { IPty } from "node-pty";
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
-import type { PermissionMode, SessionMeta } from "@rcc/protocol";
+import type { PermissionMode, SessionMeta, SessionSummary } from "@rcc/protocol";
 import { RingBuffer } from "./ring-buffer.ts";
 import { ChatParser } from "./chat-parser.ts";
 import { SdkSession } from "./sdk-session.ts";
@@ -39,6 +39,11 @@ export class Session {
   rows: number;
   status: "running" | "exited" = "running";
   exitCode: number | null = null;
+  /**
+   * Added in M6 batch 9: most recently generated AI summary, mirrored into
+   * meta() so clients see it inline. Mutable; host writes via setSummary().
+   */
+  summary: SessionSummary | null = null;
 
   private readonly pty: IPty;
   private readonly buffer = new RingBuffer<BufferedChunk>(1024);

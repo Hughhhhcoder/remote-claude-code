@@ -1,6 +1,7 @@
 import { createSignal, createMemo, onCleanup, onMount, For, Show } from "solid-js";
 import type {
   CommandSummary,
+  GitStatusData,
   PermissionMode,
   ProjectColor,
   ProjectMeta,
@@ -29,6 +30,17 @@ import { MetricsPanel } from "./MetricsPanel.tsx";
 import { clearToken, loadToken } from "./auth.ts";
 import { SettingsModal } from "./SettingsModal.tsx";
 import { createPrefsStore, DEFAULT_CUSTOM_KEYS } from "./prefs.ts";
+import { ShareModal } from "./ShareModal.tsx";
+import { SharedReadonlyView } from "./SharedReadonlyView.tsx";
+
+function readShareTokenFromLocation(): string | null {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    return params.get("share");
+  } catch {
+    return null;
+  }
+}
 
 const FALLBACK_PINNED: readonly CommandSummary[] = [
   { id: "builtin:review", name: "review", description: "完整 PR 代码审查", scope: "builtin", pinned: true },
@@ -43,11 +55,39 @@ function dotForScope(scope: "builtin" | "user" | "project"): string {
   return "bg-violet-400";
 }
 
+// [git] map shortcut sub-command → whitelisted read-only argv. Anything not
+// in this table falls through to `git <sub>` which the host rejects if not
+// in its own read-only allowlist.
+function gitArgsForShortcut(sub: string): string[] {
+  const trimmed = sub.trim();
+  if (trimmed === "status") return ["status", "--short", "--branch"];
+  if (trimmed === "diff") return ["diff", "--stat"];
+  if (trimmed === "log") return ["log", "--oneline", "-n", "20"];
+  if (trimmed === "branch") return ["branch", "-a", "--no-color"];
+  // /git:blame <file> → blame -n -L 1,80 <file>; /git:show <sha> → show <sha>
+  const parts = trimmed.split(/\s+/);
+  const head = parts[0]!;
+  if (head === "blame" && parts[1]) return ["blame", "-L", "1,120", parts.slice(1).join(" ")];
+  if (head === "show" && parts[1]) return ["show", "--stat", parts[1]!];
+  return parts;
+}
+
 export function App() {
+  // Share-token readonly guest path. Decided once at mount: if the URL has
+  // `?share=<token>`, we never instantiate the full client (no pair token,
+  // no E2E, no prefs/devices). SharedReadonlyView owns its own client.
+  const shareToken = readShareTokenFromLocation();
+  if (shareToken) {
+    // Dynamically rendered so the full App never initializes for guests.
+    return <SharedReadonlyView shareToken={shareToken} />;
+  }
+
   const client = new RccClient({ url: defaultWsUrl(), token: loadToken() });
   const isMobile = useIsMobile();
   const prefsStore = createPrefsStore(client);
   const [settingsOpen, setSettingsOpen] = createSignal(false);
+  const [shareOpen, setShareOpen] = createSignal(false);
+  const [shareSid, setShareSid] = createSignal<string | null>(null);
 
   const [sessions, setSessions] = createSignal<SessionMeta[]>([]);
   const [activeSid, setActiveSid] = createSignal<string | null>(null);
@@ -68,6 +108,14 @@ export function App() {
   const [newProjectOpen, setNewProjectOpen] = createSignal(false);
   const [newSessionProjectId, setNewSessionProjectId] = createSignal<string | null>(null);
   const [collapsedProjects, setCollapsedProjects] = createSignal<Set<string>>(new Set());
+  const [searchQuery, setSearchQuery] = createSignal("");
+  const [searchResults, setSearchResults] = createSignal<
+    { sid: string; title: string; score: number; excerpts: string[] }[] | null
+  >(null);
+  // [git] branch/dirty chip state — keyed by sid so SessionRow can display
+  // inline without a round-trip. null ⇒ cwd is not a git repo; undefined ⇒
+  // status not yet fetched.
+  const [gitBySid, setGitBySid] = createSignal<Record<string, GitStatusData | null>>({});
   // [messages] Default to chat on mobile (terminal is unusable there) and
   // terminal on desktop (power users expect raw xterm until the heuristic
   // parser is replaced with a structured stream in M5).
@@ -86,6 +134,13 @@ export function App() {
       if (fileBrowserRoot() === "~" && frame.sessions.length > 0) {
         setFileBrowserRoot(frame.sessions[0]!.cwd);
       }
+      // [git] Ask for current git.status for every session — the watcher
+      // publishes on change but late clients miss the first emit.
+      for (const s of frame.sessions) {
+        if (gitBySid()[s.id] === undefined) {
+          client.send({ v: 1, t: "git.status.request", sid: s.id });
+        }
+      }
     }
     if (frame.t === "hello") {
       if (frame.tunnel) setTunnel(frame.tunnel);
@@ -95,6 +150,14 @@ export function App() {
     }
     if (frame.t === "project.list") setProjects(frame.projects);
     if (frame.t === "cmd.pinned") setPinnedIds(frame.ids);
+    if (frame.t === "search.result") {
+      if (frame.query === searchQuery()) setSearchResults(frame.matches);
+    }
+    if (frame.t === "summary") {
+      setSessions((s) =>
+        s.map((x) => (x.id === frame.sid ? { ...x, summary: frame.summary ?? undefined } : x)),
+      );
+    }
     if (frame.t === "cmd.list") {
       const map: Record<string, CommandSummary> = {};
       for (const c of frame.commands) map[c.id] = c;
@@ -104,6 +167,7 @@ export function App() {
     if (frame.t === "session.created") {
       setSessions((s) => [...s, frame.session]);
       setActiveSid(frame.session.id);
+      client.send({ v: 1, t: "git.status.request", sid: frame.session.id });
     } else if (frame.t === "session.resumed") {
       setSessions((s) =>
         s.map((x) => (x.id === frame.session.id ? { ...x, ...frame.session } : x)),
@@ -113,6 +177,9 @@ export function App() {
       setSessions((s) =>
         s.map((x) => (x.id === frame.sid ? { ...x, status: "exited" } : x)),
       );
+    }
+    if (frame.t === "git.status") {
+      setGitBySid((m) => ({ ...m, [frame.sid]: frame.status }));
     }
   });
 
@@ -251,9 +318,24 @@ export function App() {
     setActiveSid(sid);
   }
 
+  function onShareSession(sid: string) {
+    setShareSid(sid);
+    setShareOpen(true);
+  }
+
   function sendCommand(cmd: string) {
     const sid = activeSid();
     if (!sid) return;
+    // [git] Intercept /git:<sub> — run as a read-only git.exec frame instead
+    // of forwarding to the Claude pty.
+    if (cmd.startsWith("/git:")) {
+      const sub = cmd.slice(5).trim();
+      if (sub) {
+        const args = gitArgsForShortcut(sub);
+        client.send({ v: 1, t: "git.exec.request", sid, args });
+        return;
+      }
+    }
     client.write(sid, cmd + "\r");
   }
 
@@ -354,6 +436,54 @@ export function App() {
             </button>
           </div>
           <div class="flex-1 overflow-y-auto scrollbar p-2">
+            <div class="px-2 py-2">
+              <input
+                type="search"
+                placeholder="🔍 搜索会话…"
+                value={searchQuery()}
+                onInput={(e) => {
+                  const q = e.currentTarget.value;
+                  setSearchQuery(q);
+                  if (!q.trim()) {
+                    setSearchResults(null);
+                    return;
+                  }
+                  client.send({ v: 1, t: "search.request", query: q });
+                }}
+                class="w-full px-2 py-1.5 text-xs rounded bg-zinc-900 border border-zinc-800 text-zinc-100 focus:outline-none focus:border-accent-500"
+              />
+            </div>
+            <Show when={searchResults()}>
+              <div class="px-2 py-2">
+                <div class="text-[10px] uppercase tracking-widest text-zinc-600 pb-1">
+                  搜索结果 ({searchResults()!.length})
+                </div>
+                <For each={searchResults()}>
+                  {(m) => (
+                    <button
+                      class="w-full text-left p-2 rounded hover:bg-zinc-900 block"
+                      onClick={() => {
+                        setActiveSid(m.sid);
+                        setSearchQuery("");
+                        setSearchResults(null);
+                      }}
+                    >
+                      <div class="text-sm text-zinc-200 truncate">{m.title}</div>
+                      <div class="text-[10px] text-zinc-500 font-mono truncate">{m.sid}</div>
+                      <For each={m.excerpts}>
+                        {(e) => (
+                          <div class="text-[11px] text-zinc-400 mt-1 line-clamp-2">{e}</div>
+                        )}
+                      </For>
+                    </button>
+                  )}
+                </For>
+                <Show when={searchResults()!.length === 0}>
+                  <div class="text-xs text-zinc-600 py-2">无匹配</div>
+                </Show>
+              </div>
+            </Show>
+            <Show when={!searchResults()}>
             <div class="flex items-center justify-between px-2 py-2">
               <div class="text-[10px] uppercase tracking-widest text-zinc-600">Projects</div>
               <button
@@ -419,9 +549,11 @@ export function App() {
                               <SessionRow
                                 meta={s}
                                 active={activeSid() === s.id}
+                                git={gitBySid()[s.id]}
                                 onActivate={() => setActiveSid(s.id)}
                                 onClose={() => onCloseSession(s.id)}
                                 onResume={() => onResumeSession(s.id)}
+                                onShare={() => onShareSession(s.id)}
                               />
                             )}
                           </For>
@@ -431,6 +563,7 @@ export function App() {
                   );
                 }}
               </For>
+            </Show>
             </Show>
           </div>
 
@@ -494,6 +627,9 @@ export function App() {
                   <Show when={activeSession()}>
                     <PermissionChip mode={activeSession()!.permissionMode} />
                     <DriverChip driver={activeSession()!.driver ?? "cli"} />
+                    <Show when={gitBySid()[activeSid()!]}>
+                      <BranchChip status={gitBySid()[activeSid()!]!} />
+                    </Show>
                   </Show>
                   <button
                     onClick={() => {
@@ -634,6 +770,12 @@ export function App() {
         store={prefsStore}
         onClose={() => setSettingsOpen(false)}
       />
+      <ShareModal
+        open={shareOpen()}
+        sid={shareSid()}
+        client={client}
+        onClose={() => setShareOpen(false)}
+      />
       <PermissionApproval client={client} device={currentDevice()} />
       <Show when={isMobile() && activeSid()}>
         <MobileKeyBar
@@ -760,9 +902,11 @@ function StatusBadge(props: { status: ConnStatus }) {
 function SessionRow(props: {
   meta: SessionMeta;
   active: boolean;
+  git?: GitStatusData | null;
   onActivate: () => void;
   onClose: () => void;
   onResume: () => void;
+  onShare: () => void;
 }) {
   const isArchived = () => props.meta.status === "exited";
   return (
@@ -781,13 +925,23 @@ function SessionRow(props: {
           }`}
         />
         <div class="min-w-0 flex-1">
-          <div class={`text-sm truncate ${props.active ? "text-zinc-100" : "text-zinc-300"}`}>
-            {props.meta.title ?? props.meta.id}
+          <div
+            class={`text-sm truncate ${props.active ? "text-zinc-100" : "text-zinc-300"}`}
+            title={
+              props.meta.summary
+                ? props.meta.summary.bullets.map((b) => `• ${b}`).join("\n")
+                : undefined
+            }
+          >
+            {props.meta.summary?.title ?? props.meta.title ?? props.meta.id}
           </div>
-          <div class="flex items-center gap-1.5 mt-0.5">
+          <div class="flex items-center gap-1.5 mt-0.5 flex-wrap">
             <span class="text-xs text-zinc-500 font-mono truncate">{props.meta.id}</span>
             <PermissionChip mode={props.meta.permissionMode} />
             <DriverChip driver={props.meta.driver ?? "cli"} />
+            <Show when={props.git}>
+              <BranchChip status={props.git!} />
+            </Show>
             <Show when={isArchived()}>
               <span
                 class="text-[9px] px-1 py-px rounded bg-zinc-800 text-zinc-400 border border-zinc-700"
@@ -810,6 +964,16 @@ function SessionRow(props: {
             重开
           </button>
         </Show>
+        <button
+          class="opacity-0 group-hover:opacity-100 text-zinc-500 hover:text-violet-400 text-xs"
+          onClick={(e) => {
+            e.stopPropagation();
+            props.onShare();
+          }}
+          title="生成只读分享链接"
+        >
+          🔗
+        </button>
         <button
           class="opacity-0 group-hover:opacity-100 text-zinc-500 hover:text-rose-400 text-xs"
           onClick={(e) => {
@@ -834,5 +998,40 @@ function KeyButton(props: { label: string; onClick: () => void; hint?: string })
     >
       {props.label}
     </button>
+  );
+}
+
+function BranchChip(props: { status: GitStatusData }) {
+  const label = () => props.status.branch ?? props.status.head?.slice(0, 7) ?? "detached";
+  const tooltip = () => {
+    const s = props.status;
+    const bits: string[] = [];
+    bits.push(s.branch ? `branch ${s.branch}` : `HEAD ${s.head?.slice(0, 7) ?? "detached"}`);
+    if (s.dirty) bits.push("dirty working tree");
+    if (s.ahead) bits.push(`↑${s.ahead}`);
+    if (s.behind) bits.push(`↓${s.behind}`);
+    return bits.join(" · ");
+  };
+  return (
+    <span
+      class={`inline-flex items-center gap-1 text-[9px] px-1 py-px rounded border font-mono ${
+        props.status.dirty
+          ? "bg-amber-950/40 border-amber-800/60 text-amber-300"
+          : "bg-zinc-900 border-zinc-700 text-zinc-400"
+      }`}
+      title={tooltip()}
+    >
+      <span class="opacity-80">⌥</span>
+      <span class="truncate max-w-[96px]">{label()}</span>
+      <Show when={props.status.dirty}>
+        <span class="w-1 h-1 rounded-full bg-amber-400" />
+      </Show>
+      <Show when={(props.status.ahead ?? 0) > 0}>
+        <span class="text-emerald-400">↑{props.status.ahead}</span>
+      </Show>
+      <Show when={(props.status.behind ?? 0) > 0}>
+        <span class="text-rose-400">↓{props.status.behind}</span>
+      </Show>
+    </span>
   );
 }

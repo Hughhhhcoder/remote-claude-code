@@ -68,6 +68,16 @@ const base = { v: z.literal(1).default(1) };
 export const SessionDriver = z.enum(["cli", "sdk"]);
 export type SessionDriver = z.infer<typeof SessionDriver>;
 
+// [summary] Added in M6 batch 9: AI-generated session summary. Stored in the
+// persisted snapshot and surfaced inline on SessionMeta so sidebar rendering
+// doesn't need a separate fetch. Old hosts/clients omit the field.
+export const SessionSummary = z.object({
+  title: z.string(),
+  bullets: z.array(z.string()),
+  updatedAt: z.number(),
+});
+export type SessionSummary = z.infer<typeof SessionSummary>;
+
 export const SessionMeta = z.object({
   id: z.string(),
   cwd: z.string(),
@@ -87,6 +97,11 @@ export const SessionMeta = z.object({
    * created by older hosts / sent without a driver hint still parse.
    */
   driver: SessionDriver.default("cli"),
+  /**
+   * Added in M6 batch 9: AI session summary. Optional for back-compat; generated
+   * on session.exit or explicit summary.refresh.
+   */
+  summary: SessionSummary.optional(),
 });
 export type SessionMeta = z.infer<typeof SessionMeta>;
 
@@ -211,6 +226,16 @@ export const Hello = z.object({
   pinnedCommands: z.array(z.string()).optional(),
   /** Added in M4 batch 3: known projects (workspaces). Optional for old hosts. */
   projects: z.array(ProjectMeta).optional(),
+  /**
+   * Added in M6 batch 9: when this ws connection is a share-token readonly
+   * guest, the host sets this to true and scopes `sessions` to the single
+   * shared sid. The client uses it to hide all mutation UI.
+   */
+  sharedReadonly: z.boolean().optional(),
+  /** The sid the guest is pinned to when sharedReadonly is true. */
+  sharedSid: z.string().optional(),
+  /** Expiry timestamp (ms) of the active share token, for countdown UI. */
+  sharedExpiresAt: z.number().optional(),
 });
 
 export const SessionNew = z.object({
@@ -1440,6 +1465,153 @@ export const MetricsTick = z.object({
   snapshot: MetricsSnapshot,
 });
 
+// [summary] — M6 batch 9: AI summary + cross-session search.
+//
+// SessionSummary is computed host-side (Anthropic Messages API when an apiKey
+// is configured in ~/.rcc/config.json, heuristic fallback otherwise). The
+// summary is cached on the session snapshot and broadcast so every client
+// keeps its sidebar up to date.
+//
+// Cross-session search runs over an in-memory inverted index (token → sid
+// set) built at boot from snapshot chat bodies and incrementally updated on
+// chat.append. AND-match + hit-count ranking; 200-char excerpts.
+
+export const SummaryRequest = z.object({
+  ...base,
+  t: z.literal("summary.request"),
+  sid: z.string(),
+});
+
+export const SummaryRefresh = z.object({
+  ...base,
+  t: z.literal("summary.refresh"),
+  sid: z.string(),
+});
+
+export const SummaryFrame = z.object({
+  ...base,
+  t: z.literal("summary"),
+  sid: z.string(),
+  summary: SessionSummary.nullable(),
+});
+
+export const SearchRequest = z.object({
+  ...base,
+  t: z.literal("search.request"),
+  query: z.string().max(512),
+});
+
+export const SearchMatch = z.object({
+  sid: z.string(),
+  title: z.string(),
+  score: z.number(),
+  excerpts: z.array(z.string()),
+});
+export type SearchMatch = z.infer<typeof SearchMatch>;
+
+export const SearchResult = z.object({
+  ...base,
+  t: z.literal("search.result"),
+  query: z.string(),
+  matches: z.array(SearchMatch),
+});
+
+// [shares] — M6 batch 9
+//
+// Session read-only sharing. A share token is a 32B random credential the
+// host issues against an existing sid for a bounded TTL. Guests open
+// `?share=<token>` and the client uses it (instead of a device token) to
+// open a ws. The host stamps that connection readonly + pinned to the sid
+// and filters all outbound frames. The token is hashed (sha256) in
+// `~/.rcc/shares.json`; the plaintext only ever appears in the URL.
+
+export const ShareSummary = z.object({
+  id: z.string(),
+  sid: z.string(),
+  createdAt: z.number(),
+  expiresAt: z.number(),
+  createdBy: z.string().nullable(),
+  revoked: z.boolean(),
+});
+export type ShareSummary = z.infer<typeof ShareSummary>;
+
+export const ShareListRequest = z.object({
+  ...base,
+  t: z.literal("share.list.request"),
+  sid: z.string().optional(),
+});
+
+export const ShareList = z.object({
+  ...base,
+  t: z.literal("share.list"),
+  shares: z.array(ShareSummary),
+});
+
+// [git] — per-session git integration
+//
+// The host runs `git -C <session.cwd> ...` every 5s per session to publish
+// branch / dirty / HEAD state. On HEAD change between polls, it surfaces the
+// new commits inline as a system chat message ("✓ N commits"). The client
+// can also request a one-shot read-only `git.exec` (status / diff / log /
+// branch / blame / show) without going through the Claude pty — the result
+// lands in chat as a code segment. Write operations (commit/push/…) are
+// intentionally excluded; users still have the terminal for those.
+
+export const GitStatusData = z.object({
+  branch: z.string().nullable(),
+  dirty: z.boolean(),
+  ahead: z.number().int().nonnegative().optional(),
+  behind: z.number().int().nonnegative().optional(),
+  head: z.string().optional(),
+});
+export type GitStatusData = z.infer<typeof GitStatusData>;
+
+export const GitCommitInfo = z.object({
+  hash: z.string(),
+  subject: z.string(),
+  author: z.string(),
+});
+export type GitCommitInfo = z.infer<typeof GitCommitInfo>;
+
+export const GitStatusRequest = z.object({
+  ...base,
+  t: z.literal("git.status.request"),
+  sid: z.string(),
+});
+
+export const GitStatusFrame = z.object({
+  ...base,
+  t: z.literal("git.status"),
+  sid: z.string(),
+  status: GitStatusData.nullable(),
+});
+
+export const GitCommitsFrame = z.object({
+  ...base,
+  t: z.literal("git.commits"),
+  sid: z.string(),
+  commits: z.array(GitCommitInfo),
+});
+
+export const GitExecRequest = z.object({
+  ...base,
+  t: z.literal("git.exec.request"),
+  sid: z.string(),
+  args: z.array(z.string().max(512)).min(1).max(16),
+});
+
+export const GitExecResult = z.object({
+  ...base,
+  t: z.literal("git.exec.result"),
+  sid: z.string(),
+  args: z.array(z.string()),
+  ok: z.boolean(),
+  stdout: z.string(),
+  stderr: z.string(),
+  code: z.number().int().nullable(),
+});
+
+
 // ──────────────────────────────────────────────────────────────────────────
 
 export const Frame = z.discriminatedUnion("t", [
@@ -1568,6 +1740,18 @@ export const Frame = z.discriminatedUnion("t", [
   MetricsSubscribe,
   MetricsUnsubscribe,
   MetricsTick,
+  SummaryRequest,
+  SummaryRefresh,
+  SummaryFrame,
+  SearchRequest,
+  SearchResult,
+  ShareListRequest,
+  ShareList,
+  GitStatusRequest,
+  GitStatusFrame,
+  GitCommitsFrame,
+  GitExecRequest,
+  GitExecResult,
 ]);
 export type Frame = z.infer<typeof Frame>;
 
