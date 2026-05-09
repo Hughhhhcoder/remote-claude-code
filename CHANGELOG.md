@@ -40,5 +40,5 @@ Nothing yet — v0.1.0 is the baseline; future changes land here first.
 
 
 
-[Unreleased]: https://github.com/example/rcc/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/example/rcc/releases/tag/v0.1.0
+[Unreleased]: https://github.com/Hughhhhcoder/remote-claude-code/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/Hughhhhcoder/remote-claude-code/releases/tag/v0.1.0

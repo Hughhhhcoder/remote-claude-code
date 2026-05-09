@@ -2,10 +2,10 @@
 # RCC single-binary installer.
 # Usage:
 #   curl -sSL https://example.com/install.sh | sh
-#   RCC_VERSION=0.1.0 RCC_REPO=example/rcc sh install.sh
+#   RCC_VERSION=0.1.0 RCC_REPO=Hughhhhcoder/remote-claude-code sh install.sh
 set -eu
 
-REPO="${RCC_REPO:-example/rcc}"
+REPO="${RCC_REPO:-Hughhhhcoder/remote-claude-code}"
 VERSION="${RCC_VERSION:-latest}"
 PREFIX="${RCC_PREFIX:-$HOME/.rcc}"
 BIN_DIR="${RCC_BIN_DIR:-$HOME/.local/bin}"

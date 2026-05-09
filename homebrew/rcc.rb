@@ -1,6 +1,6 @@
 class Rcc < Formula
   desc "Remote Claude Code — control claude CLI from any device"
-  homepage "https://github.com/example/rcc"
+  homepage "https://github.com/Hughhhhcoder/remote-claude-code"
   version "0.1.0"
   license "MIT"
 
@@ -8,22 +8,22 @@ class Rcc < Formula
 
   on_macos do
     on_arm do
-      url "https://github.com/example/rcc/releases/download/v#{version}/rcc-#{version}-darwin-arm64.tar.gz"
+      url "https://github.com/Hughhhhcoder/remote-claude-code/releases/download/v#{version}/rcc-#{version}-darwin-arm64.tar.gz"
       sha256 "___FILL_AT_RELEASE___"
     end
     on_intel do
-      url "https://github.com/example/rcc/releases/download/v#{version}/rcc-#{version}-darwin-x64.tar.gz"
+      url "https://github.com/Hughhhhcoder/remote-claude-code/releases/download/v#{version}/rcc-#{version}-darwin-x64.tar.gz"
       sha256 "___FILL_AT_RELEASE___"
     end
   end
 
   on_linux do
     on_arm do
-      url "https://github.com/example/rcc/releases/download/v#{version}/rcc-#{version}-linux-arm64.tar.gz"
+      url "https://github.com/Hughhhhcoder/remote-claude-code/releases/download/v#{version}/rcc-#{version}-linux-arm64.tar.gz"
       sha256 "___FILL_AT_RELEASE___"
     end
     on_intel do
-      url "https://github.com/example/rcc/releases/download/v#{version}/rcc-#{version}-linux-x64.tar.gz"
+      url "https://github.com/Hughhhhcoder/remote-claude-code/releases/download/v#{version}/rcc-#{version}-linux-x64.tar.gz"
       sha256 "___FILL_AT_RELEASE___"
     end
   end
