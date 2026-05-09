@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import type { PermissionMode, SessionMeta } from "@rcc/protocol";
 import { RingBuffer } from "./ring-buffer.ts";
+import { ChatParser } from "./chat-parser.ts";
 
 export interface BufferedChunk {
   seq: number;
@@ -33,6 +34,9 @@ export class Session {
   private readonly listeners = new Set<SessionListener>();
   private readonly exitListeners = new Set<ExitListener>();
   private nextSeq = 0;
+  // [messages] — heuristic semantic-chat parser. Feeds off pty output;
+  // assistant messages surface via chat.append broadcasts in host/index.ts.
+  readonly chat: ChatParser;
 
   constructor(opts: {
     command: string;
@@ -48,6 +52,7 @@ export class Session {
     this.cols = opts.cols ?? 120;
     this.rows = opts.rows ?? 32;
     this.permissionMode = opts.permissionMode ?? "default";
+    this.chat = new ChatParser(this.id);
 
     const env: Record<string, string> = {
       ...(process.env as Record<string, string>),
@@ -78,6 +83,8 @@ export class Session {
       const chunk: BufferedChunk = { seq: this.nextSeq++, data };
       this.buffer.push(chunk);
       for (const l of this.listeners) l(chunk);
+      // [messages] keep the chat parser fed alongside the raw stream.
+      this.chat.feedOutput(data);
     });
 
     this.pty.onExit(({ exitCode }) => {

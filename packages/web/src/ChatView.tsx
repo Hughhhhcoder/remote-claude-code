@@ -1,0 +1,202 @@
+import { createSignal, createEffect, onCleanup, For, Show } from "solid-js";
+import type { RccClient } from "./client.ts";
+import type { ChatMessage, ChatSegment } from "@rcc/protocol";
+
+// Semantic chat view backed by the host's heuristic ChatParser. Rendering is
+// intentionally minimal: text as wrapped prose, code as monospace blocks,
+// diffs line-coloured, tool_use collapsed by default. See host/chat-parser.ts
+// for the (lossy) classification rules — clients should offer a terminal
+// fallback toggle, which App.tsx does.
+export function ChatView(props: { client: RccClient; sid: string }) {
+  const [messages, setMessages] = createSignal<ChatMessage[]>([]);
+  const [input, setInput] = createSignal("");
+  let scrollRef: HTMLDivElement | undefined;
+
+  createEffect(() => {
+    const sid = props.sid;
+    setMessages([]);
+    props.client.send({ v: 1, t: "chat.list.request", sid });
+  });
+
+  const unsub = props.client.on((frame) => {
+    if (frame.t === "chat.list" && frame.sid === props.sid) {
+      setMessages(frame.messages);
+      queueMicrotask(() => scrollRef?.scrollTo({ top: scrollRef.scrollHeight }));
+    }
+    if (frame.t === "chat.append" && frame.sid === props.sid) {
+      setMessages((ms) => [...ms, frame.message].slice(-200));
+      queueMicrotask(() => scrollRef?.scrollTo({ top: scrollRef.scrollHeight }));
+    }
+  });
+  onCleanup(() => unsub());
+
+  function send() {
+    const text = input().trim();
+    if (!text) return;
+    const sid = props.sid;
+    // Echo locally immediately; host only tracks assistant output.
+    const localId =
+      typeof crypto !== "undefined" && "randomUUID" in crypto
+        ? crypto.randomUUID()
+        : `u-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    setMessages((ms) => [
+      ...ms,
+      {
+        id: localId,
+        sid,
+        role: "user",
+        segments: [{ kind: "text", content: text }],
+        timestamp: Date.now(),
+      },
+    ]);
+    props.client.write(sid, text + "\r");
+    setInput("");
+    queueMicrotask(() => scrollRef?.scrollTo({ top: scrollRef.scrollHeight }));
+  }
+
+  return (
+    <div class="flex flex-col h-full bg-zinc-950">
+      <div ref={scrollRef} class="flex-1 overflow-y-auto scrollbar p-4 space-y-3">
+        <Show
+          when={messages().length > 0}
+          fallback={
+            <div class="text-center text-xs text-zinc-600 py-8">
+              暂无对话消息。启发式解析需要 Claude 输出后才会生成卡片。
+            </div>
+          }
+        >
+          <For each={messages()}>{(m) => <MessageRow msg={m} />}</For>
+        </Show>
+      </div>
+      <div class="border-t border-zinc-900 p-3 flex gap-2">
+        <textarea
+          class="flex-1 bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:border-orange-500"
+          rows={2}
+          value={input()}
+          onInput={(e) => setInput(e.currentTarget.value)}
+          onKeyDown={(e) => {
+            if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+              e.preventDefault();
+              send();
+            }
+          }}
+          placeholder="输入消息… Cmd/Ctrl+Enter 发送"
+        />
+        <button
+          class="px-4 py-2 bg-gradient-to-r from-orange-500 to-rose-500 rounded-lg text-sm font-medium shrink-0"
+          onClick={send}
+        >
+          发送
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function MessageRow(props: { msg: ChatMessage }) {
+  const isUser = () => props.msg.role === "user";
+  return (
+    <div class={`flex ${isUser() ? "justify-end" : "justify-start"}`}>
+      <div
+        class={`max-w-[85%] rounded-lg px-3 py-2 text-sm ${
+          isUser()
+            ? "bg-orange-500/20 border border-orange-500/30"
+            : "bg-zinc-900 border border-zinc-800"
+        }`}
+      >
+        <For each={props.msg.segments}>{(seg) => <SegmentBlock seg={seg} />}</For>
+      </div>
+    </div>
+  );
+}
+
+function SegmentBlock(props: { seg: ChatSegment }) {
+  return (
+    <Show when={props.seg.kind === "text"} fallback={<NonTextSegment seg={props.seg} />}>
+      <div class="whitespace-pre-wrap break-words">
+        {(props.seg as Extract<ChatSegment, { kind: "text" }>).content}
+      </div>
+    </Show>
+  );
+}
+
+function NonTextSegment(props: { seg: ChatSegment }) {
+  return (
+    <Show
+      when={props.seg.kind === "code"}
+      fallback={
+        <Show
+          when={props.seg.kind === "diff"}
+          fallback={
+            <ToolUseBlock
+              seg={props.seg as Extract<ChatSegment, { kind: "tool_use" }>}
+            />
+          }
+        >
+          <DiffBlock
+            content={(props.seg as Extract<ChatSegment, { kind: "diff" }>).content}
+          />
+        </Show>
+      }
+    >
+      <CodeBlock seg={props.seg as Extract<ChatSegment, { kind: "code" }>} />
+    </Show>
+  );
+}
+
+function CodeBlock(props: { seg: Extract<ChatSegment, { kind: "code" }> }) {
+  return (
+    <pre class="bg-zinc-950 border border-zinc-800 rounded p-2 text-xs overflow-x-auto my-1">
+      <Show when={props.seg.lang}>
+        <div class="text-[10px] text-zinc-600 mb-1 font-mono">{props.seg.lang}</div>
+      </Show>
+      <code>{props.seg.content}</code>
+    </pre>
+  );
+}
+
+function DiffBlock(props: { content: string }) {
+  const lines = () => props.content.split("\n");
+  return (
+    <pre class="text-xs font-mono my-1 bg-zinc-950 border border-zinc-800 rounded p-2 overflow-x-auto">
+      <For each={lines()}>
+        {(line) => (
+          <div
+            class={
+              line.startsWith("+")
+                ? "text-emerald-400"
+                : line.startsWith("-")
+                  ? "text-rose-400"
+                  : "text-zinc-400"
+            }
+          >
+            {line || " "}
+          </div>
+        )}
+      </For>
+    </pre>
+  );
+}
+
+function ToolUseBlock(props: { seg: Extract<ChatSegment, { kind: "tool_use" }> }) {
+  const [open, setOpen] = createSignal(false);
+  return (
+    <div class="my-1 border border-zinc-800 rounded bg-zinc-950 text-xs">
+      <button
+        class="w-full flex items-center gap-2 px-2 py-1 text-left"
+        onClick={() => setOpen(!open())}
+      >
+        <span class="text-zinc-500 w-3">{open() ? "▼" : "▶"}</span>
+        <span class="text-sky-400 font-mono">⚙ {props.seg.tool}</span>
+        <span class="text-zinc-500 truncate flex-1">
+          {props.seg.input.slice(0, 80)}
+        </span>
+      </button>
+      <Show when={open() && props.seg.output}>
+        <pre class="border-t border-zinc-800 p-2 overflow-x-auto">
+          <code>{props.seg.output}</code>
+        </pre>
+      </Show>
+    </div>
+  );
+}

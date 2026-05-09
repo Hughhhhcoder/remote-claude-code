@@ -2,6 +2,7 @@ import { createSignal, createMemo, onCleanup, onMount, For, Show } from "solid-j
 import type { CommandSummary, PermissionMode, SessionMeta, TunnelInfo } from "@rcc/protocol";
 import { RccClient, defaultWsUrl, type ConnStatus } from "./client.ts";
 import { TerminalView } from "./TerminalView.tsx";
+import { ChatView } from "./ChatView.tsx";
 import { NewSessionModal, permissionChip } from "./NewSessionModal.tsx";
 import { PairingView } from "./PairingView.tsx";
 import { DevicesModal } from "./DevicesModal.tsx";
@@ -44,6 +45,12 @@ export function App() {
   const [fileBrowserRoot, setFileBrowserRoot] = createSignal<string>("~");
   const [pinnedIds, setPinnedIds] = createSignal<string[]>([]);
   const [commandsById, setCommandsById] = createSignal<Record<string, CommandSummary>>({});
+  // [messages] Default to chat on mobile (terminal is unusable there) and
+  // terminal on desktop (power users expect raw xterm until the heuristic
+  // parser is replaced with a structured stream in M5).
+  const [viewMode, setViewMode] = createSignal<"chat" | "terminal">(
+    isMobile() ? "chat" : "terminal",
+  );
 
   const unsubStatus = client.onStatus(setStatus);
   const unsubFrame = client.on((frame) => {
@@ -296,15 +303,27 @@ export function App() {
                   <Show when={activeSession()}>
                     <PermissionChip mode={activeSession()!.permissionMode} />
                   </Show>
+                  <button
+                    onClick={() => setViewMode((v) => (v === "chat" ? "terminal" : "chat"))}
+                    class="text-[10px] px-1.5 py-0.5 rounded border border-zinc-700 text-zinc-400 hover:text-zinc-100"
+                    title="切换终端 / 语义化对话视图（启发式）"
+                  >
+                    {viewMode() === "chat" ? "💬 对话" : "▶ 终端"}
+                  </button>
                 </div>
                 <div class="text-[11px] text-zinc-500 shrink-0">
                   {activeSession()?.cols}×{activeSession()?.rows}
                 </div>
               </div>
 
-              {/* terminal */}
+              {/* terminal / chat view */}
               <div class="flex-1 min-h-0 relative">
-                <TerminalView client={client} sid={activeSid()!} />
+                <Show
+                  when={viewMode() === "terminal"}
+                  fallback={<ChatView client={client} sid={activeSid()!} />}
+                >
+                  <TerminalView client={client} sid={activeSid()!} />
+                </Show>
               </div>
 
               {/* command bar */}

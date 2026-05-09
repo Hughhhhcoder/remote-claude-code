@@ -44,7 +44,7 @@
 | Feature | Status | Since | Notes |
 |---|---|---|---|
 | PWA 外壳 (manifest + SW) | 🟢 | 2026-05-09 | manifest + 手写 SW（static cache-first，HTML network-first，排除 ws/pair/health/tunnel）+ 📲 安装按钮（iOS Safari 提示手动 Share → Add to Home Screen） |
-| 语义化对话视图 | 🔴 | — | tool_use 卡片、diff 折叠、图片内联（替代纯 xterm） |
+| 语义化对话视图 | 🟢 | 2026-05-09 | host ChatParser 启发式 ANSI 剥离 + 段落分类 (text/code/diff/tool_use),per-session 100 条消息滚动窗口;前端 ChatView 气泡 + 可折叠 tool_use + 红绿 diff;session header 🔀 终端/对话切换(移动默认对话);图片内联 + 结构化流留 M5 |
 | 权限审批专用页 | 🟢 | 2026-05-09 | host ApprovalWatcher 启发式扫描 pty.out 中 Claude 的 y/n 提示，按工具名分 low/medium/high 三档，广播 approval.request 帧;web 端专用审批卡片（移动底部 / 桌面 modal）;高风险按钮 500ms 防误触。Face ID/Touch ID 留待 M5 WebAuthn |
 | Web Push | 🟢 | 2026-05-09 | web-push + VAPID 自动生成到 ~/.rcc/config.json;push-subs.json 订阅存储;SW push event → showNotification;高风险审批 + session.exited 触发推送;🔔 通知按钮一键开关 |
 | 虚拟键盘快捷键条（移动优化版） | 🟢 | 2026-05-09 | 移动端 sticky 底部键条,pinned commands + Esc/Tab/方向键/^C/Enter/斜杠,visualViewport 跟随键盘,safe-area-inset 适配刘海屏 |
@@ -109,3 +109,4 @@
 - 2026-05-09  M3 batch 1 · PWA: manifest.webmanifest + 手写 sw.js（static cache-first，HTML network-first + offline shell，严格排除 /ws、/pair/*、/health、/tunnel 实时路径），gen-icons.mjs 纯 Node 生成 192/512/maskable PNG，顶栏 📲 安装按钮（beforeinstallprompt 捕获 → prompt；iOS Safari 展开 Share → Add to Home Screen 提示）。
 - 2026-05-09  M3 batch 2 · 命名隧道: 新增 `~/.rcc/config.json` (`loadConfig`/`resolveTunnelConfig`) 读 `tunnel.{mode,name,hostname,credentialsFile}`；`RCC_TUNNEL=named` 启用；`NamedCloudflaredTunnel` spawn `cloudflared tunnel --credentials-file ... --url http://localhost:<port> run <name>`,缺 credentials/cert.pem 打印友好 error 并回退到 TryCloudflare；protocol `TunnelInfo` 加 `mode/hostname/name`；UI TunnelBadge 在 named 模式显示 🔒 前缀与命名隧道 tooltip。
 - 2026-05-09  M3 batch 2 · Push: VAPID 首次启动生成存 `~/.rcc/config.json` (0600);`~/.rcc/push-subs.json` 订阅持久化;protocol `[push]` 六帧 (public-key(.request) / subscribe(d) / unsubscribe(d) / test);host 在 approvals 广播 + session.exited 时 push.broadcast("all",...) (仅高风险审批),device.revoke 同步清理订阅;sw.js 追加 push + notificationclick;App 顶栏 🔔 PushPrompt 一键开启/测试/关闭。
+- 2026-05-09  M3 batch 2 · 语义化对话: host ChatParser 启发式解析 pty.out (ANSI 剥离 + `\n\n` 段落切分 + text/code/diff/tool_use 分类),每会话滚动 100 条;protocol `[messages]` 四帧 (chat.list(.request) / chat.append / chat.reset);前端 ChatView 气泡 + 可折叠 tool_use + 红绿 diff,session header 切换终端↔对话(移动默认对话);user 消息前端本地构造,assistant 靠启发式推断,结构化流留 M5。

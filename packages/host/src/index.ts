@@ -243,6 +243,15 @@ function attachApprovalWatcher(session: Session): void {
   });
 }
 
+// [messages] Bridge each session's ChatParser to a websocket broadcast so
+// every attached client sees assistant messages as they're classified.
+function attachChatBroadcast(session: Session): void {
+  const unsub = session.chat.onMessage((message) => {
+    broadcast({ v: 1, t: "chat.append", sid: session.id, message });
+  });
+  session.onExit(() => unsub());
+}
+
 // Pinned slash command ids — loaded once from ~/.rcc/pinned-commands.json, kept
 // in memory, and broadcast via `cmd.pinned` whenever mutated.
 let pinnedCommandsCache: string[] = await loadPinned();
@@ -254,6 +263,7 @@ const boot = registry.create({
   permissionMode: DEFAULT_PERMISSION_MODE,
 });
 attachApprovalWatcher(boot);
+attachChatBroadcast(boot);
 console.log(
   `[rcc-host] bootstrapped session ${boot.id} at ${boot.cwd} (permission: ${boot.permissionMode})`,
 );
@@ -297,6 +307,7 @@ function handle(ws: WebSocket, state: WsState, frame: Frame): void {
         permissionMode: frame.permissionMode ?? DEFAULT_PERMISSION_MODE,
       });
       attachApprovalWatcher(s);
+      attachChatBroadcast(s);
       send(ws, { v: 1, t: "session.created", session: s.meta() });
       send(ws, { v: 1, t: "session.list", sessions: registry.list().map((x) => x.meta()) });
       attach(ws, state, s, null);
@@ -1087,6 +1098,21 @@ function handle(ws: WebSocket, state: WsState, frame: Frame): void {
             message: err?.message ?? String(err),
           });
         });
+      return;
+    }
+    case "chat.list.request": {
+      const s = registry.get(frame.sid);
+      if (!s) {
+        send(ws, { v: 1, t: "chat.list", sid: frame.sid, messages: [] });
+        return;
+      }
+      send(ws, { v: 1, t: "chat.list", sid: frame.sid, messages: s.chat.list() });
+      return;
+    }
+    case "chat.reset": {
+      const s = registry.get(frame.sid);
+      if (s) s.chat.reset();
+      send(ws, { v: 1, t: "chat.resetted", sid: frame.sid });
       return;
     }
     default:
