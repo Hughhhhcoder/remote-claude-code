@@ -8,10 +8,30 @@ interface VersionInfo {
   node: string;
 }
 
-type CheckResult =
-  | { configured: false }
-  | { configured: true; available: boolean; current: string; latest: string; notes?: string; url?: string }
-  | { configured: true; error: string; current: string };
+interface UpdateManifest {
+  version: string;
+  url: string;
+  sha256: string;
+  releaseNotes?: string;
+  publishedAt?: number;
+}
+
+type UpdaterState =
+  | "idle"
+  | "checking"
+  | "available"
+  | "downloading"
+  | "downloaded"
+  | "applying"
+  | "error";
+
+interface UpdaterStatus {
+  state: UpdaterState;
+  current: string;
+  latest?: UpdateManifest;
+  error?: string;
+  progress?: { bytes: number; total: number };
+}
 
 interface CrashToast {
   at: number;
@@ -19,20 +39,25 @@ interface CrashToast {
   type?: string;
 }
 
-async function authedFetch(path: string): Promise<Response> {
-  const headers: Record<string, string> = {};
+async function authedFetch(path: string, init?: RequestInit): Promise<Response> {
+  const headers: Record<string, string> = { ...(init?.headers as Record<string, string> | undefined) };
   const token = loadToken();
   if (token) headers["authorization"] = `Bearer ${token}`;
-  return fetch(path, { headers });
+  return fetch(path, { ...init, headers });
+}
+
+function fmtMB(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0";
+  return (bytes / (1024 * 1024)).toFixed(1);
 }
 
 export function VersionBadge(props: { client: RccClient }) {
   const [info, setInfo] = createSignal<VersionInfo | null>(null);
-  const [check, setCheck] = createSignal<CheckResult | null>(null);
+  const [status, setStatus] = createSignal<UpdaterStatus | null>(null);
   const [popoverOpen, setPopoverOpen] = createSignal(false);
-  const [checking, setChecking] = createSignal(false);
+  const [busy, setBusy] = createSignal(false);
   const [crash, setCrash] = createSignal<CrashToast | null>(null);
-  const [copied, setCopied] = createSignal(false);
+  const [appliedVersion, setAppliedVersion] = createSignal<string | null>(null);
 
   async function loadVersion() {
     try {
@@ -44,17 +69,38 @@ export function VersionBadge(props: { client: RccClient }) {
     }
   }
 
-  async function runCheck(force = false) {
-    setChecking(true);
+  async function runCheck() {
+    setBusy(true);
     try {
-      const url = force ? "/version/check?force=1" : "/version/check";
-      const resp = await authedFetch(url);
+      const resp = await authedFetch("/update/check", { method: "POST" });
       if (!resp.ok) return;
-      setCheck((await resp.json()) as CheckResult);
+      setStatus((await resp.json()) as UpdaterStatus);
     } catch {
       // ignore
     } finally {
-      setChecking(false);
+      setBusy(false);
+    }
+  }
+
+  async function startDownload() {
+    setBusy(true);
+    try {
+      await authedFetch("/update/download", { method: "POST" });
+    } catch {
+      // ignore — progress arrives via ws
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function applyUpdate() {
+    setBusy(true);
+    try {
+      await authedFetch("/update/apply", { method: "POST" });
+    } catch {
+      // ignore
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -64,12 +110,29 @@ export function VersionBadge(props: { client: RccClient }) {
       setTimeout(() => {
         setCrash((cur) => (cur && cur.at === frame.at ? null : cur));
       }, 12_000);
+      return;
+    }
+    if (frame.t === "update.status") {
+      setStatus(frame.status);
+      return;
+    }
+    if (frame.t === "update.progress") {
+      setStatus((cur) => {
+        if (!cur) return cur;
+        return { ...cur, progress: { bytes: frame.bytes, total: frame.total } };
+      });
+      return;
+    }
+    if (frame.t === "update.ready") {
+      setAppliedVersion(frame.version);
+      setStatus((cur) => (cur ? { ...cur, state: "idle" } : cur));
+      return;
     }
   });
 
   onMount(() => {
     void loadVersion();
-    void runCheck(false);
+    void runCheck();
   });
 
   onCleanup(() => {
@@ -77,25 +140,20 @@ export function VersionBadge(props: { client: RccClient }) {
   });
 
   const hasUpdate = () => {
-    const c = check();
-    return !!(c && c.configured === true && "available" in c && c.available);
+    const s = status();
+    return !!s && (s.state === "available" || s.state === "downloading" || s.state === "downloaded");
   };
 
-  function copyCmd() {
-    const cmd = "git pull && pnpm install && pnpm -F @rcc/web build";
-    navigator.clipboard?.writeText(cmd).then(
-      () => {
-        setCopied(true);
-        setTimeout(() => setCopied(false), 1500);
-      },
-      () => {},
-    );
-  }
-
   function togglePopover() {
-    if (!popoverOpen()) void runCheck(false);
+    if (!popoverOpen()) void runCheck();
     setPopoverOpen((v) => !v);
   }
+
+  const progressPct = () => {
+    const s = status();
+    if (!s?.progress || s.progress.total <= 0) return 0;
+    return Math.min(100, Math.round((s.progress.bytes / s.progress.total) * 100));
+  };
 
   return (
     <>
@@ -125,100 +183,148 @@ export function VersionBadge(props: { client: RccClient }) {
         </button>
         <Show when={popoverOpen()}>
           <div
-            class="absolute right-0 top-full mt-1 w-72 rounded-lg bg-zinc-900 border border-zinc-800 shadow-xl p-3 text-xs z-50"
+            class="absolute right-0 top-full mt-1 w-80 rounded-lg bg-zinc-900 border border-zinc-800 shadow-xl p-3 text-xs z-50"
             onMouseLeave={() => setPopoverOpen(false)}
           >
             <div class="flex items-center justify-between mb-2">
               <div class="text-zinc-400">版本</div>
               <button
                 class="text-[10px] text-zinc-500 hover:text-zinc-200"
-                onClick={() => runCheck(true)}
-                disabled={checking()}
+                onClick={() => void runCheck()}
+                disabled={busy()}
               >
-                {checking() ? "检查中…" : "↻ 检查"}
+                {busy() ? "…" : "↻ 检查"}
               </button>
             </div>
             <Show when={info()}>
               <div class="font-mono text-zinc-300">v{info()!.version}</div>
-              <div class="text-[10px] text-zinc-600 font-mono">
-                node {info()!.node}
-              </div>
+              <div class="text-[10px] text-zinc-600 font-mono">node {info()!.node}</div>
             </Show>
             <div class="mt-2 border-t border-zinc-800 pt-2">
+              <Show when={appliedVersion()}>
+                <div class="mb-2 rounded border border-emerald-500/40 bg-emerald-500/10 p-2 text-emerald-300">
+                  <div class="font-medium">✅ 已应用 v{appliedVersion()}</div>
+                  <div class="mt-0.5 text-[10px] text-emerald-400/70">
+                    host 已退出,等待 supervisor 重启。请刷新页面或重新运行{" "}
+                    <span class="font-mono">pnpm dev:host</span>
+                  </div>
+                </div>
+              </Show>
               <Show
-                when={check()}
+                when={status()}
                 fallback={<div class="text-zinc-600">加载中…</div>}
               >
-                {(c) => (
-                  <Show
-                    when={c().configured}
-                    fallback={
+                {(s) => {
+                  const st = s();
+                  if (st.state === "error") {
+                    return (
+                      <div class="text-rose-400">
+                        失败:{" "}
+                        <span class="font-mono text-[10px]">{st.error ?? "unknown"}</span>
+                        <button
+                          class="mt-1 block w-full text-[11px] bg-zinc-950 border border-zinc-800 hover:border-orange-500/40 rounded px-2 py-1 text-zinc-300"
+                          onClick={() => void runCheck()}
+                        >
+                          重试
+                        </button>
+                      </div>
+                    );
+                  }
+                  if (st.state === "idle" && !st.latest) {
+                    return (
                       <div class="text-zinc-500">
                         未配置自动升级。
                         <div class="mt-1 text-[10px] text-zinc-600">
                           在 <span class="font-mono">~/.rcc/config.json</span> 的{" "}
-                          <span class="font-mono">update.manifestUrl</span> 里配置一个 GitHub releases
-                          或自定义 JSON URL。
+                          <span class="font-mono">update.manifestUrl</span> 里配置一个 JSON URL
+                          (需含 version / url / sha256)。
                         </div>
                       </div>
-                    }
-                  >
-                    {(() => {
-                      const val = c();
-                      if (!val.configured) return null;
-                      if ("error" in val) {
-                        return (
-                          <div class="text-rose-400">
-                            检查失败: <span class="font-mono text-[10px]">{val.error}</span>
-                          </div>
-                        );
-                      }
-                      if (val.available) {
-                        return (
-                          <div>
-                            <div class="text-orange-300 font-medium">
-                              新版本: {val.latest}
-                            </div>
-                            <Show when={val.notes}>
-                              <pre class="mt-1 max-h-32 overflow-y-auto scrollbar text-[10px] text-zinc-400 whitespace-pre-wrap font-mono bg-zinc-950 rounded p-1.5 border border-zinc-800">
-                                {val.notes}
-                              </pre>
-                            </Show>
-                            <div class="mt-2 text-[10px] text-zinc-500">
-                              RCC 从源码运行,请手动升级:
-                            </div>
-                            <button
-                              class="mt-1 w-full text-left font-mono text-[11px] bg-zinc-950 border border-zinc-800 hover:border-orange-500/40 rounded px-2 py-1.5 text-zinc-300"
-                              onClick={copyCmd}
-                              title="复制到剪贴板"
-                            >
-                              git pull && pnpm install{" "}
-                              <span class="text-zinc-600">
-                                {copied() ? "✓ 已复制" : "⎘"}
-                              </span>
-                            </button>
-                            <Show when={val.url}>
-                              <a
-                                href={val.url}
-                                target="_blank"
-                                rel="noreferrer noopener"
-                                class="block mt-1 text-[10px] text-zinc-500 hover:text-orange-300 underline decoration-dotted"
-                              >
-                                查看 release
-                              </a>
-                            </Show>
-                          </div>
-                        );
-                      }
-                      return (
-                        <div class="text-emerald-400/80">
-                          已是最新版本
-                          <span class="ml-1 text-zinc-600">({val.latest})</span>
+                    );
+                  }
+                  if (st.state === "idle" && st.latest) {
+                    return (
+                      <div class="text-emerald-400/80">
+                        已是最新版本
+                        <span class="ml-1 text-zinc-600">({st.latest.version})</span>
+                      </div>
+                    );
+                  }
+                  if (st.state === "checking") {
+                    return <div class="text-zinc-500">检查中…</div>;
+                  }
+                  if (st.state === "available" && st.latest) {
+                    return (
+                      <div>
+                        <div class="text-orange-300 font-medium">
+                          新版本: v{st.latest.version}
                         </div>
-                      );
-                    })()}
-                  </Show>
-                )}
+                        <Show when={st.latest.releaseNotes}>
+                          <pre class="mt-1 max-h-32 overflow-y-auto scrollbar text-[10px] text-zinc-400 whitespace-pre-wrap font-mono bg-zinc-950 rounded p-1.5 border border-zinc-800">
+                            {st.latest.releaseNotes}
+                          </pre>
+                        </Show>
+                        <button
+                          class="mt-2 w-full text-[11px] bg-orange-500/20 border border-orange-500/50 hover:bg-orange-500/30 rounded px-2 py-1.5 text-orange-200 font-medium"
+                          onClick={() => void startDownload()}
+                          disabled={busy()}
+                        >
+                          ⬇ 下载更新 v{st.latest.version}
+                        </button>
+                        <div class="mt-1 text-[10px] text-zinc-600">
+                          sha256 校验 · 解压到{" "}
+                          <span class="font-mono">~/.rcc/install/</span>
+                        </div>
+                      </div>
+                    );
+                  }
+                  if (st.state === "downloading") {
+                    const p = st.progress;
+                    return (
+                      <div>
+                        <div class="text-orange-300 font-medium">
+                          下载中… v{st.latest?.version ?? ""}
+                        </div>
+                        <div class="mt-2 h-1.5 w-full rounded-full bg-zinc-950 border border-zinc-800 overflow-hidden">
+                          <div
+                            class="h-full bg-orange-400 transition-all"
+                            style={{ width: `${progressPct()}%` }}
+                          />
+                        </div>
+                        <div class="mt-1 flex items-center justify-between text-[10px] font-mono text-zinc-500">
+                          <span>
+                            {p ? fmtMB(p.bytes) : "0"} /{" "}
+                            {p && p.total > 0 ? `${fmtMB(p.total)} MB` : "? MB"}
+                          </span>
+                          <span>{progressPct()}%</span>
+                        </div>
+                      </div>
+                    );
+                  }
+                  if (st.state === "downloaded" && st.latest) {
+                    return (
+                      <div>
+                        <div class="text-emerald-300 font-medium">
+                          ✅ 已下载 v{st.latest.version}
+                        </div>
+                        <div class="mt-1 text-[10px] text-zinc-500">
+                          校验通过,点击下面按钮重启并应用。host 将退出。
+                        </div>
+                        <button
+                          class="mt-2 w-full text-[11px] bg-emerald-500/20 border border-emerald-500/50 hover:bg-emerald-500/30 rounded px-2 py-1.5 text-emerald-200 font-medium"
+                          onClick={() => void applyUpdate()}
+                          disabled={busy()}
+                        >
+                          🚀 应用并重启
+                        </button>
+                      </div>
+                    );
+                  }
+                  if (st.state === "applying") {
+                    return <div class="text-emerald-300">应用中… host 即将退出</div>;
+                  }
+                  return <div class="text-zinc-500">{st.state}</div>;
+                }}
               </Show>
             </div>
           </div>
@@ -242,8 +348,7 @@ export function VersionBadge(props: { client: RccClient }) {
                   {c().message}
                 </div>
                 <div class="mt-1.5 text-[10px] text-rose-300/80">
-                  详情见{" "}
-                  <span class="font-mono">~/.rcc/crashes.log</span>
+                  详情见 <span class="font-mono">~/.rcc/crashes.log</span>
                 </div>
               </div>
               <button

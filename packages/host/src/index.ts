@@ -85,6 +85,7 @@ import { CrdtRelay, isUpdateTooLarge } from "./crdt.ts";
 import { WebAuthnService, rpIdFromHost, originFromReq } from "./webauthn.ts";
 import { installCrashHandler } from "./crash.ts";
 import { checkForUpdates, versionSummary } from "./version.ts";
+import { Updater } from "./updater.ts";
 import {
   fetchCatalogs,
   installSkillFromCatalog,
@@ -149,7 +150,9 @@ const TRUST_LOOPBACK = process.env.RCC_TRUST_LOOPBACK !== "0";
 // host will serve its dist/ directly so a single public URL ships both the
 // UI and the websocket.
 const HERE = fileURLToPath(new URL(".", import.meta.url));
-const WEB_DIST = resolve(HERE, "..", "..", "web", "dist");
+const WEB_DIST = process.env.RCC_WEB_DIST
+  ? resolve(process.env.RCC_WEB_DIST)
+  : resolve(HERE, "..", "..", "web", "dist");
 const SERVE_WEB = existsSync(join(WEB_DIST, "index.html"));
 
 const MIME: Record<string, string> = {
@@ -424,6 +427,22 @@ const approvalWatchers = new Map<string, ApprovalWatcher>();
 // emit sites via a single `activity.append` call. Clients pull the backlog
 // with `activity.list.request` and then consume live `activity.append`.
 const activity = new ActivityFeed((frame) => broadcast(frame));
+
+// [updater] Real in-place self-upgrade. Owns a small state machine + abortable
+// download. Broadcasts update.status / update.progress / update.ready so the
+// web VersionBadge can render progress + "apply" UI. Initialised lazily below
+// once the first request arrives so the host start path stays cheap.
+let updaterInstance: Updater | null = null;
+async function getUpdater(): Promise<Updater> {
+  if (updaterInstance) return updaterInstance;
+  updaterInstance = await Updater.create();
+  updaterInstance.setHandlers({
+    onStatus: (status) => broadcast({ v: 1, t: "update.status", status }),
+    onProgress: (bytes, total) => broadcast({ v: 1, t: "update.progress", bytes, total }),
+    onReady: (version) => broadcast({ v: 1, t: "update.ready", version }),
+  });
+  return updaterInstance;
+}
 
 // [plugins] M8 — dynamic-imported user plugins from ~/.rcc/plugins/*.
 const pluginSessionCreatedBus = new PluginEventBus<import("@rcc/protocol").SessionMeta>();
@@ -2471,6 +2490,60 @@ function handle(ws: WebSocket, state: WsState, frame: Frame): void {
       send(ws, { v: 1, t: "activity.list", items: activity.list() });
       return;
     }
+    case "update.check.request": {
+      getUpdater()
+        .then(async (u) => {
+          const status = await u.check(frame.force ?? true);
+          send(ws, { v: 1, t: "update.status", status });
+        })
+        .catch((err) => {
+          send(ws, {
+            v: 1,
+            t: "error",
+            code: "update_check_failed",
+            message: err?.message ?? String(err),
+          });
+        });
+      return;
+    }
+    case "update.download.request": {
+      getUpdater()
+        .then((u) => {
+          const cur = u.getStatus();
+          if (cur.state === "downloading") return;
+          void u.download();
+        })
+        .catch((err) => {
+          send(ws, {
+            v: 1,
+            t: "error",
+            code: "update_download_failed",
+            message: err?.message ?? String(err),
+          });
+        });
+      return;
+    }
+    case "update.abort.request": {
+      getUpdater()
+        .then((u) => u.abortDownload())
+        .catch(() => {});
+      return;
+    }
+    case "update.apply.request": {
+      getUpdater()
+        .then((u) => {
+          void u.apply();
+        })
+        .catch((err) => {
+          send(ws, {
+            v: 1,
+            t: "error",
+            code: "update_apply_failed",
+            message: err?.message ?? String(err),
+          });
+        });
+      return;
+    }
     case "record.start": {
       const s = registry.get(frame.sid);
       if (!(s instanceof Session)) {
@@ -3271,6 +3344,66 @@ const httpServer = createServer(async (req, res) => {
     return;
   }
 
+  // [updater] POST /update/check | /update/download | /update/apply — drive
+  // the real self-upgrade flow. Each action fires asynchronously; progress /
+  // status / ready frames are pushed over ws. All three require a device
+  // token (loopback is trusted the same as every other privileged endpoint)
+  // so a public tunnel can't initiate an upgrade.
+  if (req.url === "/update/check" && req.method === "POST") {
+    const auth = authenticate(req);
+    if (!auth.ok) {
+      res.writeHead(401, { "content-type": "application/json", "x-rcc-auth-reason": auth.reason });
+      res.end(JSON.stringify({ error: auth.reason }));
+      return;
+    }
+    try {
+      const u = await getUpdater();
+      const status = await u.check(true);
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify(status));
+    } catch (err: any) {
+      res.writeHead(500, { "content-type": "application/json" });
+      res.end(JSON.stringify({ error: err?.message ?? String(err) }));
+    }
+    return;
+  }
+  if (req.url === "/update/download" && req.method === "POST") {
+    const auth = authenticate(req);
+    if (!auth.ok) {
+      res.writeHead(401, { "content-type": "application/json", "x-rcc-auth-reason": auth.reason });
+      res.end(JSON.stringify({ error: auth.reason }));
+      return;
+    }
+    try {
+      const u = await getUpdater();
+      void u.download();
+      res.writeHead(202, { "content-type": "application/json" });
+      res.end(JSON.stringify({ accepted: true, status: u.getStatus() }));
+    } catch (err: any) {
+      res.writeHead(500, { "content-type": "application/json" });
+      res.end(JSON.stringify({ error: err?.message ?? String(err) }));
+    }
+    return;
+  }
+  if (req.url === "/update/apply" && req.method === "POST") {
+    const auth = authenticate(req);
+    if (!auth.ok) {
+      res.writeHead(401, { "content-type": "application/json", "x-rcc-auth-reason": auth.reason });
+      res.end(JSON.stringify({ error: auth.reason }));
+      return;
+    }
+    try {
+      const u = await getUpdater();
+      void u.apply();
+      res.writeHead(202, { "content-type": "application/json" });
+      res.end(JSON.stringify({ accepted: true }));
+    } catch (err: any) {
+      res.writeHead(500, { "content-type": "application/json" });
+      res.end(JSON.stringify({ error: err?.message ?? String(err) }));
+    }
+    return;
+  }
+
   if (req.url === "/metrics" && req.method === "GET") {
     const auth = authenticate(req);
     if (!auth.ok) {
@@ -3682,6 +3815,27 @@ const updateProbeTimer = setInterval(() => {
 }, 6 * 60 * 60 * 1000);
 if (typeof updateProbeTimer === "object" && updateProbeTimer && "unref" in updateProbeTimer) {
   (updateProbeTimer as { unref: () => void }).unref();
+}
+
+// [updater] Kick off an initial check once the server is up, then every 6h.
+// Uses the new Updater (manifest with url/sha256) — failure is silent so an
+// unconfigured or unreachable manifest doesn't spam the log.
+async function probeUpdater(): Promise<void> {
+  try {
+    const u = await getUpdater();
+    await u.check(false);
+  } catch {
+    // best-effort
+  }
+}
+setTimeout(() => {
+  void probeUpdater();
+}, 5_000).unref?.();
+const updaterProbeTimer = setInterval(() => {
+  void probeUpdater();
+}, 6 * 60 * 60 * 1000);
+if (typeof updaterProbeTimer === "object" && updaterProbeTimer && "unref" in updaterProbeTimer) {
+  (updaterProbeTimer as { unref: () => void }).unref();
 }
 
 // [shares] Sweep expired / revoked share ws every 30s. The host also

@@ -1,0 +1,180 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release (e.g. v0.1.0)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: build ${{ matrix.platform }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: darwin-arm64
+            runner: macos-14
+          - platform: darwin-x64
+            runner: macos-13
+          - platform: linux-x64
+            runner: ubuntu-22.04
+          - platform: linux-arm64
+            runner: ubuntu-22.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.4.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+
+      - name: install deps
+        run: pnpm install --frozen-lockfile
+
+      - name: build release tarball
+        env:
+          RCC_TARGET_PLATFORM: ${{ matrix.platform }}
+        run: pnpm build:release
+
+      - name: compute sha256
+        shell: bash
+        run: |
+          cd dist
+          for f in rcc-*-${{ matrix.platform }}.tar.gz; do
+            if command -v sha256sum >/dev/null 2>&1; then
+              sha256sum "$f" > "$f.sha256"
+            else
+              shasum -a 256 "$f" > "$f.sha256"
+            fi
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rcc-${{ matrix.platform }}
+          path: |
+            dist/rcc-*-${{ matrix.platform }}.tar.gz
+            dist/rcc-*-${{ matrix.platform }}.tar.gz.sha256
+          if-no-files-found: error
+
+  publish:
+    name: publish release
+    needs: build
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: aggregate SHA256SUMS
+        shell: bash
+        run: |
+          cd artifacts
+          : > SHA256SUMS
+          for f in *.tar.gz; do
+            sha256sum "$f" >> SHA256SUMS
+          done
+          cat SHA256SUMS
+
+      - name: resolve tag
+        id: tag
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "tag=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: ${{ steps.tag.outputs.tag }}
+          generate_release_notes: true
+          files: |
+            artifacts/*.tar.gz
+            artifacts/*.tar.gz.sha256
+            artifacts/SHA256SUMS
+
+  homebrew:
+    name: update homebrew formula
+    needs: publish
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: resolve tag
+        id: tag
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ inputs.tag }}"
+          else
+            TAG="${GITHUB_REF_NAME}"
+          fi
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - name: render formula
+        shell: bash
+        env:
+          VER: ${{ steps.tag.outputs.version }}
+        run: |
+          cd artifacts
+          SHA_DARWIN_ARM64="$(sha256sum "rcc-${VER}-darwin-arm64.tar.gz" 2>/dev/null | awk '{print $1}')"
+          SHA_DARWIN_X64="$(sha256sum "rcc-${VER}-darwin-x64.tar.gz" 2>/dev/null | awk '{print $1}')"
+          SHA_LINUX_ARM64="$(sha256sum "rcc-${VER}-linux-arm64.tar.gz" 2>/dev/null | awk '{print $1}')"
+          SHA_LINUX_X64="$(sha256sum "rcc-${VER}-linux-x64.tar.gz" 2>/dev/null | awk '{print $1}')"
+          cd ..
+          mkdir -p rendered
+          cp homebrew/rcc.rb rendered/rcc.rb
+          sed -i.bak "s/^  version \".*\"/  version \"${VER}\"/" rendered/rcc.rb
+          export SHA_DARWIN_ARM64 SHA_DARWIN_X64 SHA_LINUX_ARM64 SHA_LINUX_X64
+          python3 - <<'PY'
+          import re, os
+          p = "rendered/rcc.rb"
+          s = open(p).read()
+          shas = [
+            ("darwin-arm64", os.environ.get("SHA_DARWIN_ARM64", "")),
+            ("darwin-x64",   os.environ.get("SHA_DARWIN_X64", "")),
+            ("linux-arm64",  os.environ.get("SHA_LINUX_ARM64", "")),
+            ("linux-x64",    os.environ.get("SHA_LINUX_X64", "")),
+          ]
+          for plat, sha in shas:
+              if not sha:
+                  continue
+              pat = re.compile(
+                  r'(url "https://github\.com/[^"]*/rcc-#\{version\}-'
+                  + re.escape(plat)
+                  + r'\.tar\.gz"\s*\n\s*sha256 ")[^"]*(")'
+              )
+              s = pat.sub(r'\g<1>' + sha + r'\g<2>', s)
+          open(p, "w").write(s)
+          PY
+          rm -f rendered/rcc.rb.bak
+          cat rendered/rcc.rb
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: homebrew-formula
+          path: rendered/rcc.rb

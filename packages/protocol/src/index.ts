@@ -2224,6 +2224,95 @@ export const PluginBroadcast = z.object({
   payload: z.unknown().optional(),
 });
 
+// [updater] — M8 batch 16
+//
+// Real in-place self-upgrade. Host's Updater owns a small state machine
+// (idle → checking → available → downloading → downloaded → applying) and
+// broadcasts `update.status` on every transition. `update.progress` fires
+// while streaming the tar.gz; `update.ready` is the last frame before
+// `process.exit(0)` so web clients can prompt the user to refresh after the
+// supervisor restarts the host. Signature verification is sha256-only in v1 —
+// enough to defend against transport corruption but NOT a trusted-publisher
+// check (see updater.ts). minisign is v1.1.
+
+export const UpdaterState = z.enum([
+  "idle",
+  "checking",
+  "available",
+  "downloading",
+  "downloaded",
+  "applying",
+  "error",
+]);
+export type UpdaterState = z.infer<typeof UpdaterState>;
+
+export const UpdateManifestPlatform = z.object({
+  url: z.string(),
+  sha256: z.string(),
+});
+export type UpdateManifestPlatform = z.infer<typeof UpdateManifestPlatform>;
+
+export const UpdateManifest = z.object({
+  version: z.string(),
+  url: z.string(),
+  sha256: z.string(),
+  platforms: z.record(z.string(), UpdateManifestPlatform).optional(),
+  releaseNotes: z.string().optional(),
+  publishedAt: z.number().optional(),
+});
+export type UpdateManifest = z.infer<typeof UpdateManifest>;
+
+export const UpdaterStatusData = z.object({
+  state: UpdaterState,
+  current: z.string(),
+  latest: UpdateManifest.optional(),
+  error: z.string().optional(),
+  progress: z
+    .object({ bytes: z.number().nonnegative(), total: z.number().nonnegative() })
+    .optional(),
+});
+export type UpdaterStatusData = z.infer<typeof UpdaterStatusData>;
+
+export const UpdateCheckRequest = z.object({
+  ...base,
+  t: z.literal("update.check.request"),
+  force: z.boolean().optional(),
+});
+
+export const UpdateDownloadRequest = z.object({
+  ...base,
+  t: z.literal("update.download.request"),
+});
+
+export const UpdateApplyRequest = z.object({
+  ...base,
+  t: z.literal("update.apply.request"),
+});
+
+export const UpdateAbortRequest = z.object({
+  ...base,
+  t: z.literal("update.abort.request"),
+});
+
+export const UpdateStatusFrame = z.object({
+  ...base,
+  t: z.literal("update.status"),
+  status: UpdaterStatusData,
+});
+
+export const UpdateProgressFrame = z.object({
+  ...base,
+  t: z.literal("update.progress"),
+  bytes: z.number().nonnegative(),
+  total: z.number().nonnegative(),
+});
+
+export const UpdateReadyFrame = z.object({
+  ...base,
+  t: z.literal("update.ready"),
+  version: z.string(),
+});
+
 // [audit] — Batch 14
 //
 // Append-only security audit trail. Host persists entries to
@@ -2443,6 +2532,13 @@ export const Frame = z.discriminatedUnion("t", [
   PluginBroadcast,
   AuditQueryRequest,
   AuditEntries,
+  UpdateCheckRequest,
+  UpdateDownloadRequest,
+  UpdateApplyRequest,
+  UpdateAbortRequest,
+  UpdateStatusFrame,
+  UpdateProgressFrame,
+  UpdateReadyFrame,
 ]);
 export type Frame = z.infer<typeof Frame>;
 

@@ -12,6 +12,7 @@
     "dev:host": "pnpm --filter @rcc/host dev",
     "dev:web": "pnpm --filter @rcc/web dev",
     "build": "pnpm -r build",
+    "build:release": "node scripts/build-release.mjs",
     "typecheck": "pnpm -r typecheck",
     "test:e2e": "pnpm -F @rcc/web build && playwright test --config tests/e2e/playwright.config.ts"
   },

@@ -72,7 +72,7 @@
 | 应用层 E2E 加密 (libsodium) | 🟢 | 2026-05-09 | libsodium-wrappers X25519 ECDH(配对时协商,host 长期 keypair 在 ~/.rcc/keys.json)+ per-device sharedKey 存 trust.json;所有 ws 帧 secretbox_easy 加密(nonce 24B 随机)外包 {e2e:1,n,c};loopback 兼容明文;已配对未升级 key 的老设备走旧明文通路 |
 | 重放防护（nonce + window） | 🟢 | 2026-05-09 | envelope 加 seq+ts;host/client 各自 64-bit sliding window 拒重放;±60s 时间戳倾斜保护;decrypt 失败或 replay 检测到关闭 code 4402;仅加密连接启用 |
 | 设备吊销 | 🔴 | — | CLI 命令 + Web 管理界面 |
-| 崩溃上报 + 自升级 | 🟢 | 2026-05-09 | host 捕获 uncaughtException/unhandledRejection 写 ~/.rcc/crashes.log JSONL(1MB rotate)+ 广播 health.crash;GET /version + /version/check 通过用户配的 manifestUrl 查 GitHub releases(10 分钟缓存);Web 顶栏 VersionBadge 有更新时橙点 + popover 显示 release notes + 复制 git pull 命令 |
+| 崩溃上报 + 自升级 | 🟢 | 2026-05-09 | host Updater 真下载 tar.gz + sha256 校验 + 解压 + ~/.local/bin/rcc symlink 替换,update.progress/ready/status 帧驱动 VersionBadge 进度条 + 应用按钮;minisign 签名留 v1.1 |
 
 ## M6 · Depth  🟡 wip
 
@@ -112,6 +112,18 @@
 | CLI 客户端 (@rcc/cli) | 🟢 | 2026-05-09 | pnpm -F @rcc/cli build/start,基于 REST API;login/sessions/prompt/chat/share/devices/projects/version 命令;~/.rcc/cli-config.json 多 profile;ANSI 颜色输出,--json 原始输出 |
 | i18n (zh + en) | 🟢 | 2026-05-09 | 轻量手写 i18n(不装库),packages/web/src/i18n/{index.ts,zh.ts,en.ts} flat dicts 覆盖 ~80 条高频字符串;localStorage rcc.locale,Solid signal 立即切换;首次按 navigator.language 选 zh/en;SettingsModal 顶部新增 Language 下拉;大量低频字符串仍硬编码中文 |
 
+## M9 · Distribution  🟡 wip
+
+| Feature | Status | Since | Notes |
+|---|---|---|---|
+| 单二进制发布 | 🟢 | 2026-05-09 | `scripts/build-release.mjs` 打 tar.gz(host/cli/web/protocol 编译产物 + prod `node_modules` + sh launcher),release/rcc-&lt;ver&gt;-&lt;platform&gt;.tar.gz ~66MB gz / ~234MB 解压(含 @anthropic-ai/claude-agent-sdk-&lt;plat&gt; native claude 196MB);要求 Node ≥ 20;裁 node-pty 跨平台 prebuilds 只留当前平台、删 d.ts/tests/docs;launcher 注入 `RCC_WEB_DIST` 指向 `lib/web/dist`;`scripts/install.sh` 走 `curl -sSL ... \| sh`,下载 + sha256 验 + 解压 `~/.rcc/install/rcc-&lt;ver&gt;/` + symlink `~/.local/bin/{rcc,rcc-cli,rcc-admin}`;`pnpm build:release` 一条命令
+
+## M9 · Distribution  🟡 wip
+
+| Feature | Status | Since | Notes |
+|---|---|---|---|
+| 发行渠道 | 🟢 | 2026-05-09 | install.sh(Node 检测 + sha256 verify + ~/.local/bin symlink)、Homebrew formula 骨架、GitHub Actions release.yml 矩阵 build + 发布 tar.gz + SHA256SUMS;CHANGELOG.md + docs/install.md |
+
 ---
 
 ## 当前可用
@@ -134,6 +146,11 @@
 - `mockup/config.html` — Skills / MCP / Hooks 管理
 
 ## 变更日志
+
+- 2026-05-09  M9 · 单二进制发布 (Batch 16 A): 新增 scripts/build-release.mjs 一条命令打 tar.gz release artifact — `pnpm build:release` 先 `pnpm -r typecheck` + 为 protocol/host 各起一份临时 tsconfig.build.json (继承源,覆盖 `noEmit:false / rewriteRelativeImportExtensions:true / module:NodeNext`) 走 tsc 纯 JS emit,CLI 复用已有 `@rcc/cli build`,Web 走 vite build;stage 目录 `release/rcc-<ver>/{bin,lib}` 下 `lib/{host,cli,web,protocol}` 平铺 + 为 host/cli/protocol 写极简 package.json 指向 compiled entry;node_modules 走 `npm install --omit=dev --ignore-scripts --install-strategy=hoisted` 自动解析版本(从 workspace 已装 pkg 提取 version),@rcc/protocol cp 注入到 lib/node_modules;prune 删掉 node-pty 跨平台 prebuilds (只留 `${platform}-${arch}`) + src/deps/third_party,全链路 d.ts/map,tests/docs 子目录,CHANGELOG.md 等无用文件,darwin-arm64 解压 234MB / gz 66MB(其中 @anthropic-ai/claude-agent-sdk-<platform> 自带 native claude 196MB 是大头)。launcher `bin/{rcc,rcc-cli,rcc-admin}` 纯 sh 脚本(检查 node ≥ 20),`rcc` 注入 `RCC_WEB_DIST=$DIR/lib/web/dist` 绕过原 `../../web/dist` 相对路径定位;host/index.ts 加 `RCC_WEB_DIST` 环境变量优先读取。release/SHA256SUMS 聚合 + 每份 tarball 同名 .sha256 sidecar。新增 scripts/install.sh(POSIX /bin/sh,curl | sh 友好):平台探测 darwin-{x64,arm64}/linux-{x64,arm64},node ≥ 20 校验,resolve latest via GitHub releases API,下载 tarball + .sha256 校验,解压到 `~/.rcc/install/rcc-<ver>/`,symlink `~/.local/bin/{rcc,rcc-cli,rcc-admin}`,PATH 提示。本机跑 `./bin/rcc` 正常 listen + /health 200 + 服务 web bundle,`./bin/rcc-cli` 打印 help。release/ 目录 gitignore。
+- 2026-05-09  M8 · 真实自升级 (Batch 16 B): host 新增 packages/host/src/updater.ts 实现 Updater 类:check(manifest URL 解析 version/url/sha256/platforms/releaseNotes) → download(fetch + Readable.fromWeb 流式写 .part 文件 + 流式 sha256 hash,校验通过 rename 到最终路径,AbortController 可取消) → apply(execFile tar -xzf --strip-components=1 解压到 ~/.rcc/install/rcc-<v>.staging-<pid>,原子 rename 到 rcc-<v>,更新 ~/.local/bin/rcc symlink 指向 bin/rcc,800ms 后 process.exit(0));protocol 加 UpdateManifest/UpdaterStatusData 6 帧(update.check/download/apply/abort.request + update.status/progress/ready);host/index.ts ws 路由 + POST /update/check|download|apply(全 authenticated,download/apply 202 + 进度走 ws),boot 5s 后 + 每 6h 调 Updater.check。Web VersionBadge 监听 update.status/progress/ready,popover 按 state 渲染:available → "⬇ 下载更新" 按钮,downloading → 进度条 + MB 百分比,downloaded → "🚀 应用并重启" 按钮,ready → 绿色"已应用"提示要求刷新。**签名仅 sha256**,防传输损坏但不防中间人(攻击者控制 manifest URL + 发布 URL + CA 可替换有效 sha256);minisign 公钥签名留 v1.1。
+
+- 2026-05-09  M9 · 发行渠道 (Batch 16 C): 新增 `scripts/install.sh`(set -eu,检测 OS+arch 仅支持 darwin/linux × arm64/x64;Node ≥ 20 检测不过直接 die;下载 `rcc-<ver>-<platform>.tar.gz` + `.sha256` 并 sha256_of 双路径 `sha256sum`/`shasum` 校验;支持 `RCC_VERSION`/`RCC_INSTALL_DIR`/`RCC_BIN_DIR`/`RCC_REPO` env overrides;`RCC_VERSION=latest` 走 GitHub API `/releases/latest` 解析 tag;解压到 `~/.rcc/install/`,`ln -sf` 把 `bin/rcc` 与 `bin/rcc-cli` symlink 到 `~/.local/bin/`,不用 sudo;PATH 不含 `~/.local/bin` 时打印 export 提示)。新增 `homebrew/rcc.rb`(depends_on node,on_macos/on_linux × on_arm/on_intel 四 stanza 占位 `___FILL_AT_RELEASE___` sha256,install 把 tar 内容搬到 libexec,bin symlink rcc/rcc-cli,test 断言 `--version` 输出 semver)。新增 `.github/workflows/release.yml`(触发 `v*.*.*` tag + workflow_dispatch 手动 tag;build job 矩阵 darwin-arm64/darwin-x64/linux-x64/linux-arm64,各自 runner `pnpm install --frozen-lockfile` + `pnpm build:release`,算平台 sha256 上传 artifact;publish job 聚合所有 artifact + 写 `SHA256SUMS` + `softprops/action-gh-release@v2` 上传 tar.gz/sha256/SHA256SUMS;homebrew job 从发布 tar.gz 读 sha256,sed 替 version + Python re.sub 替四平台 sha256 进 formula 渲染到 artifact 供用户手动提交 tap;permissions contents: write)。新增 `CHANGELOG.md`(Keep-a-Changelog 格式,M1-M9 精炼版)+ `docs/install.md`(四种安装方式:curl|sh / brew / 手动 tar.gz / 源码,env 变量说明,故障排查,卸载)。Placeholder `example/rcc` repo URL + `___FILL_AT_RELEASE___` sha256 留待用户替真值。
 
 - 2026-05-09  M8 · i18n (Batch 15 C): 新增 packages/web/src/i18n/{index.ts,zh.ts,en.ts} 轻量手写 i18n(零依赖);flat key dict(如 `sidebar.newSession` / `pair.title`) 覆盖约 80 条高频字符串:顶栏 / 侧栏 / NewSessionModal / ChatView 输入框 / MetricsPanel / PairingView / InstallPrompt / SettingsModal / 通用按钮;`t(key)` 读 reactive locale signal,`setLocale(lang)` 写 localStorage `rcc.locale` 即时切换,首次加载按 navigator.language(zh-* → zh, 否则 en);SettingsModal 顶部新增 "Language / 语言" 下拉(简体中文 / English),reactive 立即生效全页面翻译。大量低频字符串(各 Tab / 各 modal)仍硬编码中文,后续迭代补齐。
 - 2026-05-09  M8-cap · Plugin Marketplace (Batch 15 A): Marketplace 扩展出第三条分支 plugins。Protocol 新增 MarketPluginEntry(含 MarketPluginSource union: inline {files} / tarball {url})+ MarketInstallPlugin/MarketPluginInstalled 2 帧,MarketCatalog.plugins 数组。Host marketplace.ts 加 SEED_PLUGINS(echo-bot + timer pomodoro 两个 inline 示例, 内嵌 manifest.json + index.ts + public/index.html 三个文件到 files map)+ isPluginEntry 校验(id [a-z0-9-]+,version,permissions 白名单 session:read/write+chat:read+broadcast,inline files 上限 64 个 × 256KB,tarball 仅接受 https:// URL 但暂不落地);installPluginFromCatalog 只处理 inline mode(tarball 返回 "M9 留白"),每个 file 走 safeJoinInsidePluginDir 逐一 path.resolve + relative 前缀检查防 zip-slip,mkdir -p + writeFile 到 ~/.rcc/plugins/<id>/,安装后不自动 pluginHost.loadOne,需用户重启 host。Host index.ts case "market.install.plugin" 分发,market.catalog 响应多带 plugins 字段。Web MarketplaceView 加 "Plugins" 第三 tab,PluginCard 渲染 permissions chips(琥珀色警告色)+ version/author/tags;安装按钮弹 PluginInstallPrompt 确认框列所有 permissions + "plugin 跑在 host Node 进程有完整 fs/network 权限,只装你信任的作者" 免责 + 写入位置 + 安装后需重启提示,确认后 market.install.plugin;tarball 条目按钮 disabled 显示 "(tarball, M9)"。不引入 tar 解压依赖。
