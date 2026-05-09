@@ -1,7 +1,10 @@
 # RCC — Remote Claude Code
 
 > 从任何设备控制本机 `claude` CLI 的远程终端。
-> 移动浏览器 + 桌面 Web + CLI 一致体验;E2E 加密、端到端审计、可扩展。
+> Control your local `claude` CLI from any device. Same UX on mobile, desktop web, and CLI.
+> E2E encrypted, fully auditable, pluggable.
+
+**📱 想用手机连上来?** → **[中文快速上手](docs/quickstart.zh.md)** · **[English Quickstart](docs/quickstart.en.md)**
 
 <!-- hero image placeholder: screenshot/GIF -->
 
@@ -47,6 +50,7 @@ RCC_TUNNEL=1 rcc
 
 ## 文档
 
+- **[中文快速上手 / Quickstart (zh)](docs/quickstart.zh.md)** · **[English Quickstart](docs/quickstart.en.md)** — 手机连上本机 `claude` 的 5 分钟教程
 - [安装](docs/install.md)
 - [架构](docs/architecture.md)
 - [威胁模型](docs/threat-model.md)
