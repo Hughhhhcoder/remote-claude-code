@@ -18,6 +18,8 @@ import { startTunnel, type Tunnel } from "./tunnel.ts";
 import { loadConfig, resolveTunnelConfig } from "./config.ts";
 import { TrustStore, PairingCodes, type PairedDevice } from "./trust.ts";
 import { handlePairRoute } from "./pair.ts";
+import { handleWhisperRoute } from "./whisper.ts";
+import { loadOrCreateHostKeys, isEnvelope, encryptFrame, decryptEnvelope, ensureSodiumReady } from "./e2e.ts";
 import { listMcp, getMcp, addMcp, removeMcp, setMcpEnabled } from "./mcp.ts";
 import {
   listSkills,
@@ -53,6 +55,7 @@ import { listHooks, writeHook, deleteHook, testHook } from "./hooks.ts";
 import { ls as fsLs, read as fsRead, statEntry as fsStat } from "./fs.ts";
 import { ApprovalWatcher } from "./approvals.ts";
 import { PushService, type PushPayload } from "./push.ts";
+import { CrdtRelay, isUpdateTooLarge } from "./crdt.ts";
 
 interface WsState {
   attached: Set<string>;
@@ -139,6 +142,8 @@ const DEFAULT_PERMISSION_MODE: PermissionMode = (() => {
 const trust = await TrustStore.load();
 const codes = new PairingCodes();
 const push = await PushService.load();
+await ensureSodiumReady();
+const hostKeys = await loadOrCreateHostKeys();
 
 function isLoopback(req: { socket: { remoteAddress?: string | undefined } }): boolean {
   const addr = req.socket.remoteAddress ?? "";
@@ -189,6 +194,7 @@ function authenticate(req: { url?: string; headers: { [key: string]: any }; sock
 }
 
 const registry = new SessionRegistry();
+const crdt = new CrdtRelay();
 
 // Approval watchers: one per session. Scan pty.out for Claude CLI y/n prompts
 // and surface structured `approval.request` frames to all clients. The actual
@@ -201,7 +207,7 @@ function broadcastApproval(frame: Frame): void {
   for (const client of wss.clients) {
     if (client.readyState !== WebSocket.OPEN) continue;
     try {
-      client.send(encode(frame));
+      client.send(frameForClient(client as E2EWebSocket, frame));
     } catch {
       // ignore
     }
@@ -268,10 +274,26 @@ console.log(
   `[rcc-host] bootstrapped session ${boot.id} at ${boot.cwd} (permission: ${boot.permissionMode})`,
 );
 
+type E2EWebSocket = WebSocket & {
+  rccDevice?: PairedDevice | null;
+  rccSharedKey?: string | null;
+};
+
+/**
+ * Return the serialized ws payload for this client, honouring E2E. Plain
+ * JSON for clients without a shared key (loopback / legacy), secretbox
+ * envelope `{e2e:1,n,c}` otherwise.
+ */
+function frameForClient(ws: E2EWebSocket, frame: Frame): string {
+  const key = ws.rccSharedKey;
+  if (key) return encryptFrame(key, frame);
+  return encode(frame);
+}
+
 function send(ws: WebSocket, frame: Frame): void {
   if (ws.readyState !== WebSocket.OPEN) return;
   try {
-    ws.send(encode(frame));
+    ws.send(frameForClient(ws as E2EWebSocket, frame));
   } catch (err) {
     console.error("[rcc-host] send error", err);
   }
@@ -324,6 +346,7 @@ function handle(ws: WebSocket, state: WsState, frame: Frame): void {
     }
     case "session.close": {
       registry.close(frame.sid);
+      crdt.dropSession(frame.sid);
       send(ws, { v: 1, t: "session.list", sessions: registry.list().map((x) => x.meta()) });
       return;
     }
@@ -425,7 +448,7 @@ function handle(ws: WebSocket, state: WsState, frame: Frame): void {
         }
         // Kick all live ws sessions belonging to that device.
         for (const client of wss.clients) {
-          const d = (client as WebSocket & { rccDevice?: PairedDevice | null }).rccDevice;
+          const d = (client as E2EWebSocket).rccDevice;
           if (d && d.id === frame.deviceId) {
             try {
               client.close(4401, "device_revoked");
@@ -1115,6 +1138,42 @@ function handle(ws: WebSocket, state: WsState, frame: Frame): void {
       send(ws, { v: 1, t: "chat.resetted", sid: frame.sid });
       return;
     }
+    case "crdt.update": {
+      if (isUpdateTooLarge(frame.update)) {
+        send(ws, {
+          v: 1,
+          t: "error",
+          code: "crdt_update_too_large",
+          message: `update exceeds 64KB cap`,
+          sid: frame.sid,
+        });
+        return;
+      }
+      crdt.append(frame.sid, frame.docId, { update: frame.update, origin: frame.origin });
+      for (const client of wss.clients) {
+        if (client === ws) continue;
+        if (client.readyState !== WebSocket.OPEN) continue;
+        try {
+          client.send(frameForClient(client as E2EWebSocket, frame));
+        } catch {
+          // ignore
+        }
+      }
+      return;
+    }
+    case "crdt.sync.request": {
+      for (const entry of crdt.replay(frame.sid, frame.docId)) {
+        send(ws, {
+          v: 1,
+          t: "crdt.update",
+          sid: frame.sid,
+          docId: frame.docId,
+          update: entry.update,
+          origin: entry.origin,
+        });
+      }
+      return;
+    }
     default:
       return;
   }
@@ -1124,7 +1183,7 @@ function broadcastMcpList(servers: Parameters<typeof listMcp> extends any ? Awai
   for (const client of wss.clients) {
     if (client.readyState !== WebSocket.OPEN) continue;
     try {
-      client.send(encode({ v: 1, t: "mcp.list", servers }));
+      client.send(frameForClient(client as E2EWebSocket, { v: 1, t: "mcp.list", servers }));
     } catch {
       // ignore
     }
@@ -1136,7 +1195,7 @@ function broadcastPinned(): void {
   for (const client of wss.clients) {
     if (client.readyState !== WebSocket.OPEN) continue;
     try {
-      client.send(encode(frame));
+      client.send(frameForClient(client as E2EWebSocket, frame));
     } catch {
       // ignore
     }
@@ -1157,7 +1216,7 @@ function broadcastCmdList(): void {
       for (const client of wss.clients) {
         if (client.readyState !== WebSocket.OPEN) continue;
         try {
-          client.send(encode(frame));
+          client.send(frameForClient(client as E2EWebSocket, frame));
         } catch {
           // ignore
         }
@@ -1181,7 +1240,7 @@ function broadcastSubagentList(): void {
       for (const client of wss.clients) {
         if (client.readyState !== WebSocket.OPEN) continue;
         try {
-          client.send(encode(frame));
+          client.send(frameForClient(client as E2EWebSocket, frame));
         } catch {
           // ignore
         }
@@ -1197,7 +1256,7 @@ function broadcastHookList(): void {
       for (const client of wss.clients) {
         if (client.readyState !== WebSocket.OPEN) continue;
         try {
-          client.send(encode(frame));
+          client.send(frameForClient(client as E2EWebSocket, frame));
         } catch {
           // ignore
         }
@@ -1211,7 +1270,7 @@ function broadcastMcp(server: Awaited<ReturnType<typeof listMcp>>[number], kind:
     if (client.readyState !== WebSocket.OPEN) continue;
     try {
       if (kind === "added") {
-        client.send(encode({ v: 1, t: "mcp.added", server }));
+        client.send(frameForClient(client as E2EWebSocket, { v: 1, t: "mcp.added", server }));
       }
     } catch {
       // ignore
@@ -1223,7 +1282,7 @@ function broadcastMcpRemoved(name: string): void {
   for (const client of wss.clients) {
     if (client.readyState !== WebSocket.OPEN) continue;
     try {
-      client.send(encode({ v: 1, t: "mcp.removed", name }));
+      client.send(frameForClient(client as E2EWebSocket, { v: 1, t: "mcp.removed", name }));
     } catch {
       // ignore
     }
@@ -1237,7 +1296,7 @@ function broadcastPermList(): void {
       for (const client of wss.clients) {
         if (client.readyState !== WebSocket.OPEN) continue;
         try {
-          client.send(encode(frame));
+          client.send(frameForClient(client as E2EWebSocket, frame));
         } catch {
           // ignore
         }
@@ -1249,10 +1308,10 @@ function broadcastPermList(): void {
 function broadcastDeviceList(): void {
   for (const client of wss.clients) {
     if (client.readyState !== WebSocket.OPEN) continue;
-    const d = (client as WebSocket & { rccDevice?: PairedDevice | null }).rccDevice;
+    const d = (client as E2EWebSocket).rccDevice;
     try {
       client.send(
-        encode({
+        frameForClient(client as E2EWebSocket, {
           v: 1,
           t: "device.list",
           devices: trust.devices().map((x) => ({
@@ -1290,6 +1349,7 @@ const httpServer = createServer(async (req, res) => {
     handlePairRoute(req, res, {
       trust,
       codes,
+      hostKeys,
       onCodeCreated: (code) => {
         console.log("");
         console.log(`[rcc-host] 🔑 Pairing code requested`);
@@ -1299,6 +1359,30 @@ const httpServer = createServer(async (req, res) => {
       },
     })
   ) {
+    return;
+  }
+
+  // Whisper transcription proxy. Authenticated so remote callers must
+  // present a device token — we don't want an open proxy to someone's paid
+  // OpenAI key.
+  if (req.url?.startsWith("/whisper") && req.method === "POST") {
+    const auth = authenticate(req);
+    if (!auth.ok) {
+      res.writeHead(401, {
+        "content-type": "application/json",
+        "x-rcc-auth-reason": auth.reason,
+      });
+      res.end(JSON.stringify({ error: auth.reason }));
+      return;
+    }
+    try {
+      await handleWhisperRoute(req, res);
+    } catch (err: any) {
+      if (!res.headersSent) {
+        res.writeHead(500, { "content-type": "application/json" });
+        res.end(JSON.stringify({ error: err?.message ?? "whisper failed" }));
+      }
+    }
     return;
   }
 
@@ -1351,8 +1435,11 @@ httpServer.on("upgrade", (req, socket, head) => {
     return;
   }
   wss.handleUpgrade(req, socket, head, (ws) => {
-    // Attach device info for later (so device.list etc. can read it).
-    (ws as WebSocket & { rccDevice?: PairedDevice | null }).rccDevice = auth.device;
+    // Attach device info and E2E shared key for later (so device.list etc. can
+    // read it, and the send helpers can encrypt per-client).
+    const eWs = ws as E2EWebSocket;
+    eWs.rccDevice = auth.device;
+    eWs.rccSharedKey = auth.device?.sharedKey ?? null;
     wss.emit("connection", ws, req);
   });
 });
@@ -1368,7 +1455,7 @@ function broadcast(frame: Frame): void {
   for (const client of wss.clients) {
     if (client.readyState === WebSocket.OPEN) {
       try {
-        client.send(encode(frame));
+        client.send(frameForClient(client as E2EWebSocket, frame));
       } catch {
         // socket going away; ignore
       }
@@ -1386,7 +1473,7 @@ if (tunnel) {
 trust.onExternalChange(() => {
   console.log("[rcc-host] trust store changed on disk, re-broadcasting device list");
   for (const client of wss.clients) {
-    const d = (client as WebSocket & { rccDevice?: PairedDevice | null }).rccDevice;
+    const d = (client as E2EWebSocket).rccDevice;
     if (d && !trust.devices().find((x) => x.id === d.id)) {
       try {
         client.close(4401, "device_revoked");
@@ -1399,8 +1486,14 @@ trust.onExternalChange(() => {
 });
 
 wss.on("connection", (ws) => {
-  const device = (ws as WebSocket & { rccDevice?: PairedDevice | null }).rccDevice ?? null;
+  const eWs = ws as E2EWebSocket;
+  const device = eWs.rccDevice ?? null;
   const state: WsState = { attached: new Set(), unsubs: new Map(), device };
+  if (device && !eWs.rccSharedKey) {
+    console.warn(
+      `[rcc-host] device ${device.id} (${device.name}) paired before E2E — falling back to plaintext. Ask user to re-pair.`,
+    );
+  }
 
   send(ws, {
     v: 1,
@@ -1418,6 +1511,53 @@ wss.on("connection", (ws) => {
     else if (Array.isArray(raw)) text = Buffer.concat(raw).toString("utf8");
     else text = (raw as Buffer).toString("utf8");
 
+    // E2E: the outer message may be a secretbox envelope. Try to unwrap it
+    // first. We still accept plaintext in two cases: (a) loopback/legacy
+    // clients with no shared key, (b) a bare `{hello:1}` bootstrap marker
+    // from the client (reserved for future handshake — ignored for now).
+    let outer: unknown;
+    try {
+      outer = JSON.parse(text);
+    } catch {
+      send(ws, { v: 1, t: "error", code: "decode", message: "invalid frame" });
+      return;
+    }
+    if (isEnvelope(outer)) {
+      if (!eWs.rccSharedKey) {
+        send(ws, { v: 1, t: "error", code: "e2e_no_key", message: "e2e envelope received but no shared key" });
+        return;
+      }
+      const inner = decryptEnvelope(eWs.rccSharedKey, outer);
+      if (!inner) {
+        // Auth failure on the E2E envelope — either key rotated or tampering.
+        // Close with the unauthorized code so the client drops its token and
+        // re-pairs.
+        try {
+          ws.close(4401, "e2e_decrypt_failed");
+        } catch {
+          // ignore
+        }
+        return;
+      }
+      const frame = tryDecode(JSON.stringify(inner));
+      if (!frame) {
+        send(ws, { v: 1, t: "error", code: "decode", message: "invalid frame" });
+        return;
+      }
+      handle(ws, state, frame);
+      return;
+    }
+    // Bootstrap marker — client may send `{hello:1}` before switching to
+    // encrypted mode. No-op; host has already sent its hello.
+    if (outer && typeof outer === "object" && (outer as { hello?: unknown }).hello === 1) {
+      return;
+    }
+    // Plain frame. Only accept when this connection has no E2E key
+    // (loopback, or pre-E2E device not yet re-paired).
+    if (eWs.rccSharedKey) {
+      send(ws, { v: 1, t: "error", code: "e2e_required", message: "plain frame rejected; re-pair this device" });
+      return;
+    }
     const frame = tryDecode(text);
     if (!frame) {
       send(ws, { v: 1, t: "error", code: "decode", message: "invalid frame" });

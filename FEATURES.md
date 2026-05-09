@@ -48,7 +48,7 @@
 | 权限审批专用页 | 🟢 | 2026-05-09 | host ApprovalWatcher 启发式扫描 pty.out 中 Claude 的 y/n 提示，按工具名分 low/medium/high 三档，广播 approval.request 帧;web 端专用审批卡片（移动底部 / 桌面 modal）;高风险按钮 500ms 防误触。Face ID/Touch ID 留待 M5 WebAuthn |
 | Web Push | 🟢 | 2026-05-09 | web-push + VAPID 自动生成到 ~/.rcc/config.json;push-subs.json 订阅存储;SW push event → showNotification;高风险审批 + session.exited 触发推送;🔔 通知按钮一键开关 |
 | 虚拟键盘快捷键条（移动优化版） | 🟢 | 2026-05-09 | 移动端 sticky 底部键条,pinned commands + Esc/Tab/方向键/^C/Enter/斜杠,visualViewport 跟随键盘,safe-area-inset 适配刘海屏 |
-| 语音输入 | 🔴 | — | Web Speech API 优先，失败回退 Whisper API |
+| 语音输入 | 🟢 | 2026-05-09 | Web Speech API 实时 partial,不支持时 MediaRecorder 录 webm 传 host /whisper 代理到 OpenAI(需 ~/.rcc/config.json whisper.apiKey);🎙 录音中红色脉冲 |
 
 ## M4 · Multi-device + Config UI  🟡 wip
 
@@ -58,7 +58,7 @@
 | Skills 管理 (user + project) | 🟢 | 2026-05-09 | 读取 `~/.claude/skills` 和 `<cwd>/.claude/skills`，卡片 grid + 启用/禁用 toggle（目录前缀 `_disabled_` 持久化）、⚙查看 SKILL.md、▶试运行（往活跃会话写 `请使用 skill: <name>`）、🗑删除、+ 新建（写到选定 scope）。Marketplace 入口占位。 |
 | MCP Servers 管理 | 🟢 | 2026-05-09 | `claude mcp list/add/remove/get` 包装（execFile，无 shell）；protocol 帧 `mcp.list/get/add/added/remove/removed/toggle`；Web 端表格 + 展开详情 + 启用/禁用开关 + 添加弹窗（stdio/http/sse + env/headers）；env 中 KEY/TOKEN/SECRET/PASSWORD/AUTH 在传输前打码为 `***` 并只暴露长度；claude CLI 无原生 disable，实现为 "snapshot 到 `~/.rcc/mcp-disabled.json` + claude mcp remove"，enable 时重新 add |
 | Slash Commands + Subagents 管理 | 🟢 | 2026-05-09 | commands/.md 读写 + pinned 存 ~/.rcc/pinned-commands.json；subagents/.md frontmatter 解析 (name/description/model/tools)；新建/编辑/删除 modal；pinned 实时广播到 desktop 快捷按钮条 |
-| CRDT 多端输入同步 (Yjs) | 🔴 | — | 两端同时输入不冲突 |
+| CRDT 多端输入同步 (Yjs) | 🟢 | 2026-05-09 | Yjs Y.Text 同步 input draft(docId "input-draft")跨设备;host 做无 yjs 依赖的 update buffer relay(每 doc 上限 200 条);发送后 setValue("") 同步清空 |
 | 文件树 + Monaco 预览 | 🟢 | 2026-05-09 | 右栏可 toggle,fs.ls/read 后端 + Monaco 只读预览,512KB 截断,二进制检测转 base64 |
 | Hooks 管理 UI | 🟢 | 2026-05-09 | ~/.claude/settings.json + <cwd>/.claude/settings.json 的 hooks 段读写，9 种事件支持 matcher+command 列表，🧪 测试按钮 execFile sh -c 跑命令 |
 | 权限策略 UI | 🟢 | 2026-05-09 | user/project/local 三 scope，allow/deny/ask 三 bucket 规则读写；defaultMode 和 additionalDirectories 可视化 |
@@ -67,7 +67,7 @@
 
 | Feature | Status | Since | Notes |
 |---|---|---|---|
-| 应用层 E2E 加密 (libsodium) | 🔴 | — | TLS 之内再加一层 |
+| 应用层 E2E 加密 (libsodium) | 🟢 | 2026-05-09 | libsodium-wrappers X25519 ECDH(配对时协商,host 长期 keypair 在 ~/.rcc/keys.json)+ per-device sharedKey 存 trust.json;所有 ws 帧 secretbox_easy 加密(nonce 24B 随机)外包 {e2e:1,n,c};loopback 兼容明文;已配对未升级 key 的老设备走旧明文通路 |
 | 重放防护（nonce + window） | 🔴 | — | |
 | 设备吊销 | 🔴 | — | CLI 命令 + Web 管理界面 |
 | 崩溃上报 + 自升级 | 🔴 | — | |
@@ -110,3 +110,6 @@
 - 2026-05-09  M3 batch 2 · 命名隧道: 新增 `~/.rcc/config.json` (`loadConfig`/`resolveTunnelConfig`) 读 `tunnel.{mode,name,hostname,credentialsFile}`；`RCC_TUNNEL=named` 启用；`NamedCloudflaredTunnel` spawn `cloudflared tunnel --credentials-file ... --url http://localhost:<port> run <name>`,缺 credentials/cert.pem 打印友好 error 并回退到 TryCloudflare；protocol `TunnelInfo` 加 `mode/hostname/name`；UI TunnelBadge 在 named 模式显示 🔒 前缀与命名隧道 tooltip。
 - 2026-05-09  M3 batch 2 · Push: VAPID 首次启动生成存 `~/.rcc/config.json` (0600);`~/.rcc/push-subs.json` 订阅持久化;protocol `[push]` 六帧 (public-key(.request) / subscribe(d) / unsubscribe(d) / test);host 在 approvals 广播 + session.exited 时 push.broadcast("all",...) (仅高风险审批),device.revoke 同步清理订阅;sw.js 追加 push + notificationclick;App 顶栏 🔔 PushPrompt 一键开启/测试/关闭。
 - 2026-05-09  M3 batch 2 · 语义化对话: host ChatParser 启发式解析 pty.out (ANSI 剥离 + `\n\n` 段落切分 + text/code/diff/tool_use 分类),每会话滚动 100 条;protocol `[messages]` 四帧 (chat.list(.request) / chat.append / chat.reset);前端 ChatView 气泡 + 可折叠 tool_use + 红绿 diff,session header 切换终端↔对话(移动默认对话);user 消息前端本地构造,assistant 靠启发式推断,结构化流留 M5。
+- 2026-05-09  M4 batch 3 · CRDT: Yjs Y.Text 同步 input draft 跨设备;新增 `[crdt]` 三帧 (crdt.update / crdt.sync / crdt.sync.request);host 不装 yjs,仅做 sid-scoped byte relay + 每 doc 200 条 update 环形 buffer 供新连接回放;单 update 硬上限 64KB;ChatView textarea 绑 Y.Text,发送后 setValue("") 双端同步清空。
+- 2026-05-09  M3 batch 3 · 语音输入: Web Speech API 优先(实时 partial 填入 textarea),不支持/出错回退 MediaRecorder 录 webm/opus → host `POST /whisper` 多部件代理到 OpenAI Whisper(读 ~/.rcc/config.json whisper.{apiKey,model,endpoint},未配置返 501,>10MB 返 413);ChatView 🎙 按钮录音中红色脉冲,权限/配置错误下方短提示;host /whisper 复用 authenticate 拦截非 loopback 必须带 token,不新增 protocol 帧。
+- 2026-05-09  M5 batch 1 · E2E 加密: libsodium-wrappers X25519 ECDH 配对协商 per-device sharedKey,host 长期 keypair 在 `~/.rcc/keys.json` (0600),ws 帧 secretbox_easy 加密后外包 `{e2e:1,n,c}` JSON,loopback/未升级设备仍走明文并打 warning。

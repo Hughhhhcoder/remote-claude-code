@@ -14,11 +14,13 @@
   },
   "dependencies": {
     "@rcc/protocol": "workspace:*",
+    "libsodium-wrappers": "^0.8.4",
     "node-pty": "^1.0.0",
     "web-push": "^3.6.7",
     "ws": "^8.18.0"
   },
   "devDependencies": {
+    "@types/libsodium-wrappers": "^0.8.2",
     "@types/node": "^22.9.0",
     "@types/web-push": "^3.6.4",
     "@types/ws": "^8.5.13",

@@ -1,4 +1,6 @@
 import { tryDecode, encode, type Frame, type PermissionMode, type SessionMeta, type TunnelInfo } from "@rcc/protocol";
+import sodium from "libsodium-wrappers";
+import { loadE2EKey } from "./auth.ts";
 
 export type Listener = (frame: Frame) => void;
 export type StatusListener = (status: ConnStatus) => void;
@@ -8,6 +10,22 @@ export type ConnStatus = "connecting" | "connected" | "closed" | "unauthorized";
 export interface RccClientOptions {
   url: string;
   token?: string | null;
+}
+
+interface E2EEnvelope {
+  e2e: 1;
+  n: string;
+  c: string;
+}
+
+function isEnvelope(obj: unknown): obj is E2EEnvelope {
+  return (
+    !!obj &&
+    typeof obj === "object" &&
+    (obj as { e2e?: unknown }).e2e === 1 &&
+    typeof (obj as { n?: unknown }).n === "string" &&
+    typeof (obj as { c?: unknown }).c === "string"
+  );
 }
 
 /**
@@ -27,13 +45,71 @@ export class RccClient {
   private reconnectAttempts = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private closed = false;
+  /** Raw base64 symmetric key. Null before sodium.ready or if not paired with
+   * E2E. Once non-null, every outbound/inbound ws message is secretbox'd. */
+  private e2eKey: Uint8Array | null = null;
+  private sodiumReady = false;
 
   sessions: SessionMeta[] = [];
   tunnel: TunnelInfo | null = null;
   pinnedCommandIds: string[] = [];
 
   constructor(private readonly opts: RccClientOptions) {
+    void this.initSodium();
     this.connect();
+  }
+
+  private async initSodium(): Promise<void> {
+    try {
+      await sodium.ready;
+      this.sodiumReady = true;
+      const keyB64 = loadE2EKey();
+      if (keyB64) {
+        try {
+          this.e2eKey = sodium.from_base64(keyB64, sodium.base64_variants.ORIGINAL);
+        } catch (err) {
+          console.warn("[rcc] invalid E2E key, ignoring:", err);
+        }
+      }
+    } catch (err) {
+      console.warn("[rcc] libsodium init failed:", err);
+    }
+  }
+
+  private encodeOutbound(frame: Frame): string {
+    if (!this.e2eKey || !this.sodiumReady) return encode(frame);
+    const nonce = sodium.randombytes_buf(sodium.crypto_secretbox_NONCEBYTES);
+    const plain = sodium.from_string(encode(frame));
+    const cipher = sodium.crypto_secretbox_easy(plain, nonce, this.e2eKey);
+    const env: E2EEnvelope = {
+      e2e: 1,
+      n: sodium.to_base64(nonce, sodium.base64_variants.ORIGINAL),
+      c: sodium.to_base64(cipher, sodium.base64_variants.ORIGINAL),
+    };
+    return JSON.stringify(env);
+  }
+
+  /** Attempt to unwrap an incoming ws text into a Frame. Returns null on
+   * decrypt/decode failure (caller drops). */
+  private decodeInbound(text: string): Frame | null {
+    let outer: unknown;
+    try {
+      outer = JSON.parse(text);
+    } catch {
+      return null;
+    }
+    if (isEnvelope(outer)) {
+      if (!this.e2eKey || !this.sodiumReady) return null;
+      try {
+        const nonce = sodium.from_base64(outer.n, sodium.base64_variants.ORIGINAL);
+        const cipher = sodium.from_base64(outer.c, sodium.base64_variants.ORIGINAL);
+        const plain = sodium.crypto_secretbox_open_easy(cipher, nonce, this.e2eKey);
+        return tryDecode(sodium.to_string(plain));
+      } catch {
+        return null;
+      }
+    }
+    return tryDecode(text);
   }
 
   private connect(): void {
@@ -62,8 +138,21 @@ export class RccClient {
     });
 
     this.ws.addEventListener("message", (ev) => {
-      const frame = tryDecode(typeof ev.data === "string" ? ev.data : String(ev.data));
-      if (!frame) return;
+      const text = typeof ev.data === "string" ? ev.data : String(ev.data);
+      const frame = this.decodeInbound(text);
+      if (!frame) {
+        // E2E decryption/decode failure → treat as fatal auth problem so the
+        // user re-pairs (keys may have rotated on the host).
+        if (this.e2eKey) {
+          this.setStatus("unauthorized");
+          try {
+            this.ws?.close();
+          } catch {
+            // ignore
+          }
+        }
+        return;
+      }
       if (frame.t === "hello" || frame.t === "session.list") {
         this.sessions = frame.sessions;
       }
@@ -168,7 +257,7 @@ export class RccClient {
       this.outbox.push(frame);
       return;
     }
-    this.ws.send(encode(frame));
+    this.ws.send(this.encodeOutbound(frame));
   }
 
   send(frame: Frame): void {

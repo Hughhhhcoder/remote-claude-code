@@ -27,7 +27,9 @@ if (cmd === "devices" || cmd === "list" || cmd === "ls") {
     for (const d of rows) {
       const paired = new Date(d.createdAt).toISOString().slice(0, 19).replace("T", " ");
       const last = new Date(d.lastSeenAt).toISOString().slice(0, 19).replace("T", " ");
-      console.log(`${d.id}  ${d.name.padEnd(24)}  paired ${paired}  last seen ${last}`);
+      // ANSI green ✓ when this device has an E2E shared key, dim ✗ otherwise.
+      const e2e = d.sharedKey ? "\x1b[32m✓\x1b[0m" : "\x1b[2m✗\x1b[0m";
+      console.log(`${d.id}  ${d.name.padEnd(24)}  paired ${paired}  last seen ${last}  e2e ${e2e}`);
     }
   }
 } else if (cmd === "revoke" && args[1]) {

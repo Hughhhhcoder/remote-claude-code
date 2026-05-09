@@ -1,9 +1,16 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { TrustStore, PairingCodes } from "./trust.ts";
+import { deriveSharedKey, type HostKeypair } from "./e2e.ts";
 
 interface PairDeps {
   trust: TrustStore;
   codes: PairingCodes;
+  /**
+   * Host's long-term X25519 keypair. Its public half is returned on a
+   * successful /pair/claim so the client can derive the same shared secret
+   * via ECDH and enable app-layer E2E encryption.
+   */
+  hostKeys: HostKeypair;
   /** Called when a new pairing code is created so the host can surface it to the user. */
   onCodeCreated?: (code: string) => void;
 }
@@ -96,14 +103,14 @@ async function handleClaim(
   res: ServerResponse,
   deps: PairDeps,
 ): Promise<void> {
-  let body: { code?: string; claimSecret?: string; deviceName?: string };
+  let body: { code?: string; claimSecret?: string; deviceName?: string; pub?: string };
   try {
     body = await readJson(req);
   } catch (err: any) {
     sendJson(res, 400, { error: err.message ?? "invalid body" });
     return;
   }
-  const { code, claimSecret, deviceName } = body;
+  const { code, claimSecret, deviceName, pub } = body;
   if (!code || !claimSecret) {
     sendJson(res, 400, { error: "code and claimSecret required" });
     return;
@@ -124,9 +131,22 @@ async function handleClaim(
     return;
   }
   const userAgent = (req.headers["user-agent"] as string | undefined) ?? null;
+  // Derive a per-device shared key if the client provided its X25519 public
+  // key. Older clients that don't know about E2E simply omit `pub` and stay
+  // on the plaintext path.
+  let sharedKey: string | undefined;
+  if (pub && typeof pub === "string") {
+    try {
+      sharedKey = deriveSharedKey({ hostPriv: deps.hostKeys.priv, devicePub: pub });
+    } catch (err: any) {
+      sendJson(res, 400, { error: `invalid pub: ${err.message ?? err}` });
+      return;
+    }
+  }
   const { device, token } = await deps.trust.addDevice({
     name: deviceName || "unnamed device",
     userAgent,
+    sharedKey,
   });
   sendJson(res, 200, {
     token,
@@ -136,5 +156,6 @@ async function handleClaim(
       createdAt: device.createdAt,
     },
     hostId: deps.trust.hostId,
+    hostPub: deps.hostKeys.pub,
   });
 }

@@ -11,6 +11,12 @@ export interface PairedDevice {
   createdAt: number;
   lastSeenAt: number;
   userAgent: string | null;
+  /**
+   * Base64 X25519 ECDH shared secret with this device. Added in M5 batch 1
+   * (E2E). Older devices paired before this field existed will be undefined —
+   * they continue to work unencrypted until the user re-pairs them.
+   */
+  sharedKey?: string;
 }
 
 interface TrustStoreFile {
@@ -83,7 +89,7 @@ export class TrustStore {
   }
 
   /** Register a new device and return the plaintext token the client should keep. */
-  async addDevice(opts: { name: string; userAgent: string | null }): Promise<{ device: PairedDevice; token: string }> {
+  async addDevice(opts: { name: string; userAgent: string | null; sharedKey?: string }): Promise<{ device: PairedDevice; token: string }> {
     const token = randomToken();
     const device: PairedDevice = {
       id: newId("dev"),
@@ -92,6 +98,7 @@ export class TrustStore {
       createdAt: Date.now(),
       lastSeenAt: Date.now(),
       userAgent: opts.userAgent,
+      sharedKey: opts.sharedKey,
     };
     this.data.devices.push(device);
     await this.save();

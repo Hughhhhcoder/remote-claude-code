@@ -4,6 +4,7 @@ import {
   defaultDeviceName,
   requestPairingCode,
   saveDevice,
+  saveE2EKey,
   saveToken,
 } from "./auth.ts";
 
@@ -62,6 +63,7 @@ export function PairingView(props: Props) {
       });
       saveToken(r.token);
       saveDevice({ id: r.device.id, name: r.device.name, hostId: r.hostId });
+      if (r.e2eKey) saveE2EKey(r.e2eKey);
       setPhase("success");
       setTimeout(() => props.onPaired(r.token), 600);
     } catch (err: any) {

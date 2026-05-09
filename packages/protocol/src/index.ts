@@ -986,6 +986,37 @@ export const FsStat = z.object({
   entry: FileEntry,
 });
 
+// [crdt] — filled by M4 batch 3
+//
+// Shared editing state (e.g. the chat input draft) lives in a Y.Doc on the
+// client. The host is a dumb relay: it keeps a per-`sid:docId` ring of the
+// last 200 update byte blobs so late joiners can fast-forward by replaying
+// them. The host never loads yjs — it only forwards base64-encoded bytes.
+
+export const CrdtUpdate = z.object({
+  ...base,
+  t: z.literal("crdt.update"),
+  sid: z.string(),
+  docId: z.string(),
+  update: z.string(),
+  origin: z.string().optional(),
+});
+
+export const CrdtSync = z.object({
+  ...base,
+  t: z.literal("crdt.sync"),
+  sid: z.string(),
+  docId: z.string(),
+  state: z.string(),
+});
+
+export const CrdtSyncRequest = z.object({
+  ...base,
+  t: z.literal("crdt.sync.request"),
+  sid: z.string(),
+  docId: z.string(),
+});
+
 // ──────────────────────────────────────────────────────────────────────────
 
 export const Frame = z.discriminatedUnion("t", [
@@ -1084,6 +1115,9 @@ export const Frame = z.discriminatedUnion("t", [
   PushUnsubscribe,
   PushUnsubscribed,
   PushTest,
+  CrdtUpdate,
+  CrdtSync,
+  CrdtSyncRequest,
 ]);
 export type Frame = z.infer<typeof Frame>;
 

@@ -1,6 +1,14 @@
 import { createSignal, createEffect, onCleanup, For, Show } from "solid-js";
 import type { RccClient } from "./client.ts";
 import type { ChatMessage, ChatSegment } from "@rcc/protocol";
+import { createSharedText, type SharedText } from "./crdt.ts";
+import {
+  startDictation,
+  isSpeechSupported,
+  hasMediaRecorder,
+  errorMessage,
+  type DictationHandle,
+} from "./voice.ts";
 
 // Semantic chat view backed by the host's heuristic ChatParser. Rendering is
 // intentionally minimal: text as wrapped prose, code as monospace blocks,
@@ -9,13 +17,34 @@ import type { ChatMessage, ChatSegment } from "@rcc/protocol";
 // fallback toggle, which App.tsx does.
 export function ChatView(props: { client: RccClient; sid: string }) {
   const [messages, setMessages] = createSignal<ChatMessage[]>([]);
-  const [input, setInput] = createSignal("");
+  // [crdt] The input draft is a Y.Text synced across every client attached
+  // to this sid (docId "input-draft"). Local edits propagate via onInput;
+  // remote edits land via the observer below and refresh `draft`. Caret may
+  // jump when remote inserts land mid-edit — acceptable trade-off.
+  const [draft, setDraft] = createSignal("");
+  const [recording, setRecording] = createSignal(false);
+  const [voiceMode, setVoiceMode] = createSignal<"speech" | "recorder" | null>(null);
+  const [voiceError, setVoiceError] = createSignal<string | null>(null);
+  let voiceHandle: DictationHandle | null = null;
+  let draftAtStart = "";
+  let shared: SharedText | null = null;
   let scrollRef: HTMLDivElement | undefined;
 
   createEffect(() => {
     const sid = props.sid;
     setMessages([]);
     props.client.send({ v: 1, t: "chat.list.request", sid });
+
+    shared?.destroy();
+    const s = createSharedText(props.client, sid, "input-draft");
+    shared = s;
+    setDraft(s.getValue());
+    const offObs = s.observe((v) => setDraft(v));
+    onCleanup(() => {
+      offObs();
+      s.destroy();
+      if (shared === s) shared = null;
+    });
   });
 
   const unsub = props.client.on((frame) => {
@@ -31,7 +60,7 @@ export function ChatView(props: { client: RccClient; sid: string }) {
   onCleanup(() => unsub());
 
   function send() {
-    const text = input().trim();
+    const text = draft().trim();
     if (!text) return;
     const sid = props.sid;
     // Echo locally immediately; host only tracks assistant output.
@@ -50,9 +79,65 @@ export function ChatView(props: { client: RccClient; sid: string }) {
       },
     ]);
     props.client.write(sid, text + "\r");
-    setInput("");
+    shared?.setValue("");
+    setDraft("");
     queueMicrotask(() => scrollRef?.scrollTo({ top: scrollRef.scrollHeight }));
   }
+
+  function updateDraft(v: string) {
+    setDraft(v);
+    shared?.setValue(v);
+  }
+
+  async function toggleMic() {
+    if (recording()) {
+      voiceHandle?.stop();
+      return;
+    }
+    if (!isSpeechSupported() && !hasMediaRecorder()) {
+      setVoiceError("此设备不支持语音输入");
+      return;
+    }
+    setVoiceError(null);
+    draftAtStart = draft();
+    setRecording(true);
+    try {
+      voiceHandle = await startDictation({
+        onMode: (m) => setVoiceMode(m),
+        onPartial: (text) => {
+          const combined = draftAtStart ? `${draftAtStart} ${text}` : text;
+          updateDraft(combined);
+        },
+        onFinal: (text) => {
+          if (text) {
+            const combined = draftAtStart ? `${draftAtStart} ${text}` : text;
+            updateDraft(combined);
+          }
+          setRecording(false);
+          setVoiceMode(null);
+          voiceHandle = null;
+        },
+        onError: (code, detail) => {
+          setVoiceError(errorMessage(code));
+          if (detail) console.warn("[voice]", code, detail);
+          setRecording(false);
+          setVoiceMode(null);
+          voiceHandle = null;
+        },
+      });
+    } catch (err: any) {
+      console.warn("[voice] start failed", err);
+      setVoiceError("无法启动语音输入");
+      setRecording(false);
+      setVoiceMode(null);
+      voiceHandle = null;
+    }
+  }
+
+  onCleanup(() => {
+    voiceHandle?.cancel();
+    voiceHandle = null;
+  });
 
   return (
     <div class="flex flex-col h-full bg-zinc-950">
@@ -72,8 +157,12 @@ export function ChatView(props: { client: RccClient; sid: string }) {
         <textarea
           class="flex-1 bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:border-orange-500"
           rows={2}
-          value={input()}
-          onInput={(e) => setInput(e.currentTarget.value)}
+          value={draft()}
+          onInput={(e) => {
+            const v = e.currentTarget.value;
+            setDraft(v);
+            shared?.setValue(v);
+          }}
           onKeyDown={(e) => {
             if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
               e.preventDefault();
@@ -82,13 +171,37 @@ export function ChatView(props: { client: RccClient; sid: string }) {
           }}
           placeholder="输入消息… Cmd/Ctrl+Enter 发送"
         />
-        <button
-          class="px-4 py-2 bg-gradient-to-r from-orange-500 to-rose-500 rounded-lg text-sm font-medium shrink-0"
-          onClick={send}
-        >
-          发送
-        </button>
+        <div class="flex flex-col gap-2 shrink-0">
+          <button
+            type="button"
+            class={`px-3 py-2 rounded-lg text-base leading-none border transition ${
+              recording()
+                ? "bg-rose-600/90 border-rose-500 text-white animate-pulse"
+                : "bg-zinc-900 border-zinc-800 text-zinc-400 hover:text-zinc-200 hover:border-zinc-700"
+            }`}
+            onClick={toggleMic}
+            title={
+              recording()
+                ? voiceMode() === "recorder"
+                  ? "录音中(停止后 Whisper 转写)"
+                  : "录音中(点击停止)"
+                : "语音输入"
+            }
+            aria-label="语音输入"
+          >
+            🎙
+          </button>
+          <button
+            class="px-4 py-2 bg-gradient-to-r from-orange-500 to-rose-500 rounded-lg text-sm font-medium"
+            onClick={send}
+          >
+            发送
+          </button>
+        </div>
       </div>
+      <Show when={voiceError()}>
+        <div class="px-3 pb-2 text-[11px] text-rose-400">{voiceError()}</div>
+      </Show>
     </div>
   );
 }
