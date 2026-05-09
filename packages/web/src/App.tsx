@@ -27,7 +27,6 @@ const FileBrowser = lazy(() =>
   import("./FileBrowser.tsx").then((m) => ({ default: m.FileBrowser })),
 );
 import { NotebookView } from "./NotebookView.tsx";
-import { MobileKeyBar } from "./MobileKeyBar.tsx";
 import { useIsMobile } from "./useIsMobile.ts";
 import { InstallPrompt } from "./InstallPrompt.tsx";
 import { PermissionApproval } from "./PermissionApproval.tsx";
@@ -44,6 +43,13 @@ import { CommandPalette, type PaletteAction } from "./CommandPalette.tsx";
 import { InboxView, createInboxStore } from "./InboxView.tsx";
 import { createWorkflowRunner, type WorkflowRunRequest } from "./workflow-runner.ts";
 import { t } from "./i18n/index.ts";
+import { MobileTopBar } from "./mobile/MobileTopBar.tsx";
+import { MobileTabNav, type MobileTab } from "./mobile/MobileTabNav.tsx";
+import { MobileSidebarDrawer } from "./mobile/MobileSidebarDrawer.tsx";
+import { MobileChatTab } from "./mobile/MobileChatTab.tsx";
+import { MobileFilesTab } from "./mobile/MobileFilesTab.tsx";
+import { MobileApprovalsTab } from "./mobile/MobileApprovalsTab.tsx";
+import { MobileSettingsTab } from "./mobile/MobileSettingsTab.tsx";
 
 function readShareTokenFromLocation(): string | null {
   try {
@@ -127,6 +133,9 @@ export function App() {
   const [newSessionProjectId, setNewSessionProjectId] = createSignal<string | null>(null);
   const [collapsedProjects, setCollapsedProjects] = createSignal<Set<string>>(new Set());
   const [starters, setStarters] = createSignal<Starter[]>([]);
+  // Mobile-only UI state
+  const [mobileTab, setMobileTab] = createSignal<MobileTab>("chat");
+  const [mobileDrawerOpen, setMobileDrawerOpen] = createSignal(false);
   // Starter id the user picked in NewSessionModal, cached so the session.created
   // handler can match the next spawned session to its starter and run bootstrap.
   const [pendingStarterId, setPendingStarterId] = createSignal<string | null>(null);
@@ -471,7 +480,8 @@ export function App() {
       fallback={<PairingView onPaired={onPaired} />}
     >
       <div class="h-screen flex flex-col bg-zinc-950 text-zinc-100">
-      {/* Top bar */}
+      <Show when={!isMobile()}>
+      {/* Top bar (desktop only) */}
       <div class="h-11 flex items-center justify-between px-4 border-b border-zinc-900 bg-zinc-950 shrink-0">
         <div class="flex items-center gap-3">
           <div class="flex items-center gap-1.5 mr-3">
@@ -551,12 +561,136 @@ export function App() {
           <StatusBadge status={status()} />
         </div>
       </div>
+      </Show>
 
       <WorkflowRunBar
         state={workflowRunner.state()}
         onStop={() => workflowRunner.stop()}
       />
 
+      <Show when={isMobile()}>
+        <MobileTopBar
+          onOpenDrawer={() => setMobileDrawerOpen(true)}
+          onOpenInbox={() => setInboxOpen(true)}
+          title={activeSession()?.title ?? "rcc"}
+          subtitle={activeSession()?.cwd}
+          status={status()}
+          unreadInbox={inboxStore.unread()}
+        />
+        <MobileSidebarDrawer
+          open={mobileDrawerOpen()}
+          onClose={() => setMobileDrawerOpen(false)}
+        >
+          <div class="p-3 border-b border-zinc-900 space-y-2 shrink-0">
+            <button
+              class="w-full py-2.5 rounded-lg bg-gradient-to-r from-accent-500 to-accent-600 text-white text-sm font-medium flex items-center justify-center gap-2"
+              onClick={() => {
+                setMobileDrawerOpen(false);
+                onNewSession();
+              }}
+            >
+              <span>+</span> 新建会话
+            </button>
+          </div>
+          <div class="flex-1 overflow-y-auto scrollbar p-2">
+            <Show
+              when={sessions().length > 0}
+              fallback={<div class="px-2 py-4 text-xs text-zinc-600">暂无会话</div>}
+            >
+              <div class="text-[10px] uppercase tracking-widest text-zinc-600 px-2 py-2">
+                会话
+              </div>
+              <For each={sessions()}>
+                {(s) => (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveSid(s.id);
+                      setMobileDrawerOpen(false);
+                    }}
+                    class={`w-full text-left px-2 py-2 rounded mb-1 ${
+                      activeSid() === s.id
+                        ? "bg-accent-500/10 border border-accent-500/30"
+                        : "active:bg-zinc-900"
+                    }`}
+                  >
+                    <div class="text-sm text-zinc-200 truncate">{s.title}</div>
+                    <div class="text-[10px] text-zinc-500 font-mono truncate">
+                      {s.cwd}
+                    </div>
+                  </button>
+                )}
+              </For>
+            </Show>
+          </div>
+        </MobileSidebarDrawer>
+
+        <main class="flex-1 min-h-0 flex flex-col overflow-hidden">
+          <Show
+            when={activeSid()}
+            fallback={
+              <div class="flex-1 grid place-items-center text-zinc-500 text-sm px-6 text-center">
+                暂无活跃会话 · 点击左上角 ☰ 创建
+              </div>
+            }
+          >
+            <Show when={mobileTab() === "chat"}>
+              <MobileChatTab
+                client={client}
+                sid={activeSid()!}
+                sessions={sessions()}
+                pinnedCommands={pinnedCommands}
+                customKeys={customKeys}
+                onOpenSessionList={() => setMobileDrawerOpen(true)}
+                onSendCommand={sendCommand}
+              />
+            </Show>
+            <Show when={mobileTab() === "files"}>
+              <MobileFilesTab
+                client={client}
+                activeSession={activeSession}
+                gitBySid={gitBySid}
+              />
+            </Show>
+            <Show when={mobileTab() === "approvals"}>
+              <MobileApprovalsTab
+                items={inboxStore.items}
+                onJumpToSid={(sid) => setActiveSid(sid)}
+                onSwitchToChat={() => setMobileTab("chat")}
+              />
+            </Show>
+            <Show when={mobileTab() === "settings"}>
+              <MobileSettingsTab
+                client={client}
+                status={status()}
+                sessions={sessions()}
+                tunnel={tunnel()}
+                currentDevice={currentDevice()}
+                hostVersion={null}
+                onOpenDevices={() => setDevicesOpen(true)}
+                onOpenConfig={() => setConfigOpen(true)}
+                onOpenMarket={() => setMarketOpen(true)}
+                onOpenProjects={() => setProjectsModalOpen(true)}
+                onOpenPeers={() => setPeersModalOpen(true)}
+                onOpenPrefs={() => setSettingsOpen(true)}
+                onSignOut={onSignOut}
+              />
+            </Show>
+          </Show>
+        </main>
+
+        <MobileTabNav
+          active={mobileTab()}
+          onChange={setMobileTab}
+          pendingApprovals={
+            inboxStore.items().filter(
+              (it) => it.kind === "approval" && it.status === "pending",
+            ).length
+          }
+        />
+      </Show>
+
+      <Show when={!isMobile()}>
       {/* Main grid */}
       <div
         class="flex-1 grid"
@@ -982,6 +1116,7 @@ export function App() {
           </aside>
         </Show>
       </div>
+      </Show>
 
       <NewSessionModal
         open={modalOpen()}
@@ -1063,14 +1198,6 @@ export function App() {
         actions={paletteActions()}
         onActivateSession={(sid) => setActiveSid(sid)}
       />
-      <Show when={isMobile() && activeSid()}>
-        <MobileKeyBar
-          client={client}
-          sid={activeSid()}
-          pinnedCommands={pinnedCommands}
-          customKeys={customKeys}
-        />
-      </Show>
     </div>
     </Show>
   );

@@ -26,6 +26,7 @@ export function ChatView(props: {
   sid: string;
   sessions?: SessionMeta[];
   onPinToNotebook?: (messageId: string) => void;
+  hideInput?: boolean;
 }) {
   const [messages, setMessages] = createSignal<ChatMessage[]>([]);
   // [crdt] The input draft is a Y.Text synced across every client attached
@@ -257,6 +258,7 @@ export function ChatView(props: {
           <For each={messages()}>{(m) => <MessageRow msg={m} onPin={props.onPinToNotebook} />}</For>
         </Show>
       </div>
+      <Show when={!props.hideInput}>
       <div class="border-t border-zinc-900 p-3 flex gap-2">
         <textarea
           class="flex-1 bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:border-orange-500"
@@ -313,6 +315,7 @@ export function ChatView(props: {
           </button>
         </div>
       </div>
+      </Show>
       <Show when={voiceError()}>
         <div class="px-3 pb-2 text-[11px] text-rose-400">{voiceError()}</div>
       </Show>

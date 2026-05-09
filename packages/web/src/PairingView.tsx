@@ -74,21 +74,21 @@ export function PairingView(props: Props) {
   }
 
   return (
-    <div class="min-h-screen grid place-items-center bg-zinc-950 text-zinc-100 p-6">
+    <div class="min-h-screen grid place-items-center bg-zinc-950 text-zinc-100 p-4 md:p-6">
       <div class="w-[480px] max-w-full rounded-2xl border border-zinc-800 bg-zinc-900/40 overflow-hidden">
-        <div class="p-6 border-b border-zinc-900">
+        <div class="p-5 md:p-6 border-b border-zinc-900">
           <div class="flex items-center gap-2.5">
-            <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-orange-500 to-rose-600 grid place-items-center font-bold text-sm">
+            <div class="w-9 h-9 rounded-lg bg-gradient-to-br from-orange-500 to-rose-600 grid place-items-center font-bold text-base">
               R
             </div>
             <div>
-              <div class="font-semibold text-sm">{t("pair.title")}</div>
+              <div class="font-semibold text-base">{t("pair.title")}</div>
               <div class="text-xs text-zinc-500">{t("pair.subtitle")}</div>
             </div>
           </div>
         </div>
 
-        <div class="p-6 space-y-5">
+        <div class="p-5 md:p-6 space-y-5">
           <Show when={phase() === "intro" || phase() === "requesting" || phase() === "error"}>
             <div class="space-y-4">
               <p class="text-sm text-zinc-400 leading-relaxed">
@@ -97,7 +97,7 @@ export function PairingView(props: Props) {
               <button
                 onClick={startRequest}
                 disabled={phase() === "requesting"}
-                class="w-full py-2.5 rounded-lg bg-gradient-to-r from-orange-500 to-rose-500 text-white text-sm font-semibold disabled:opacity-50"
+                class="w-full min-h-[48px] rounded-xl bg-gradient-to-r from-orange-500 to-rose-500 text-white text-base font-semibold disabled:opacity-50 active:scale-[0.98] transition"
               >
                 {phase() === "requesting" ? t("pair.requesting") : t("pair.requestCode")}
               </button>
@@ -115,7 +115,7 @@ export function PairingView(props: Props) {
                 <div class="text-[11px] uppercase tracking-widest text-zinc-500 mb-2">
                   {t("pair.hostShownCode")}
                 </div>
-                <div class="font-mono text-2xl text-zinc-200 tracking-[0.3em] select-all">
+                <div class="font-mono text-3xl md:text-2xl text-zinc-200 tracking-[0.3em] select-all">
                   {code()!.slice(0, 3)} {code()!.slice(3)}
                 </div>
                 <div
@@ -134,11 +134,12 @@ export function PairingView(props: Props) {
                 <input
                   type="text"
                   inputmode="numeric"
+                  autocomplete="one-time-code"
                   maxlength="7"
                   placeholder="482 917"
                   value={entered()}
                   onInput={(e) => setEntered(e.currentTarget.value)}
-                  class="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-lg font-mono tracking-widest text-zinc-100 outline-none focus:border-orange-500/60"
+                  class="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-2xl md:text-lg font-mono tracking-[0.3em] text-zinc-100 outline-none focus:border-orange-500/60"
                 />
               </div>
 
@@ -151,21 +152,21 @@ export function PairingView(props: Props) {
                   value={deviceName()}
                   onInput={(e) => setDeviceName(e.currentTarget.value)}
                   maxlength={64}
-                  class="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-100 outline-none focus:border-orange-500/60"
+                  class="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-3 md:py-2 text-base md:text-sm text-zinc-100 outline-none focus:border-orange-500/60"
                 />
               </div>
 
               <div class="flex gap-2">
                 <button
                   onClick={startRequest}
-                  class="px-3 py-2 rounded-lg border border-zinc-800 text-xs text-zinc-400 hover:border-zinc-700"
+                  class="px-4 py-3 rounded-xl border border-zinc-800 text-sm text-zinc-400 active:border-zinc-700"
                 >
                   {t("pair.retry")}
                 </button>
                 <button
                   onClick={confirm}
                   disabled={codeExpired() || entered().replace(/\s/g, "").length !== 6}
-                  class="flex-1 py-2 rounded-lg bg-emerald-500 text-zinc-950 text-sm font-semibold disabled:opacity-40 disabled:cursor-not-allowed"
+                  class="flex-1 min-h-[48px] rounded-xl bg-emerald-500 text-zinc-950 text-base font-semibold disabled:opacity-40 disabled:cursor-not-allowed active:scale-[0.98] transition"
                 >
                   {t("pair.finish")}
                 </button>
