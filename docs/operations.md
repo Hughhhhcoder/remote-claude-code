@@ -249,5 +249,5 @@ rcc    # host 重启自动 rehydrate,所有设备无感
 ## 延伸阅读
 
 - [install.md](./install.md) — 安装与卸载
-- [../FEATURES.md](../FEATURES.md) — 特性矩阵
-- [../CHANGELOG.md](../CHANGELOG.md) — 版本变更
+- [architecture.md](./architecture.md) — 架构总览
+- [threat-model.md](./threat-model.md) — 威胁模型

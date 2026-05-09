@@ -46,8 +46,6 @@ RCC_TUNNEL=1 rcc
 - 🤝 **多 host 联邦**:订阅远程 host,sessions 合并展示,sid 前缀透传
 - 🔗 **只读分享链接**:TTL 可选、可撤销,访客无 E2E key,白名单帧过滤
 
-完整清单:[FEATURES.md](FEATURES.md)
-
 ## 文档
 
 - **[中文快速上手 / Quickstart (zh)](docs/quickstart.zh.md)** · **[English Quickstart](docs/quickstart.en.md)** — 手机连上本机 `claude` 的 5 分钟教程
@@ -55,7 +53,6 @@ RCC_TUNNEL=1 rcc
 - [架构](docs/architecture.md)
 - [威胁模型](docs/threat-model.md)
 - [CLI 使用](packages/cli/README.md)
-- 变更日志:[CHANGELOG.md](CHANGELOG.md)
 
 ## 开发
 

@@ -13,14 +13,10 @@
     "dev:web": "pnpm --filter @rcc/web dev",
     "build": "pnpm -r build",
     "build:release": "node scripts/build-release.mjs",
-    "typecheck": "pnpm -r typecheck",
-    "test:e2e": "pnpm -F @rcc/web build && playwright test --config tests/e2e/playwright.config.ts"
+    "typecheck": "pnpm -r typecheck"
   },
   "packageManager": "pnpm@9.4.0",
   "engines": {
     "node": ">=20"
-  },
-  "devDependencies": {
-    "@playwright/test": "^1.59.1"
   }
 }

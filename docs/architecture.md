@@ -14,7 +14,6 @@ rcc/
 ├── scripts/        build-release / install.sh / soak / fix-node-pty 等
 ├── homebrew/       Homebrew formula (release CI 回填 sha256)
 ├── examples/       plugins/echo-bot 等示例
-├── tests/e2e/      Playwright,fake-claude.mjs 隔离跑
 └── docs/           本目录
 ```
 
