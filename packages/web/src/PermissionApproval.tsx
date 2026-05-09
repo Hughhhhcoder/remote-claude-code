@@ -2,6 +2,7 @@ import { createEffect, createSignal, onCleanup, Show } from "solid-js";
 import type { ApprovalRisk, FrameByT } from "@rcc/protocol";
 import type { RccClient } from "./client.ts";
 import { useIsMobile } from "./useIsMobile.ts";
+import { authenticateForApproval, isWebAuthnAvailable } from "./webauthn.ts";
 
 type Pending = FrameByT<"approval.request">;
 
@@ -43,11 +44,18 @@ const RISK_STYLES: Record<ApprovalRisk, RiskStyle> = {
   },
 };
 
-export function PermissionApproval(props: { client: RccClient }) {
+interface Props {
+  client: RccClient;
+  device: { id: string; name: string; hasPasskey?: boolean } | null;
+}
+
+export function PermissionApproval(props: Props) {
   const [current, setCurrent] = createSignal<Pending | null>(null);
   const [showRaw, setShowRaw] = createSignal(false);
   const [onceOnly, setOnceOnly] = createSignal(true);
   const [countdown, setCountdown] = createSignal(0);
+  const [authing, setAuthing] = createSignal(false);
+  const [authError, setAuthError] = createSignal<string | null>(null);
   const isMobile = useIsMobile();
 
   const unsub = props.client.on((frame) => {
@@ -55,6 +63,8 @@ export function PermissionApproval(props: { client: RccClient }) {
       setCurrent(frame);
       setShowRaw(false);
       setOnceOnly(true);
+      setAuthError(null);
+      setAuthing(false);
       if (frame.risk === "high") {
         setCountdown(HIGH_RISK_DELAY_MS);
       } else {
@@ -97,24 +107,51 @@ export function PermissionApproval(props: { client: RccClient }) {
     if (tickTimer) clearInterval(tickTimer);
   });
 
-  function respond(approve: boolean) {
-    const c = current();
-    if (!c) return;
+  function needsWebAuthn(c: Pending): boolean {
+    return (
+      c.risk === "high" &&
+      !!props.device?.hasPasskey &&
+      isWebAuthnAvailable()
+    );
+  }
+
+  function sendResponse(c: Pending, approve: boolean, webauthnToken?: string) {
     props.client.send({
       v: 1,
       t: "approval.response",
       id: c.id,
       sid: c.sid,
       approve,
+      webauthnToken,
     });
     setCurrent(null);
+  }
+
+  async function respond(approve: boolean) {
+    const c = current();
+    if (!c) return;
+    if (approve && needsWebAuthn(c) && props.device) {
+      setAuthing(true);
+      setAuthError(null);
+      try {
+        const token = await authenticateForApproval(props.device.id, c.id);
+        sendResponse(c, true, token);
+      } catch (err) {
+        setAuthError((err as Error).message || "passkey 验证失败");
+        setAuthing(false);
+        // keep the approval pending so the user can retry or cancel
+      }
+      return;
+    }
+    sendResponse(c, approve);
   }
 
   return (
     <Show when={current()}>
       {(c) => {
         const style = () => RISK_STYLES[c().risk];
-        const approveDisabled = () => countdown() > 0;
+        const approveDisabled = () => countdown() > 0 || authing();
+        const useWebAuthn = () => needsWebAuthn(c());
         return (
           <div
             class="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/60 backdrop-blur-sm"
@@ -174,17 +211,31 @@ export function PermissionApproval(props: { client: RccClient }) {
                 <span class="text-[10px] text-zinc-600">（持久化规则尚未实现）</span>
               </label>
 
-              <Show when={c().risk === "high"}>
+              <Show when={c().risk === "high" && !useWebAuthn()}>
                 <div class="text-[11px] text-rose-400 mb-3 flex items-center gap-1.5">
                   <span>⚠</span>
                   <span>高风险操作 — 按钮 {(HIGH_RISK_DELAY_MS / 1000).toFixed(1)}s 内不可点击防误触</span>
                 </div>
               </Show>
 
+              <Show when={useWebAuthn()}>
+                <div class="text-[11px] text-violet-300 mb-3 flex items-center gap-1.5">
+                  <span>🔐</span>
+                  <span>高风险操作 — 需要 Touch ID / Face ID 二次确认</span>
+                </div>
+              </Show>
+
+              <Show when={authError()}>
+                <div class="text-[11px] text-rose-400 mb-3 px-2 py-1.5 rounded border border-rose-500/30 bg-rose-500/5">
+                  {authError()}
+                </div>
+              </Show>
+
               <div class="grid grid-cols-2 gap-3">
                 <button
-                  class="h-12 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 font-semibold text-sm transition"
+                  class="h-12 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 font-semibold text-sm transition disabled:opacity-50"
                   onClick={() => respond(false)}
+                  disabled={authing()}
                 >
                   ✗ 拒绝
                 </button>
@@ -195,9 +246,15 @@ export function PermissionApproval(props: { client: RccClient }) {
                 >
                   <Show
                     when={!approveDisabled()}
-                    fallback={<span>等 {(countdown() / 1000).toFixed(1)}s</span>}
+                    fallback={
+                      <span>
+                        {authing() ? "等待生物识别…" : `等 ${(countdown() / 1000).toFixed(1)}s`}
+                      </span>
+                    }
                   >
-                    <span>✓ 同意</span>
+                    <Show when={useWebAuthn()} fallback={<span>✓ 同意</span>}>
+                      <span>🔐 Touch ID / Face ID 确认</span>
+                    </Show>
                   </Show>
                 </button>
               </div>

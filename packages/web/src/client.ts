@@ -16,6 +16,8 @@ interface E2EEnvelope {
   e2e: 1;
   n: string;
   c: string;
+  s: number;
+  ts: number;
 }
 
 function isEnvelope(obj: unknown): obj is E2EEnvelope {
@@ -24,8 +26,52 @@ function isEnvelope(obj: unknown): obj is E2EEnvelope {
     typeof obj === "object" &&
     (obj as { e2e?: unknown }).e2e === 1 &&
     typeof (obj as { n?: unknown }).n === "string" &&
-    typeof (obj as { c?: unknown }).c === "string"
+    typeof (obj as { c?: unknown }).c === "string" &&
+    typeof (obj as { s?: unknown }).s === "number" &&
+    typeof (obj as { ts?: unknown }).ts === "number"
   );
+}
+
+const TIMESTAMP_SKEW_MS = 60_000;
+
+/** Mirror of host/src/e2e.ts ReplayWindow — 64-slot sliding bitmap. */
+class ReplayWindow {
+  private highest = -1;
+  private mask = 0n;
+  private static readonly SIZE = 64;
+
+  check(seq: number): "ok" | "replay" | "too_old" {
+    const s = seq >>> 0;
+    if (this.highest < 0) return "ok";
+    if (s > this.highest) return "ok";
+    const diff = this.highest - s;
+    if (diff >= ReplayWindow.SIZE) return "too_old";
+    const bit = 1n << BigInt(diff);
+    return (this.mask & bit) !== 0n ? "replay" : "ok";
+  }
+
+  apply(seq: number): void {
+    const s = seq >>> 0;
+    if (this.highest < 0) {
+      this.highest = s;
+      this.mask = 1n;
+      return;
+    }
+    if (s > this.highest) {
+      const shift = s - this.highest;
+      if (shift >= ReplayWindow.SIZE) {
+        this.mask = 1n;
+      } else {
+        this.mask = ((this.mask << BigInt(shift)) | 1n) & ((1n << BigInt(ReplayWindow.SIZE)) - 1n);
+      }
+      this.highest = s;
+      return;
+    }
+    const diff = this.highest - s;
+    if (diff < ReplayWindow.SIZE) {
+      this.mask |= 1n << BigInt(diff);
+    }
+  }
 }
 
 /**
@@ -49,6 +95,11 @@ export class RccClient {
    * E2E. Once non-null, every outbound/inbound ws message is secretbox'd. */
   private e2eKey: Uint8Array | null = null;
   private sodiumReady = false;
+  /** Per-connection outbound seq. Reset on every (re)connect. uint32. */
+  private outboundSeq = 0;
+  /** Per-connection inbound replay window. Reset on every (re)connect. Only
+   * consulted when the received frame is an E2E envelope. */
+  private replay = new ReplayWindow();
 
   sessions: SessionMeta[] = [];
   tunnel: TunnelInfo | null = null;
@@ -81,16 +132,19 @@ export class RccClient {
     const nonce = sodium.randombytes_buf(sodium.crypto_secretbox_NONCEBYTES);
     const plain = sodium.from_string(encode(frame));
     const cipher = sodium.crypto_secretbox_easy(plain, nonce, this.e2eKey);
+    this.outboundSeq = (this.outboundSeq + 1) >>> 0;
     const env: E2EEnvelope = {
       e2e: 1,
       n: sodium.to_base64(nonce, sodium.base64_variants.ORIGINAL),
       c: sodium.to_base64(cipher, sodium.base64_variants.ORIGINAL),
+      s: this.outboundSeq,
+      ts: Date.now(),
     };
     return JSON.stringify(env);
   }
 
   /** Attempt to unwrap an incoming ws text into a Frame. Returns null on
-   * decrypt/decode failure (caller drops). */
+   * decrypt/decode failure or replay/skew violation (caller drops + closes). */
   private decodeInbound(text: string): Frame | null {
     let outer: unknown;
     try {
@@ -100,10 +154,20 @@ export class RccClient {
     }
     if (isEnvelope(outer)) {
       if (!this.e2eKey || !this.sodiumReady) return null;
+      if (Math.abs(Date.now() - outer.ts) > TIMESTAMP_SKEW_MS) {
+        console.error("[rcc] e2e timestamp skew, dropping frame");
+        return null;
+      }
+      const check = this.replay.check(outer.s);
+      if (check !== "ok") {
+        console.error(`[rcc] e2e replay check failed: ${check}`);
+        return null;
+      }
       try {
         const nonce = sodium.from_base64(outer.n, sodium.base64_variants.ORIGINAL);
         const cipher = sodium.from_base64(outer.c, sodium.base64_variants.ORIGINAL);
         const plain = sodium.crypto_secretbox_open_easy(cipher, nonce, this.e2eKey);
+        this.replay.apply(outer.s);
         return tryDecode(sodium.to_string(plain));
       } catch {
         return null;
@@ -115,6 +179,11 @@ export class RccClient {
   private connect(): void {
     if (this.closed) return;
     this.setStatus("connecting");
+    // Each ws connection gets its own seq stream + replay window. The host
+    // does the same on its side, so neither peer ever sees a stale seq from
+    // a prior connection.
+    this.outboundSeq = 0;
+    this.replay = new ReplayWindow();
     const url = this.buildUrl();
     try {
       this.ws = new WebSocket(url);
@@ -182,6 +251,14 @@ export class RccClient {
       // on revoke, and we also probe /health for 401 when a normal close hits.
       if (ev.code === 4401) {
         this.setStatus("unauthorized");
+        return;
+      }
+      if (ev.code === 4402) {
+        // Replay/skew failure — host dropped us. Reconnecting will reset the
+        // seq stream on both sides, so transient clock glitches self-heal.
+        console.error("[rcc] e2e replay/skew rejected by host, reconnecting");
+        this.setStatus("closed");
+        this.scheduleReconnect();
         return;
       }
       this.probeAuth().then((needsAuth) => {

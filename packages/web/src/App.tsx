@@ -13,6 +13,7 @@ import { useIsMobile } from "./useIsMobile.ts";
 import { InstallPrompt } from "./InstallPrompt.tsx";
 import { PermissionApproval } from "./PermissionApproval.tsx";
 import { PushPrompt } from "./PushPrompt.tsx";
+import { VersionBadge } from "./VersionBadge.tsx";
 import { clearToken, loadToken } from "./auth.ts";
 
 const FALLBACK_PINNED: readonly CommandSummary[] = [
@@ -38,7 +39,7 @@ export function App() {
   const [modalOpen, setModalOpen] = createSignal(false);
   const [lastMode, setLastMode] = createSignal<PermissionMode>("default");
   const [tunnel, setTunnel] = createSignal<TunnelInfo | null>(null);
-  const [currentDevice, setCurrentDevice] = createSignal<{ id: string; name: string } | null>(null);
+  const [currentDevice, setCurrentDevice] = createSignal<{ id: string; name: string; hasPasskey?: boolean } | null>(null);
   const [devicesOpen, setDevicesOpen] = createSignal(false);
   const [configOpen, setConfigOpen] = createSignal(false);
   const [fileBrowserOpen, setFileBrowserOpen] = createSignal(false);
@@ -207,6 +208,7 @@ export function App() {
           </Show>
           <TunnelBadge info={tunnel()} />
           <PushPrompt client={client} />
+          <VersionBadge client={client} />
           <InstallPrompt />
           <StatusBadge status={status()} />
         </div>
@@ -390,6 +392,11 @@ export function App() {
         open={devicesOpen()}
         client={client}
         onClose={() => setDevicesOpen(false)}
+        currentDevice={currentDevice()}
+        onPasskeyChange={(hasPasskey) => {
+          const d = currentDevice();
+          if (d) setCurrentDevice({ ...d, hasPasskey });
+        }}
       />
       <ConfigView
         open={configOpen()}
@@ -397,7 +404,7 @@ export function App() {
         activeSid={activeSid()}
         onClose={() => setConfigOpen(false)}
       />
-      <PermissionApproval client={client} />
+      <PermissionApproval client={client} device={currentDevice()} />
       <Show when={isMobile() && activeSid()}>
         <MobileKeyBar client={client} sid={activeSid()} pinnedCommands={pinnedCommands} />
       </Show>

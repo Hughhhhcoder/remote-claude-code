@@ -17,6 +17,18 @@ export interface PairedDevice {
    * they continue to work unencrypted until the user re-pairs them.
    */
   sharedKey?: string;
+  /**
+   * WebAuthn passkey registered by the user for this device. Added in M5
+   * batch 6. Token auth remains the primary auth path; passkey is an
+   * orthogonal second-factor for high-risk approvals. `publicKey` is a
+   * base64url-encoded COSE public key; `counter` is the replay guard.
+   */
+  passkey?: {
+    credId: string;
+    publicKey: string;
+    counter: number;
+    registeredAt: number;
+  };
 }
 
 interface TrustStoreFile {
@@ -133,6 +145,33 @@ export class TrustStore {
     if (!d) return false;
     d.name = name;
     await this.save();
+    return true;
+  }
+
+  async addPasskey(
+    deviceId: string,
+    passkey: { credId: string; publicKey: string; counter: number },
+  ): Promise<boolean> {
+    const d = this.data.devices.find((x) => x.id === deviceId);
+    if (!d) return false;
+    d.passkey = { ...passkey, registeredAt: Date.now() };
+    await this.save();
+    return true;
+  }
+
+  async clearPasskey(deviceId: string): Promise<boolean> {
+    const d = this.data.devices.find((x) => x.id === deviceId);
+    if (!d || !d.passkey) return false;
+    delete d.passkey;
+    await this.save();
+    return true;
+  }
+
+  async updatePasskeyCounter(deviceId: string, counter: number): Promise<boolean> {
+    const d = this.data.devices.find((x) => x.id === deviceId);
+    if (!d?.passkey) return false;
+    d.passkey.counter = counter;
+    this.scheduleSave();
     return true;
   }
 

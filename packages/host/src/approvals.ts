@@ -54,6 +54,14 @@ interface Pending {
 
 export type Broadcaster = (frame: Frame) => void;
 
+/**
+ * Signals whether a given in-flight approval is subject to a WebAuthn gate.
+ * Wired from index.ts where we know the current device's passkey status.
+ * Returning true means: `approval.response` must carry a verified WebAuthn
+ * token (assert flow completed) before being honoured.
+ */
+export type GateDecider = (approvalId: string, risk: ApprovalRisk) => boolean;
+
 export class ApprovalWatcher {
   private buffer = "";
   private pending: Pending | null = null;
@@ -63,6 +71,7 @@ export class ApprovalWatcher {
   constructor(
     private readonly session: Session,
     private readonly broadcast: Broadcaster,
+    private readonly onGate?: (approvalId: string, risk: ApprovalRisk) => void,
   ) {}
 
   feed(data: string): void {
@@ -111,6 +120,8 @@ export class ApprovalWatcher {
     const id = randomUUID();
     const timeout = setTimeout(() => this.timeout(id), TIMEOUT_MS);
     this.pending = { id, tool, timeout };
+
+    this.onGate?.(id, risk);
 
     this.broadcast({
       v: 1,

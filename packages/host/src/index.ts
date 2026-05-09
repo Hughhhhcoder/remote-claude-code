@@ -19,7 +19,15 @@ import { loadConfig, resolveTunnelConfig } from "./config.ts";
 import { TrustStore, PairingCodes, type PairedDevice } from "./trust.ts";
 import { handlePairRoute } from "./pair.ts";
 import { handleWhisperRoute } from "./whisper.ts";
-import { loadOrCreateHostKeys, isEnvelope, encryptFrame, decryptEnvelope, ensureSodiumReady } from "./e2e.ts";
+import {
+  loadOrCreateHostKeys,
+  isEnvelope,
+  encryptFrame,
+  decryptEnvelope,
+  ensureSodiumReady,
+  ReplayWindow,
+  timestampWithinSkew,
+} from "./e2e.ts";
 import { listMcp, getMcp, addMcp, removeMcp, setMcpEnabled } from "./mcp.ts";
 import {
   listSkills,
@@ -56,6 +64,9 @@ import { ls as fsLs, read as fsRead, statEntry as fsStat } from "./fs.ts";
 import { ApprovalWatcher } from "./approvals.ts";
 import { PushService, type PushPayload } from "./push.ts";
 import { CrdtRelay, isUpdateTooLarge } from "./crdt.ts";
+import { WebAuthnService, rpIdFromHost, originFromReq } from "./webauthn.ts";
+import { installCrashHandler } from "./crash.ts";
+import { checkForUpdates, versionSummary } from "./version.ts";
 
 interface WsState {
   attached: Set<string>;
@@ -144,6 +155,7 @@ const codes = new PairingCodes();
 const push = await PushService.load();
 await ensureSodiumReady();
 const hostKeys = await loadOrCreateHostKeys();
+const webauthn = new WebAuthnService(trust);
 
 function isLoopback(req: { socket: { remoteAddress?: string | undefined } }): boolean {
   const addr = req.socket.remoteAddress ?? "";
@@ -229,7 +241,21 @@ function broadcastApproval(frame: Frame): void {
 }
 
 function attachApprovalWatcher(session: Session): void {
-  const watcher = new ApprovalWatcher(session, broadcastApproval);
+  const watcher = new ApprovalWatcher(session, broadcastApproval, (id, risk) => {
+    if (risk !== "high") return;
+    // Gate only if at least one currently-connected device has a passkey —
+    // otherwise there's nobody to satisfy the challenge.
+    let gateable = false;
+    for (const client of wss.clients) {
+      if (client.readyState !== WebSocket.OPEN) continue;
+      const d = (client as E2EWebSocket).rccDevice;
+      if (d?.passkey) {
+        gateable = true;
+        break;
+      }
+    }
+    if (gateable) webauthn.requireGate(id);
+  });
   approvalWatchers.set(session.id, watcher);
   const unsub = session.subscribe((chunk) => watcher.feed(chunk.data));
   session.onExit((code) => {
@@ -277,16 +303,26 @@ console.log(
 type E2EWebSocket = WebSocket & {
   rccDevice?: PairedDevice | null;
   rccSharedKey?: string | null;
+  /** Last seq we issued outbound on this connection. Starts at 0; first send
+   * uses 1. uint32, wraps at 2^32 (practically unreachable). */
+  rccOutboundSeq?: number;
+  /** Per-connection replay state for inbound frames. Only populated when the
+   * connection has a shared key (i.e. E2E is active). */
+  rccReplay?: ReplayWindow;
 };
 
 /**
  * Return the serialized ws payload for this client, honouring E2E. Plain
  * JSON for clients without a shared key (loopback / legacy), secretbox
- * envelope `{e2e:1,n,c}` otherwise.
+ * envelope `{e2e:1,n,c,s,ts}` otherwise. Mutates the ws to bump outbound seq.
  */
 function frameForClient(ws: E2EWebSocket, frame: Frame): string {
   const key = ws.rccSharedKey;
-  if (key) return encryptFrame(key, frame);
+  if (key) {
+    const seq = ((ws.rccOutboundSeq ?? 0) + 1) >>> 0;
+    ws.rccOutboundSeq = seq;
+    return encryptFrame(key, frame, seq, Date.now());
+  }
   return encode(frame);
 }
 
@@ -363,6 +399,21 @@ function handle(ws: WebSocket, state: WsState, frame: Frame): void {
       return;
     }
     case "approval.response": {
+      const gate = webauthn.consumeGate(frame.id, frame.webauthnToken);
+      if (!gate.open) {
+        send(ws, {
+          v: 1,
+          t: "error",
+          code: "approval_gate_blocked",
+          message: gate.reason,
+          sid: frame.sid,
+        });
+        // Tell every client this approval is no longer live so UIs reset.
+        broadcastApproval({ v: 1, t: "approval.cleared", id: frame.id, sid: frame.sid });
+        const w = approvalWatchers.get(frame.sid);
+        if (w) w.resolve(frame.id, false);
+        return;
+      }
       const w = approvalWatchers.get(frame.sid);
       if (w) w.resolve(frame.id, frame.approve);
       return;
@@ -1330,6 +1381,113 @@ function broadcastDeviceList(): void {
   }
 }
 
+function readJsonBody<T>(req: import("node:http").IncomingMessage, max = 256 * 1024): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    let size = 0;
+    req.on("data", (c: Buffer) => {
+      size += c.length;
+      if (size > max) {
+        reject(new Error("payload too large"));
+        req.destroy();
+        return;
+      }
+      chunks.push(c);
+    });
+    req.on("end", () => {
+      try {
+        const text = Buffer.concat(chunks).toString("utf8");
+        resolve(text ? (JSON.parse(text) as T) : ({} as T));
+      } catch (err) {
+        reject(err);
+      }
+    });
+    req.on("error", reject);
+  });
+}
+
+async function handleWebAuthnRoute(
+  req: import("node:http").IncomingMessage,
+  res: import("node:http").ServerResponse,
+  deviceId: string,
+  rpId: string,
+  origin: string,
+): Promise<void> {
+  const url = req.url ?? "";
+  const writeJson = (code: number, body: unknown) => {
+    res.writeHead(code, { "content-type": "application/json", "cache-control": "no-store" });
+    res.end(JSON.stringify(body));
+  };
+  if (url === "/webauthn/register/begin") {
+    const body = await readJsonBody<{ deviceId?: string }>(req);
+    const targetId = body.deviceId ?? deviceId;
+    if (targetId !== deviceId) {
+      writeJson(403, { error: "cannot register passkey for another device" });
+      return;
+    }
+    const options = await webauthn.beginRegistration(targetId, rpId, "RCC");
+    writeJson(200, options);
+    return;
+  }
+  if (url === "/webauthn/register/complete") {
+    const body = await readJsonBody<{ deviceId?: string; response?: unknown }>(req);
+    const targetId = body.deviceId ?? deviceId;
+    if (targetId !== deviceId || !body.response) {
+      writeJson(400, { error: "invalid body" });
+      return;
+    }
+    const result = await webauthn.completeRegistration(
+      targetId,
+      body.response as Parameters<typeof webauthn.completeRegistration>[1],
+      rpId,
+      origin,
+    );
+    await trust.addPasskey(targetId, result);
+    broadcastDeviceList();
+    writeJson(200, { ok: true });
+    return;
+  }
+  if (url === "/webauthn/assert/begin") {
+    const body = await readJsonBody<{ deviceId?: string; approvalId?: string }>(req);
+    const targetId = body.deviceId ?? deviceId;
+    if (targetId !== deviceId || !body.approvalId) {
+      writeJson(400, { error: "invalid body" });
+      return;
+    }
+    const options = await webauthn.beginAssertion(targetId, body.approvalId, rpId);
+    writeJson(200, options);
+    return;
+  }
+  if (url === "/webauthn/assert/complete") {
+    const body = await readJsonBody<{
+      deviceId?: string;
+      approvalId?: string;
+      response?: unknown;
+    }>(req);
+    const targetId = body.deviceId ?? deviceId;
+    if (targetId !== deviceId || !body.approvalId || !body.response) {
+      writeJson(400, { error: "invalid body" });
+      return;
+    }
+    const ok = await webauthn.completeAssertion(
+      targetId,
+      body.approvalId,
+      body.response as Parameters<typeof webauthn.completeAssertion>[2],
+      rpId,
+      origin,
+    );
+    writeJson(ok ? 200 : 401, { ok, webauthnToken: ok ? body.approvalId : null });
+    return;
+  }
+  if (url === "/webauthn/clear") {
+    await trust.clearPasskey(deviceId);
+    broadcastDeviceList();
+    writeJson(200, { ok: true });
+    return;
+  }
+  writeJson(404, { error: "unknown webauthn route" });
+}
+
 const httpServer = createServer(async (req, res) => {
   if (req.url === "/health") {
     res.writeHead(200, { "content-type": "application/json" });
@@ -1359,6 +1517,60 @@ const httpServer = createServer(async (req, res) => {
       },
     })
   ) {
+    return;
+  }
+
+  // Version & update-check. Authenticated so a public tunnel doesn't expose
+  // internal version info to unpaired callers.
+  if (req.url === "/version" && req.method === "GET") {
+    const auth = authenticate(req);
+    if (!auth.ok) {
+      res.writeHead(401, { "content-type": "application/json", "x-rcc-auth-reason": auth.reason });
+      res.end(JSON.stringify({ error: auth.reason }));
+      return;
+    }
+    const summary = await versionSummary();
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify(summary));
+    return;
+  }
+  if (req.url?.startsWith("/version/check") && req.method === "GET") {
+    const auth = authenticate(req);
+    if (!auth.ok) {
+      res.writeHead(401, { "content-type": "application/json", "x-rcc-auth-reason": auth.reason });
+      res.end(JSON.stringify({ error: auth.reason }));
+      return;
+    }
+    const force = req.url.includes("force=1");
+    const result = await checkForUpdates(force);
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify(result));
+    return;
+  }
+
+  // WebAuthn: passkey registration + high-risk approval assertion. Both
+  // require a valid device token; the RP ID is derived from the Host header
+  // so the host works on both `localhost` and a cloudflared hostname.
+  if (req.url?.startsWith("/webauthn/") && req.method === "POST") {
+    const auth = authenticate(req);
+    if (!auth.ok || !auth.device) {
+      res.writeHead(401, {
+        "content-type": "application/json",
+        "x-rcc-auth-reason": auth.ok ? "device_required" : auth.reason,
+      });
+      res.end(JSON.stringify({ error: auth.ok ? "device_required" : auth.reason }));
+      return;
+    }
+    const rpId = rpIdFromHost(req.headers["host"] as string | undefined);
+    const origin = originFromReq(req);
+    try {
+      await handleWebAuthnRoute(req, res, auth.device.id, rpId, origin);
+    } catch (err: any) {
+      if (!res.headersSent) {
+        res.writeHead(400, { "content-type": "application/json" });
+        res.end(JSON.stringify({ error: err?.message ?? "webauthn failed" }));
+      }
+    }
     return;
   }
 
@@ -1440,6 +1652,8 @@ httpServer.on("upgrade", (req, socket, head) => {
     const eWs = ws as E2EWebSocket;
     eWs.rccDevice = auth.device;
     eWs.rccSharedKey = auth.device?.sharedKey ?? null;
+    eWs.rccOutboundSeq = 0;
+    if (eWs.rccSharedKey) eWs.rccReplay = new ReplayWindow();
     wss.emit("connection", ws, req);
   });
 });
@@ -1462,6 +1676,8 @@ function broadcast(frame: Frame): void {
     }
   }
 }
+
+installCrashHandler((frame) => broadcast(frame));
 
 if (tunnel) {
   tunnel.on("status", (s) => {
@@ -1501,7 +1717,7 @@ wss.on("connection", (ws) => {
     protocol: PROTOCOL_VERSION,
     sessions: registry.list().map((s) => s.meta()),
     tunnel: currentTunnelInfo(),
-    device: device ? { id: device.id, name: device.name } : null,
+    device: device ? { id: device.id, name: device.name, hasPasskey: !!device.passkey } : null,
     pinnedCommands: pinnedCommandsCache,
   });
 
@@ -1527,8 +1743,28 @@ wss.on("connection", (ws) => {
         send(ws, { v: 1, t: "error", code: "e2e_no_key", message: "e2e envelope received but no shared key" });
         return;
       }
-      const inner = decryptEnvelope(eWs.rccSharedKey, outer);
-      if (!inner) {
+      if (!timestampWithinSkew(outer.ts)) {
+        try {
+          ws.close(4402, "timestamp_skew");
+        } catch {
+          // ignore
+        }
+        return;
+      }
+      const replay = eWs.rccReplay;
+      if (replay) {
+        const check = replay.check(outer.s);
+        if (check !== "ok") {
+          try {
+            ws.close(4402, check === "replay" ? "replay" : "too_old");
+          } catch {
+            // ignore
+          }
+          return;
+        }
+      }
+      const decrypted = decryptEnvelope(eWs.rccSharedKey, outer);
+      if (!decrypted) {
         // Auth failure on the E2E envelope — either key rotated or tampering.
         // Close with the unauthorized code so the client drops its token and
         // re-pairs.
@@ -1539,7 +1775,8 @@ wss.on("connection", (ws) => {
         }
         return;
       }
-      const frame = tryDecode(JSON.stringify(inner));
+      if (replay) replay.apply(outer.s);
+      const frame = tryDecode(JSON.stringify(decrypted.obj));
       if (!frame) {
         send(ws, { v: 1, t: "error", code: "decode", message: "invalid frame" });
         return;

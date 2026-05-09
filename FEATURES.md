@@ -37,7 +37,7 @@
 | 配对 UI | 🟢 | 2026-05-09 | 客户端 status 变 `unauthorized` 时自动显示配对页；输入码 + 设备名 → token 存 localStorage → 自动重连 |
 | 设备管理 UI + CLI | 🟢 | 2026-05-09 | Web 端 `已配对设备` 弹窗（重命名 / 吊销 / 当前设备标记）；`pnpm -F @rcc/host admin devices|revoke|rename` CLI；吊销即时断开活跃连接（close code 4401） |
 | 固定子域（命名隧道） | 🟢 | 2026-05-09 | `~/.rcc/config.json` 读 `tunnel.{mode,name,hostname,credentialsFile}`；`RCC_TUNNEL=named` 启用；复用 `cloudflared tunnel run`；UI TunnelBadge 区分 try/named（🔒 前缀 + tooltip） |
-| Passkey (WebAuthn) | 🔴 | — | 目前用 32 字节随机 token，足以 M2；WebAuthn 延到 M5 |
+| Passkey (WebAuthn) | 🟢 | 2026-05-09 | @simplewebauthn 服务端+浏览器端;per-device passkey 注册(DevicesModal 升级按钮)存 trust.json;高风险审批走 WebAuthn assertion(Touch ID/Face ID),assert 验证后 server gate 开放 approval.response;token 认证仍是主通路,passkey 是叠加的二次确认 |
 
 ## M3 · Mobile polish  🔴 planned
 
@@ -68,9 +68,9 @@
 | Feature | Status | Since | Notes |
 |---|---|---|---|
 | 应用层 E2E 加密 (libsodium) | 🟢 | 2026-05-09 | libsodium-wrappers X25519 ECDH(配对时协商,host 长期 keypair 在 ~/.rcc/keys.json)+ per-device sharedKey 存 trust.json;所有 ws 帧 secretbox_easy 加密(nonce 24B 随机)外包 {e2e:1,n,c};loopback 兼容明文;已配对未升级 key 的老设备走旧明文通路 |
-| 重放防护（nonce + window） | 🔴 | — | |
+| 重放防护（nonce + window） | 🟢 | 2026-05-09 | envelope 加 seq+ts;host/client 各自 64-bit sliding window 拒重放;±60s 时间戳倾斜保护;decrypt 失败或 replay 检测到关闭 code 4402;仅加密连接启用 |
 | 设备吊销 | 🔴 | — | CLI 命令 + Web 管理界面 |
-| 崩溃上报 + 自升级 | 🔴 | — | |
+| 崩溃上报 + 自升级 | 🟢 | 2026-05-09 | host 捕获 uncaughtException/unhandledRejection 写 ~/.rcc/crashes.log JSONL(1MB rotate)+ 广播 health.crash;GET /version + /version/check 通过用户配的 manifestUrl 查 GitHub releases(10 分钟缓存);Web 顶栏 VersionBadge 有更新时橙点 + popover 显示 release notes + 复制 git pull 命令 |
 
 ---
 
@@ -113,3 +113,6 @@
 - 2026-05-09  M4 batch 3 · CRDT: Yjs Y.Text 同步 input draft 跨设备;新增 `[crdt]` 三帧 (crdt.update / crdt.sync / crdt.sync.request);host 不装 yjs,仅做 sid-scoped byte relay + 每 doc 200 条 update 环形 buffer 供新连接回放;单 update 硬上限 64KB;ChatView textarea 绑 Y.Text,发送后 setValue("") 双端同步清空。
 - 2026-05-09  M3 batch 3 · 语音输入: Web Speech API 优先(实时 partial 填入 textarea),不支持/出错回退 MediaRecorder 录 webm/opus → host `POST /whisper` 多部件代理到 OpenAI Whisper(读 ~/.rcc/config.json whisper.{apiKey,model,endpoint},未配置返 501,>10MB 返 413);ChatView 🎙 按钮录音中红色脉冲,权限/配置错误下方短提示;host /whisper 复用 authenticate 拦截非 loopback 必须带 token,不新增 protocol 帧。
 - 2026-05-09  M5 batch 1 · E2E 加密: libsodium-wrappers X25519 ECDH 配对协商 per-device sharedKey,host 长期 keypair 在 `~/.rcc/keys.json` (0600),ws 帧 secretbox_easy 加密后外包 `{e2e:1,n,c}` JSON,loopback/未升级设备仍走明文并打 warning。
+- 2026-05-09  M5 batch 2 · 重放防护: E2E envelope 扩 `s`(uint32 seq)+`ts`(Date.now ms),host 和 web 各自维护 per-connection 64-slot 滑动窗 + 单调 outbound 计数器,±60s 时间戳倾斜保护,host 拒绝时 close(4402),web 相应重连重置双端序号流。
+- 2026-05-09  M5 batch 2 · 崩溃+自升级: host 安装 uncaughtException/unhandledRejection 钩子写 ~/.rcc/crashes.log JSONL(1MB 自动 rotate 到 .1)+ 广播 health.crash 帧;新增 GET /version 和 GET /version/check(读 ~/.rcc/config.json update.manifestUrl,fetch GitHub releases JSON,semver 比对,10 分钟缓存);Web 顶栏 VersionBadge 显示 v<ver>,有更新变橙 + 圆点 + popover 内 release notes 和复制 git pull 命令,health.crash 帧触发右下 toast。
+- 2026-05-09  M5 batch 2 · Passkey: @simplewebauthn 服务端+浏览器端落地;trust.json PairedDevice 加可选 `passkey{credId,publicKey,counter,registeredAt}`;`POST /webauthn/{register,assert}/{begin,complete}` 四端点(Host 头派生 rpId,localhost 友好,挑战 5 分钟 TTL 内存 Map);高风险审批触发时 ApprovalWatcher 回调 gate,仅当至少一个连接设备有 passkey 才 require,`approval.response` 携 webauthnToken 被 server-side gate 校验通过才写 y\r 到 pty;DevicesModal 顶部横幅升级/移除按钮,PermissionApproval 高风险+passkey 时按钮改为 🔐 Touch ID/Face ID 确认(调 navigator.credentials.get);hello.device 加 hasPasskey 供前端分支。

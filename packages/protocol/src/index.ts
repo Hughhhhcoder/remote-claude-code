@@ -94,6 +94,12 @@ export const Hello = z.object({
     .object({
       id: z.string(),
       name: z.string(),
+      /**
+       * Added in M5 batch 6: whether this device has a passkey registered. The
+       * client uses this to decide whether high-risk approvals should take the
+       * WebAuthn path.
+       */
+      hasPasskey: z.boolean().optional(),
     })
     .nullable()
     .optional(),
@@ -787,6 +793,14 @@ export const ApprovalResponse = z.object({
   id: z.string(),
   sid: z.string(),
   approve: z.boolean(),
+  /**
+   * When the approval is gated on WebAuthn (high-risk + device has a passkey),
+   * the client runs the WebAuthn assertion flow first and only sends this
+   * response once the host has marked the gate open. `webauthnToken` echoes
+   * the approval id as confirmation that assertion succeeded; the server-side
+   * gate is keyed by approvalId.
+   */
+  webauthnToken: z.string().optional(),
 });
 
 export const ApprovalCleared = z.object({
@@ -1017,6 +1031,21 @@ export const CrdtSyncRequest = z.object({
   docId: z.string(),
 });
 
+// [health] — filled by M5 batch 6
+//
+// Host captures uncaughtException / unhandledRejection, writes JSONL to
+// ~/.rcc/crashes.log, and broadcasts a one-shot `health.crash` frame so
+// connected clients can toast the event. The host does NOT exit — this is
+// purely a notification channel; users recover by restarting.
+
+export const HealthCrash = z.object({
+  ...base,
+  t: z.literal("health.crash"),
+  at: z.number(),
+  message: z.string(),
+  type: z.string().optional(),
+});
+
 // ──────────────────────────────────────────────────────────────────────────
 
 export const Frame = z.discriminatedUnion("t", [
@@ -1118,6 +1147,7 @@ export const Frame = z.discriminatedUnion("t", [
   CrdtUpdate,
   CrdtSync,
   CrdtSyncRequest,
+  HealthCrash,
 ]);
 export type Frame = z.infer<typeof Frame>;
 

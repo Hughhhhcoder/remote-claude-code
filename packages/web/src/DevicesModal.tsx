@@ -1,11 +1,14 @@
 import { createSignal, createEffect, For, Show, onCleanup } from "solid-js";
 import type { DeviceSummary } from "@rcc/protocol";
 import type { RccClient } from "./client.ts";
+import { registerPasskey, clearPasskey, isWebAuthnAvailable } from "./webauthn.ts";
 
 interface Props {
   open: boolean;
   client: RccClient;
   onClose: () => void;
+  currentDevice: { id: string; name: string; hasPasskey?: boolean } | null;
+  onPasskeyChange?: (hasPasskey: boolean) => void;
 }
 
 function formatAge(ts: number): string {
@@ -20,6 +23,8 @@ export function DevicesModal(props: Props) {
   const [devices, setDevices] = createSignal<DeviceSummary[]>([]);
   const [renamingId, setRenamingId] = createSignal<string | null>(null);
   const [renameValue, setRenameValue] = createSignal("");
+  const [passkeyBusy, setPasskeyBusy] = createSignal(false);
+  const [passkeyError, setPasskeyError] = createSignal<string | null>(null);
 
   const unsub = props.client.on((frame) => {
     if (frame.t === "device.list") setDevices(frame.devices);
@@ -55,6 +60,37 @@ export function DevicesModal(props: Props) {
     setRenamingId(null);
   }
 
+  async function upgradePasskey() {
+    if (!props.currentDevice) return;
+    setPasskeyBusy(true);
+    setPasskeyError(null);
+    try {
+      await registerPasskey(props.currentDevice.id);
+      props.onPasskeyChange?.(true);
+      props.client.send({ v: 1, t: "device.list.request" });
+    } catch (err) {
+      setPasskeyError((err as Error).message || "passkey 注册失败");
+    } finally {
+      setPasskeyBusy(false);
+    }
+  }
+
+  async function removePasskey() {
+    if (!props.currentDevice) return;
+    if (!confirm("移除此设备的 Passkey？高风险审批将退回到单次点击确认。")) return;
+    setPasskeyBusy(true);
+    setPasskeyError(null);
+    try {
+      await clearPasskey(props.currentDevice.id);
+      props.onPasskeyChange?.(false);
+      props.client.send({ v: 1, t: "device.list.request" });
+    } catch (err) {
+      setPasskeyError((err as Error).message || "passkey 移除失败");
+    } finally {
+      setPasskeyBusy(false);
+    }
+  }
+
   return (
     <Show when={props.open}>
       <div
@@ -78,6 +114,55 @@ export function DevicesModal(props: Props) {
           </div>
 
           <div class="max-h-[480px] overflow-y-auto">
+            <Show when={props.currentDevice && isWebAuthnAvailable()}>
+              <div class="px-5 py-3 border-b border-zinc-900 bg-zinc-900/30">
+                <div class="flex items-center gap-3">
+                  <div class="w-8 h-8 rounded-lg bg-violet-500/15 border border-violet-500/30 grid place-items-center text-sm shrink-0">
+                    🔐
+                  </div>
+                  <div class="flex-1 min-w-0">
+                    <div class="text-xs font-medium text-zinc-200">
+                      Passkey（本设备）
+                    </div>
+                    <div class="text-[11px] text-zinc-500 mt-0.5">
+                      <Show
+                        when={props.currentDevice?.hasPasskey}
+                        fallback={
+                          <span>升级后高风险审批需要 Touch ID / Face ID 二次确认</span>
+                        }
+                      >
+                        <span class="text-violet-300">已启用 · 高风险审批走生物识别</span>
+                      </Show>
+                    </div>
+                  </div>
+                  <Show
+                    when={props.currentDevice?.hasPasskey}
+                    fallback={
+                      <button
+                        onClick={upgradePasskey}
+                        disabled={passkeyBusy()}
+                        class="text-[11px] px-3 py-1.5 rounded-lg bg-violet-500 hover:bg-violet-400 text-white font-medium disabled:opacity-60 disabled:cursor-not-allowed"
+                      >
+                        {passkeyBusy() ? "注册中…" : "升级 Passkey"}
+                      </button>
+                    }
+                  >
+                    <button
+                      onClick={removePasskey}
+                      disabled={passkeyBusy()}
+                      class="text-[11px] px-3 py-1.5 rounded-lg border border-zinc-800 text-zinc-400 hover:text-rose-400 hover:border-rose-500/40 disabled:opacity-60"
+                    >
+                      {passkeyBusy() ? "…" : "移除"}
+                    </button>
+                  </Show>
+                </div>
+                <Show when={passkeyError()}>
+                  <div class="mt-2 text-[11px] text-rose-400 break-words">
+                    {passkeyError()}
+                  </div>
+                </Show>
+              </div>
+            </Show>
             <Show
               when={devices().length > 0}
               fallback={
