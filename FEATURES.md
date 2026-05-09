@@ -1,5 +1,7 @@
 # RCC — Features Tracker
 
+**🏁 v0.1.0 候选(Batch 19 收尾完成 · 2026-05-09)**  —  19 批次 · 57 个并行 agent · M1→M10 全绿。详见 `CHANGELOG.md` 和 `docs/`。
+
 **规则：每次修改代码必须同步更新这个文档。**
 - 新增功能 → 加一行，状态填 🟢 done / 🟡 wip / 🔴 planned / ⚪ deferred
 - 修改现有功能 → 更新对应行的状态和 Notes
