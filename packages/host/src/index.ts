@@ -300,6 +300,9 @@ function handle(ws: WebSocket, state: WsState, frame: Frame): void {
       });
       return;
     }
+    // [config-handlers] — each config agent adds its case blocks below.
+    // Keep handlers self-contained; if they need background state they
+    // register it at module level (see SessionRegistry for the pattern).
     default:
       return;
   }

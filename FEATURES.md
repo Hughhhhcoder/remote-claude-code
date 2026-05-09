@@ -50,17 +50,17 @@
 | 虚拟键盘快捷键条（移动优化版） | 🔴 | — | 贴键盘上方 |
 | 语音输入 | 🔴 | — | Web Speech API 优先，失败回退 Whisper API |
 
-## M4 · Multi-device + Config UI  🔴 planned
+## M4 · Multi-device + Config UI  🟡 wip
 
 | Feature | Status | Since | Notes |
 |---|---|---|---|
+| ConfigView 骨架 (5 tabs) | 🟢 | 2026-05-09 | 侧栏 `⚙ Claude Code 配置` 打开；5 个 tab 占位，各 agent 填充；protocol 和 host switch 已预留 `[config-frames]` / `[config-handlers]` 插入点 |
+| Skills 管理 (user + project) | 🟡 | 2026-05-09 | M4A in-flight |
+| MCP Servers 管理 | 🟡 | 2026-05-09 | M4B in-flight |
+| Slash Commands + Subagents 管理 | 🟡 | 2026-05-09 | M4C in-flight |
 | CRDT 多端输入同步 (Yjs) | 🔴 | — | 两端同时输入不冲突 |
 | 文件树 + Monaco 预览 | 🔴 | — | 右栏，按 mockup/desktop.html |
-| Skills 管理 UI | 🔴 | — | 读写 ~/.claude/skills 和 .claude/skills |
-| MCP Servers 管理 UI | 🔴 | — | `claude mcp add/list/remove` 封装 |
-| Slash Commands 管理 UI | 🔴 | — | 钉到聊天按钮条 |
-| Subagents 管理 UI | 🔴 | — | 读写 .claude/agents |
-| Hooks 管理 UI | 🔴 | — | 读写 ~/.claude/settings.json hooks 段 |
+| Hooks 管理 UI | 🔴 | — | M4 batch 2 |
 | 权限策略 UI | 🔴 | — | allow/deny 规则 |
 
 ## M5 · Hardening  🔴 planned
@@ -99,3 +99,4 @@
 - 2026-05-09  权限模式选择：新建会话弹窗选 mode，host 自动拼 `claude --permission-mode <m>`；列表 + header 显示彩色 chip。新增 `RCC_PERMISSION_MODE` 环境变量作为全局默认。
 - 2026-05-09  M2 启动：cloudflared 集成（`RCC_TUNNEL=1`），host 静态托管 web 构建产物（单一公网 URL），UI 顶栏 tunnel 状态 + 点击复制 URL。
 - 2026-05-09  M2 认证：token 信任存储（`~/.rcc/trust.json`）、`POST /pair/new`+`/pair/claim` 配对、ws/HTTP 全路径认证（loopback 默认放行）、Web 端配对页 + 设备管理弹窗、`rcc-admin` CLI（list/revoke/rename）、`fs.watchFile` 监控外部改动自动重载。
+- 2026-05-09  M4 骨架：ConfigView 5-tab 壳 + `[config-frames]` / `[config-handlers]` 插入点，3 个并行 agent 分别填充。

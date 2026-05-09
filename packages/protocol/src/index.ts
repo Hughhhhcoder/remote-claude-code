@@ -211,6 +211,23 @@ export const DeviceRename = z.object({
   name: z.string().min(1).max(64),
 });
 
+// ─── config feature frames ────────────────────────────────────────────────
+// Each config agent (Skills / MCP / Slash / Subagents / Hooks) appends its
+// frames below as a self-contained block. Keep within-block additions
+// alphabetical so merges are predictable.
+
+// [skills] — filled by M4A
+
+// [mcp] — filled by M4B
+
+// [commands] — filled by M4C
+
+// [subagents] — filled by M4C
+
+// [hooks] — filled by M4 batch 2
+
+// ──────────────────────────────────────────────────────────────────────────
+
 export const Frame = z.discriminatedUnion("t", [
   Hello,
   SessionNew,
@@ -230,6 +247,7 @@ export const Frame = z.discriminatedUnion("t", [
   DeviceListRequest,
   DeviceRevoke,
   DeviceRename,
+  // [config-frames] — each config agent adds its frames after this marker
 ]);
 export type Frame = z.infer<typeof Frame>;
 

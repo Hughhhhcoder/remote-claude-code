@@ -5,6 +5,7 @@ import { TerminalView } from "./TerminalView.tsx";
 import { NewSessionModal, permissionChip } from "./NewSessionModal.tsx";
 import { PairingView } from "./PairingView.tsx";
 import { DevicesModal } from "./DevicesModal.tsx";
+import { ConfigView } from "./ConfigView.tsx";
 import { clearToken, loadToken } from "./auth.ts";
 
 const PINNED_COMMANDS = [
@@ -25,6 +26,7 @@ export function App() {
   const [tunnel, setTunnel] = createSignal<TunnelInfo | null>(null);
   const [currentDevice, setCurrentDevice] = createSignal<{ id: string; name: string } | null>(null);
   const [devicesOpen, setDevicesOpen] = createSignal(false);
+  const [configOpen, setConfigOpen] = createSignal(false);
 
   const unsubStatus = client.onStatus(setStatus);
   const unsubFrame = client.on((frame) => {
@@ -178,9 +180,17 @@ export function App() {
             </Show>
           </div>
 
-          <div class="p-3 border-t border-zinc-900">
+          <div class="p-3 border-t border-zinc-900 space-y-1">
             <button
-              class="w-full text-xs text-zinc-500 hover:text-zinc-200 flex items-center justify-center gap-1.5 py-1.5 rounded hover:bg-zinc-900"
+              class="w-full text-xs text-zinc-500 hover:text-zinc-200 flex items-center gap-1.5 py-1.5 px-2 rounded hover:bg-zinc-900"
+              onClick={() => setConfigOpen(true)}
+              title="管理 Skills / MCP / Slash Commands / Subagents / Hooks"
+            >
+              <span>⚙</span>
+              <span>Claude Code 配置</span>
+            </button>
+            <button
+              class="w-full text-xs text-zinc-500 hover:text-zinc-200 flex items-center gap-1.5 py-1.5 px-2 rounded hover:bg-zinc-900"
               onClick={() => setDevicesOpen(true)}
               title="管理已配对设备"
             >
@@ -271,6 +281,11 @@ export function App() {
         open={devicesOpen()}
         client={client}
         onClose={() => setDevicesOpen(false)}
+      />
+      <ConfigView
+        open={configOpen()}
+        client={client}
+        onClose={() => setConfigOpen(false)}
       />
     </div>
     </Show>
