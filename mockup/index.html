@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>RCC — Mockup Index</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: ui-sans-serif, -apple-system, "SF Pro", "PingFang SC", system-ui; }
+  .grid-bg { background-image: radial-gradient(circle at 1px 1px, rgba(255,255,255,0.06) 1px, transparent 0); background-size: 24px 24px; }
+</style>
+</head>
+<body class="bg-zinc-950 text-zinc-100 min-h-screen grid-bg">
+  <div class="max-w-6xl mx-auto px-6 py-16">
+
+    <div class="flex items-center gap-3 mb-10">
+      <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-orange-500 to-rose-600 grid place-items-center font-bold text-lg">R</div>
+      <div>
+        <div class="text-2xl font-semibold tracking-tight">RCC Design Mockup</div>
+        <div class="text-sm text-zinc-400">Remote Claude Code · 高保真视觉原型</div>
+      </div>
+    </div>
+
+    <p class="text-zinc-400 max-w-2xl mb-14 leading-relaxed">
+      下面是 RCC 的全部视觉原型页。点击打开任意一个查看完整设计。所有页面都是真实可交互的 HTML，
+      可以在浏览器里看到最终产品的样子。
+    </p>
+
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
+
+      <a href="landing.html" class="group block p-6 rounded-2xl bg-zinc-900/60 border border-zinc-800 hover:border-orange-500/60 hover:bg-zinc-900 transition">
+        <div class="flex items-start justify-between mb-4">
+          <div class="text-xs uppercase tracking-widest text-orange-400 font-medium">01 · Landing</div>
+          <div class="text-zinc-500 group-hover:text-orange-400 transition">→</div>
+        </div>
+        <div class="text-xl font-semibold mb-2">产品介绍页</div>
+        <div class="text-sm text-zinc-400 leading-relaxed">Hero、卖点、架构图、设备预览、使用场景、定价 — 给别人看 RCC 是什么的完整官网。</div>
+        <div class="mt-5 flex gap-2 flex-wrap">
+          <span class="text-xs px-2 py-1 rounded bg-zinc-800 text-zinc-300">Hero</span>
+          <span class="text-xs px-2 py-1 rounded bg-zinc-800 text-zinc-300">架构图</span>
+          <span class="text-xs px-2 py-1 rounded bg-zinc-800 text-zinc-300">设备 mockup</span>
+          <span class="text-xs px-2 py-1 rounded bg-zinc-800 text-zinc-300">定价</span>
+        </div>
+      </a>
+
+      <a href="desktop.html" class="group block p-6 rounded-2xl bg-zinc-900/60 border border-zinc-800 hover:border-orange-500/60 hover:bg-zinc-900 transition">
+        <div class="flex items-start justify-between mb-4">
+          <div class="text-xs uppercase tracking-widest text-sky-400 font-medium">02 · Desktop App</div>
+          <div class="text-zinc-500 group-hover:text-sky-400 transition">→</div>
+        </div>
+        <div class="text-xl font-semibold mb-2">桌面 Web 应用</div>
+        <div class="text-sm text-zinc-400 leading-relaxed">从任何电脑浏览器打开的工作台。会话列表 + 对话/终端视图 + 文件树 + 多 session 并行。</div>
+        <div class="mt-5 flex gap-2 flex-wrap">
+          <span class="text-xs px-2 py-1 rounded bg-zinc-800 text-zinc-300">三栏布局</span>
+          <span class="text-xs px-2 py-1 rounded bg-zinc-800 text-zinc-300">对话 + 终端</span>
+          <span class="text-xs px-2 py-1 rounded bg-zinc-800 text-zinc-300">Diff 预览</span>
+        </div>
+      </a>
+
+      <a href="mobile.html" class="group block p-6 rounded-2xl bg-zinc-900/60 border border-zinc-800 hover:border-orange-500/60 hover:bg-zinc-900 transition">
+        <div class="flex items-start justify-between mb-4">
+          <div class="text-xs uppercase tracking-widest text-emerald-400 font-medium">03 · Mobile App</div>
+          <div class="text-zinc-500 group-hover:text-emerald-400 transition">→</div>
+        </div>
+        <div class="text-xl font-semibold mb-2">手机 PWA 应用</div>
+        <div class="text-sm text-zinc-400 leading-relaxed">iPhone 外观展示 4 个核心 Tab：对话、文件、审批、设置。权限推送、语音输入、快捷键条。</div>
+        <div class="mt-5 flex gap-2 flex-wrap">
+          <span class="text-xs px-2 py-1 rounded bg-zinc-800 text-zinc-300">4 个 Tab</span>
+          <span class="text-xs px-2 py-1 rounded bg-zinc-800 text-zinc-300">权限审批</span>
+          <span class="text-xs px-2 py-1 rounded bg-zinc-800 text-zinc-300">语音输入</span>
+          <span class="text-xs px-2 py-1 rounded bg-zinc-800 text-zinc-300">推送通知</span>
+        </div>
+      </a>
+
+      <a href="pairing.html" class="group block p-6 rounded-2xl bg-zinc-900/60 border border-zinc-800 hover:border-orange-500/60 hover:bg-zinc-900 transition">
+        <div class="flex items-start justify-between mb-4">
+          <div class="text-xs uppercase tracking-widest text-violet-400 font-medium">04 · Pairing Flow</div>
+          <div class="text-zinc-500 group-hover:text-violet-400 transition">→</div>
+        </div>
+        <div class="text-xl font-semibold mb-2">首次配对流程</div>
+        <div class="text-sm text-zinc-400 leading-relaxed">电脑端生成 QR 码 + 6 位数字，手机扫码 → Face ID 确认 → 完成配对。全流程 3 步。</div>
+        <div class="mt-5 flex gap-2 flex-wrap">
+          <span class="text-xs px-2 py-1 rounded bg-zinc-800 text-zinc-300">QR 扫码</span>
+          <span class="text-xs px-2 py-1 rounded bg-zinc-800 text-zinc-300">Face ID</span>
+          <span class="text-xs px-2 py-1 rounded bg-zinc-800 text-zinc-300">WebAuthn</span>
+        </div>
+      </a>
+
+      <a href="config.html" class="group block p-6 rounded-2xl bg-zinc-900/60 border border-zinc-800 hover:border-orange-500/60 hover:bg-zinc-900 transition md:col-span-2">
+        <div class="flex items-start justify-between mb-4">
+          <div class="text-xs uppercase tracking-widest text-amber-400 font-medium">05 · Configuration · NEW</div>
+          <div class="text-zinc-500 group-hover:text-amber-400 transition">→</div>
+        </div>
+        <div class="text-xl font-semibold mb-2">配置管理 — Skills / MCP / Hooks / 权限</div>
+        <div class="text-sm text-zinc-400 leading-relaxed">
+          Claude Code 的所有能力在 RCC 里统一管理：启用/禁用 Skills、配置 MCP Server 及其工具、
+          编辑 Slash Commands 并把常用命令"钉"到聊天按钮条、管理 Subagents、编写 Hooks、设置远程权限策略。
+          所有更改自动同步到所有配对设备。
+        </div>
+        <div class="mt-5 flex gap-2 flex-wrap">
+          <span class="text-xs px-2 py-1 rounded bg-zinc-800 text-zinc-300">✨ Skills</span>
+          <span class="text-xs px-2 py-1 rounded bg-zinc-800 text-zinc-300">🔌 MCP Servers</span>
+          <span class="text-xs px-2 py-1 rounded bg-zinc-800 text-zinc-300">/ Slash Commands</span>
+          <span class="text-xs px-2 py-1 rounded bg-zinc-800 text-zinc-300">🤖 Subagents</span>
+          <span class="text-xs px-2 py-1 rounded bg-zinc-800 text-zinc-300">⚡ Hooks</span>
+          <span class="text-xs px-2 py-1 rounded bg-zinc-800 text-zinc-300">🛡 权限</span>
+        </div>
+      </a>
+
+    </div>
+
+    <div class="mt-16 p-6 rounded-2xl bg-gradient-to-br from-zinc-900 to-zinc-900/40 border border-zinc-800">
+      <div class="text-sm text-zinc-400 mb-2">怎么看</div>
+      <div class="text-zinc-200 leading-relaxed">
+        这些页面是<span class="text-orange-400 font-medium">视觉/交互原型</span>，只是 HTML + CSS，没有真的连后端。
+        看完告诉我哪里要改颜色、布局、信息层级、字号、密度…… 都可以直接改。
+        确认后我再写 <code class="bg-zinc-800 px-1.5 py-0.5 rounded text-xs">MOCKUP.md</code> 里定义的真实代码。
+      </div>
+    </div>
+
+  </div>
+</body>
+</html>

@@ -1,0 +1,715 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>rcc · Mobile</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: ui-sans-serif, -apple-system, "SF Pro", "PingFang SC", system-ui; -webkit-font-smoothing: antialiased; }
+  .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+  .grid-bg { background-image: radial-gradient(circle at 1px 1px, rgba(255,255,255,0.04) 1px, transparent 0); background-size: 28px 28px; }
+  .scrollbar::-webkit-scrollbar { width: 4px; }
+  .scrollbar::-webkit-scrollbar-thumb { background: #27272a; border-radius: 4px; }
+  @keyframes pulseSoft { 0%,100%{opacity:1} 50%{opacity:.5} }
+  .pulse-soft { animation: pulseSoft 1.6s ease-in-out infinite; }
+  .gradient-text { background: linear-gradient(135deg, #fb923c, #f43f5e); -webkit-background-clip: text; background-clip: text; color: transparent; }
+
+  /* phone frame */
+  .phone {
+    width: 390px; height: 844px;
+    background: #000;
+    border-radius: 56px;
+    padding: 14px;
+    box-shadow: 0 0 0 2px #1c1c1e, 0 40px 80px -20px rgba(0,0,0,0.8), 0 0 120px -30px rgba(251,146,60,0.15);
+    position: relative;
+  }
+  .phone-screen {
+    width: 100%; height: 100%;
+    background: #0a0a0a;
+    border-radius: 44px;
+    overflow: hidden;
+    position: relative;
+  }
+  .notch {
+    position: absolute; top: 14px; left: 50%; transform: translateX(-50%);
+    width: 120px; height: 34px; background: #000; border-radius: 20px; z-index: 50;
+  }
+  .status-bar {
+    height: 54px; padding: 18px 28px 6px; display:flex; align-items:center; justify-content: space-between;
+    font-size: 14px; font-weight: 600; color: white; position: relative; z-index: 10;
+  }
+  .home-indicator {
+    position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%);
+    width: 130px; height: 5px; border-radius: 3px; background: white; opacity: .9;
+  }
+</style>
+</head>
+<body class="bg-zinc-950 text-zinc-100 min-h-screen grid-bg py-10">
+
+<div class="max-w-7xl mx-auto px-4">
+  <div class="mb-8 flex items-center justify-between">
+    <div class="flex items-center gap-3">
+      <a href="index.html" class="flex items-center gap-2">
+        <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-orange-500 to-rose-600 grid place-items-center font-bold">R</div>
+        <span class="font-semibold">rcc · Mobile</span>
+      </a>
+      <span class="text-xs text-zinc-500">— iPhone 15 PWA</span>
+    </div>
+    <a href="index.html" class="text-xs text-zinc-500 hover:text-white">← 返回总览</a>
+  </div>
+  <p class="text-zinc-400 mb-10 text-sm max-w-2xl">4 个核心 Tab 的高保真预览。所有手机 mockup 并排展示，不用切换就能对比。</p>
+
+  <!-- phones grid -->
+  <div class="flex flex-wrap gap-10 justify-center">
+
+    <!-- ===== PHONE 1: Chat ===== -->
+    <div class="flex flex-col items-center">
+      <div class="phone">
+        <div class="phone-screen">
+          <div class="notch"></div>
+          <!-- status bar -->
+          <div class="status-bar">
+            <span>9:41</span>
+            <span class="flex items-center gap-1 text-xs">
+              <span>●●●●</span>
+              <span class="ml-1">5G</span>
+              <span class="ml-1">🔋</span>
+            </span>
+          </div>
+          <!-- app bar -->
+          <div class="px-5 pb-3 flex items-center justify-between">
+            <button class="w-9 h-9 rounded-full bg-zinc-900 grid place-items-center text-zinc-400">☰</button>
+            <div class="text-center">
+              <div class="text-[13px] font-semibold">rcc</div>
+              <div class="text-[10px] text-emerald-400 flex items-center justify-center gap-1">
+                <span class="w-1 h-1 rounded-full bg-emerald-400 pulse-soft"></span>
+                Mac-Studio · 18ms
+              </div>
+            </div>
+            <button class="w-9 h-9 rounded-full bg-zinc-900 grid place-items-center text-zinc-400 relative">
+              🔔
+              <span class="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full bg-orange-500 text-[10px] text-white grid place-items-center">3</span>
+            </button>
+          </div>
+          <!-- session chip -->
+          <div class="px-5 pb-3">
+            <div class="flex items-center gap-2 px-3 py-2 rounded-full bg-zinc-900/60 border border-zinc-800">
+              <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 pulse-soft"></span>
+              <span class="text-xs font-medium">rcc</span>
+              <span class="mono text-[10px] text-zinc-500 truncate">~/projects/rcc</span>
+              <span class="ml-auto text-[10px] text-zinc-500">▾</span>
+            </div>
+          </div>
+
+          <!-- conversation -->
+          <div class="px-4 overflow-y-auto scrollbar" style="height: 490px">
+            <div class="space-y-3">
+              <!-- user -->
+              <div class="flex justify-end">
+                <div class="max-w-[82%] px-3.5 py-2 rounded-2xl rounded-br-md bg-zinc-800 text-[13px]">
+                  把 protocol.ts 改成 zod schema
+                </div>
+              </div>
+              <!-- tools compact -->
+              <div class="rounded-xl bg-zinc-900/60 border border-zinc-800 divide-y divide-zinc-800">
+                <div class="flex items-center gap-2 px-3 py-2 text-[11px]">
+                  <span class="w-4 h-4 rounded bg-blue-500/20 text-blue-400 grid place-items-center text-[9px]">R</span>
+                  <span class="mono text-zinc-400 truncate">frames.ts</span>
+                </div>
+                <div class="flex items-center gap-2 px-3 py-2 text-[11px]">
+                  <span class="w-4 h-4 rounded bg-emerald-500/20 text-emerald-400 grid place-items-center text-[9px]">E</span>
+                  <span class="mono text-zinc-400 truncate flex-1">frames.ts</span>
+                  <span class="text-emerald-400">+24</span>
+                  <span class="text-rose-400">-12</span>
+                </div>
+              </div>
+              <!-- diff card collapsed -->
+              <div class="rounded-xl border border-zinc-800 overflow-hidden">
+                <div class="px-3 py-1.5 bg-zinc-900 border-b border-zinc-800 flex items-center justify-between text-[11px]">
+                  <span class="mono text-zinc-500 truncate">frames.ts</span>
+                  <span class="text-zinc-600">tap 展开</span>
+                </div>
+                <div class="mono text-[11px] p-2.5 space-y-0.5">
+                  <div class="text-rose-400 truncate">- type Frame = { ... }</div>
+                  <div class="text-emerald-400 truncate">+ const PtyOut = z.object({</div>
+                  <div class="text-emerald-400 truncate">+   t: z.literal("pty.out"),</div>
+                  <div class="text-zinc-600">  ⋯ 21 lines more</div>
+                </div>
+              </div>
+
+              <!-- approval card (highlight) -->
+              <div class="rounded-2xl border-2 border-amber-500/40 bg-amber-500/5 p-3.5">
+                <div class="flex items-start gap-2.5">
+                  <div class="w-8 h-8 rounded-full bg-amber-500/20 text-amber-400 grid place-items-center shrink-0">⚠</div>
+                  <div class="flex-1 min-w-0">
+                    <div class="text-xs text-amber-400 font-medium mb-0.5">请求权限</div>
+                    <div class="text-[11px] text-zinc-400 mb-2">Bash · 安装新依赖</div>
+                    <div class="mono text-[11px] bg-zinc-950 rounded px-2 py-1.5 text-zinc-300 mb-2.5 truncate">
+                      pnpm add zod
+                    </div>
+                    <div class="flex gap-1.5">
+                      <button class="flex-1 py-2 text-[11px] rounded-lg bg-zinc-800 text-zinc-300">拒绝</button>
+                      <button class="flex-1 py-2 text-[11px] rounded-lg bg-emerald-500 text-zinc-950 font-semibold">
+                        🔒 Face ID 允许
+                      </button>
+                    </div>
+                    <div class="mt-2 text-[10px] text-zinc-500">电脑端同步待批 · 10秒前</div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- assistant text -->
+              <div class="text-[13px] text-zinc-200 leading-relaxed px-1">
+                已改写好。用了 <span class="mono text-orange-300 text-[12px]">discriminatedUnion</span>，类型收窄更好。
+                接下来要加单元测试吗？
+              </div>
+              <div class="text-[10px] text-emerald-400 mono px-1">✓ 3.4s · 3 tools</div>
+            </div>
+          </div>
+
+          <!-- quick keys + input -->
+          <div class="absolute left-0 right-0 px-3" style="bottom: 138px">
+            <div class="flex gap-1 overflow-x-auto pb-1.5 scrollbar text-[11px]">
+              <button class="shrink-0 px-2 py-1 rounded-md bg-zinc-900 border border-zinc-800 text-zinc-300 mono flex items-center gap-1">
+                <span class="w-1 h-1 rounded-full bg-sky-400"></span>/review
+              </button>
+              <button class="shrink-0 px-2 py-1 rounded-md bg-zinc-900 border border-zinc-800 text-zinc-300 mono flex items-center gap-1">
+                <span class="w-1 h-1 rounded-full bg-emerald-400"></span>/security-review
+              </button>
+              <button class="shrink-0 px-2 py-1 rounded-md bg-orange-500/10 border border-orange-500/30 text-orange-300 mono flex items-center gap-1">
+                <span class="w-1 h-1 rounded-full bg-orange-400"></span>/test
+              </button>
+              <button class="shrink-0 px-2 py-1 rounded-md bg-orange-500/10 border border-orange-500/30 text-orange-300 mono flex items-center gap-1">
+                <span class="w-1 h-1 rounded-full bg-orange-400"></span>/deploy
+              </button>
+              <span class="shrink-0 w-px h-4 bg-zinc-800 self-center mx-0.5"></span>
+              <button class="shrink-0 px-2 py-1 rounded-md bg-zinc-900 border border-zinc-800 text-zinc-400 flex items-center gap-1">
+                <span>✨</span><span>simplify</span>
+              </button>
+              <button class="shrink-0 px-2 py-1 rounded-md bg-zinc-900 border border-zinc-800 text-zinc-400 flex items-center gap-1">
+                <span class="text-sky-400">🔌</span><span class="mono">tavily</span>
+              </button>
+              <button class="shrink-0 px-2 py-1 rounded-md bg-zinc-900 border border-zinc-800 text-zinc-500">⚙</button>
+            </div>
+          </div>
+          <div class="absolute left-0 right-0 px-3" style="bottom: 100px">
+            <div class="flex gap-1 overflow-x-auto pb-2 scrollbar mono text-[11px]">
+              <button class="shrink-0 px-2.5 py-1 rounded-md bg-zinc-900 border border-zinc-800 text-zinc-300">Esc</button>
+              <button class="shrink-0 px-2.5 py-1 rounded-md bg-zinc-900 border border-zinc-800 text-zinc-300">Tab</button>
+              <button class="shrink-0 px-2.5 py-1 rounded-md bg-zinc-900 border border-zinc-800 text-zinc-300">↑</button>
+              <button class="shrink-0 px-2.5 py-1 rounded-md bg-zinc-900 border border-zinc-800 text-zinc-300">↓</button>
+              <button class="shrink-0 px-2.5 py-1 rounded-md bg-zinc-900 border border-zinc-800 text-zinc-300">/</button>
+              <button class="shrink-0 px-2.5 py-1 rounded-md bg-zinc-900 border border-zinc-800 text-zinc-300">@</button>
+              <button class="shrink-0 px-2.5 py-1 rounded-md bg-zinc-900 border border-zinc-800 text-zinc-300">^C</button>
+              <button class="shrink-0 px-2.5 py-1 rounded-md bg-zinc-900 border border-zinc-800 text-zinc-300">Plan</button>
+            </div>
+          </div>
+          <div class="absolute left-0 right-0 px-3" style="bottom: 52px">
+            <div class="flex items-center gap-2 px-2 py-1.5 rounded-full bg-zinc-900/90 border border-zinc-800 backdrop-blur">
+              <button class="w-7 h-7 rounded-full grid place-items-center text-zinc-500">＋</button>
+              <input placeholder="消息或 /命令" class="flex-1 bg-transparent text-sm outline-none text-zinc-200 placeholder-zinc-600" />
+              <button class="w-7 h-7 rounded-full bg-zinc-800 grid place-items-center text-zinc-300">🎤</button>
+              <button class="w-7 h-7 rounded-full bg-gradient-to-br from-orange-500 to-rose-500 grid place-items-center text-white text-sm">➤</button>
+            </div>
+          </div>
+
+          <!-- tab bar -->
+          <div class="absolute left-0 right-0 bottom-0 pb-6 pt-2 px-4 bg-zinc-950/95 backdrop-blur border-t border-zinc-900">
+            <div class="flex items-center justify-around text-[10px]">
+              <button class="flex flex-col items-center gap-0.5 text-orange-400">
+                <span class="text-lg">💬</span>
+                <span class="font-medium">对话</span>
+              </button>
+              <button class="flex flex-col items-center gap-0.5 text-zinc-500">
+                <span class="text-lg">📁</span>
+                <span>文件</span>
+              </button>
+              <button class="flex flex-col items-center gap-0.5 text-zinc-500 relative">
+                <span class="text-lg">📋</span>
+                <span>审批</span>
+                <span class="absolute top-0 right-3 w-1.5 h-1.5 rounded-full bg-orange-500"></span>
+              </button>
+              <button class="flex flex-col items-center gap-0.5 text-zinc-500">
+                <span class="text-lg">⚙</span>
+                <span>设置</span>
+              </button>
+            </div>
+          </div>
+          <div class="home-indicator"></div>
+        </div>
+      </div>
+      <div class="mt-4 text-center">
+        <div class="text-sm font-medium text-zinc-300">01 · 对话 Tab</div>
+        <div class="text-xs text-zinc-500 mt-1">语义化卡片 + 权限审批 + 快捷键条</div>
+      </div>
+    </div>
+
+    <!-- ===== PHONE 2: Files ===== -->
+    <div class="flex flex-col items-center">
+      <div class="phone">
+        <div class="phone-screen">
+          <div class="notch"></div>
+          <div class="status-bar">
+            <span>9:41</span>
+            <span class="flex items-center gap-1 text-xs">●●●●<span class="ml-1">5G</span><span class="ml-1">🔋</span></span>
+          </div>
+          <div class="px-5 pb-3 flex items-center justify-between">
+            <button class="text-[13px] text-orange-400">← 对话</button>
+            <div class="text-[13px] font-semibold">文件</div>
+            <button class="text-zinc-400 text-sm">⌕</button>
+          </div>
+          <!-- breadcrumb -->
+          <div class="px-5 pb-3">
+            <div class="flex items-center gap-1 text-[11px] mono text-zinc-500 overflow-x-auto scrollbar">
+              <span>~</span><span>/</span>
+              <span>projects</span><span>/</span>
+              <span class="text-zinc-300">rcc</span><span>/</span>
+              <span>packages</span><span>/</span>
+              <span class="text-orange-300">protocol</span>
+            </div>
+          </div>
+
+          <div class="overflow-y-auto scrollbar" style="height: 620px">
+
+            <!-- current changes -->
+            <div class="px-4 mb-3">
+              <div class="text-[10px] uppercase tracking-widest text-zinc-600 mb-2">此次会话改动</div>
+              <div class="rounded-xl border border-amber-500/30 bg-amber-500/5 divide-y divide-amber-500/10">
+                <div class="px-3.5 py-2.5 flex items-center gap-3">
+                  <span class="w-5 h-5 rounded bg-amber-500/20 text-amber-400 grid place-items-center text-[10px] font-bold">M</span>
+                  <div class="flex-1 min-w-0">
+                    <div class="mono text-[12px] truncate">frames.ts</div>
+                    <div class="text-[10px] text-zinc-500">protocol/src · 1m ago</div>
+                  </div>
+                  <div class="text-[10px]">
+                    <span class="text-emerald-400">+24</span>
+                    <span class="text-rose-400 ml-1">-12</span>
+                  </div>
+                </div>
+                <div class="px-3.5 py-2.5 flex items-center gap-3">
+                  <span class="w-5 h-5 rounded bg-emerald-500/20 text-emerald-400 grid place-items-center text-[10px] font-bold">A</span>
+                  <div class="flex-1 min-w-0">
+                    <div class="mono text-[12px] truncate">zod.ts</div>
+                    <div class="text-[10px] text-zinc-500">protocol/src · new</div>
+                  </div>
+                  <div class="text-[10px] text-emerald-400">+42</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- file list -->
+            <div class="px-4">
+              <div class="text-[10px] uppercase tracking-widest text-zinc-600 mb-2">当前目录</div>
+              <div class="space-y-0.5">
+                <div class="flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-zinc-900 cursor-pointer">
+                  <span class="text-lg">📁</span>
+                  <div class="flex-1">
+                    <div class="text-[13px]">src</div>
+                    <div class="text-[10px] text-zinc-500">8 items</div>
+                  </div>
+                  <span class="text-zinc-600">›</span>
+                </div>
+                <div class="flex items-center gap-3 px-3 py-2.5 rounded-lg bg-orange-500/5 border border-orange-500/20">
+                  <span class="text-lg">📄</span>
+                  <div class="flex-1">
+                    <div class="mono text-[13px] text-orange-300">frames.ts</div>
+                    <div class="text-[10px] text-zinc-500">TypeScript · 2.4 KB · 刚刚修改</div>
+                  </div>
+                  <span class="text-[10px] text-amber-400">M</span>
+                </div>
+                <div class="flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-zinc-900">
+                  <span class="text-lg">📄</span>
+                  <div class="flex-1">
+                    <div class="mono text-[13px]">schema.ts</div>
+                    <div class="text-[10px] text-zinc-500">TypeScript · 1.1 KB</div>
+                  </div>
+                </div>
+                <div class="flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-zinc-900">
+                  <span class="text-lg">📄</span>
+                  <div class="flex-1">
+                    <div class="mono text-[13px]">package.json</div>
+                    <div class="text-[10px] text-zinc-500">JSON · 512 B</div>
+                  </div>
+                </div>
+                <div class="flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-zinc-900">
+                  <span class="text-lg">📄</span>
+                  <div class="flex-1">
+                    <div class="mono text-[13px]">tsconfig.json</div>
+                    <div class="text-[10px] text-zinc-500">JSON · 284 B</div>
+                  </div>
+                </div>
+                <div class="flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-zinc-900">
+                  <span class="text-lg">📄</span>
+                  <div class="flex-1">
+                    <div class="mono text-[13px]">README.md</div>
+                    <div class="text-[10px] text-zinc-500">Markdown · 1.8 KB</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- preview -->
+            <div class="px-4 mt-5">
+              <div class="text-[10px] uppercase tracking-widest text-zinc-600 mb-2">预览 · frames.ts</div>
+              <div class="rounded-xl border border-zinc-800 overflow-hidden">
+                <div class="mono text-[11px] bg-zinc-950 p-3 space-y-0.5">
+                  <div class="text-zinc-600">// packages/protocol/src/frames.ts</div>
+                  <div class="text-violet-400">import <span class="text-zinc-300">{ z }</span> from <span class="text-emerald-300">"zod"</span></div>
+                  <div></div>
+                  <div class="text-zinc-500">const <span class="text-sky-300">PtyOut</span> = z.object({</div>
+                  <div class="pl-3">t: z.literal(<span class="text-emerald-300">"pty.out"</span>),</div>
+                  <div class="pl-3">sid: z.string(),</div>
+                  <div class="text-zinc-500">})</div>
+                  <div class="text-zinc-600">...</div>
+                </div>
+                <div class="px-3 py-2 bg-zinc-900 border-t border-zinc-800 flex items-center justify-between text-[11px]">
+                  <span class="text-zinc-500">86 行</span>
+                  <button class="text-orange-400">全屏查看</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- tab bar -->
+          <div class="absolute left-0 right-0 bottom-0 pb-6 pt-2 px-4 bg-zinc-950/95 backdrop-blur border-t border-zinc-900">
+            <div class="flex items-center justify-around text-[10px]">
+              <button class="flex flex-col items-center gap-0.5 text-zinc-500"><span class="text-lg">💬</span><span>对话</span></button>
+              <button class="flex flex-col items-center gap-0.5 text-orange-400"><span class="text-lg">📁</span><span class="font-medium">文件</span></button>
+              <button class="flex flex-col items-center gap-0.5 text-zinc-500 relative"><span class="text-lg">📋</span><span>审批</span><span class="absolute top-0 right-3 w-1.5 h-1.5 rounded-full bg-orange-500"></span></button>
+              <button class="flex flex-col items-center gap-0.5 text-zinc-500"><span class="text-lg">⚙</span><span>设置</span></button>
+            </div>
+          </div>
+          <div class="home-indicator"></div>
+        </div>
+      </div>
+      <div class="mt-4 text-center">
+        <div class="text-sm font-medium text-zinc-300">02 · 文件 Tab</div>
+        <div class="text-xs text-zinc-500 mt-1">工作目录浏览 + diff 快照 + 代码预览</div>
+      </div>
+    </div>
+
+    <!-- ===== PHONE 3: Approvals ===== -->
+    <div class="flex flex-col items-center">
+      <div class="phone">
+        <div class="phone-screen">
+          <div class="notch"></div>
+          <div class="status-bar">
+            <span>9:41</span>
+            <span class="flex items-center gap-1 text-xs">●●●●<span class="ml-1">5G</span><span class="ml-1">🔋</span></span>
+          </div>
+          <div class="px-5 pb-3 flex items-center justify-between">
+            <div class="text-[13px] font-semibold">审批</div>
+            <div class="text-[10px] px-2 py-1 rounded-full bg-orange-500/15 text-orange-400">3 待批 · 12 历史</div>
+          </div>
+
+          <div class="overflow-y-auto scrollbar px-4" style="height: 640px">
+
+            <!-- pending urgent -->
+            <div class="text-[10px] uppercase tracking-widest text-amber-400 mb-2 mt-1 flex items-center gap-2">
+              <span class="w-1.5 h-1.5 rounded-full bg-amber-400 pulse-soft"></span>
+              待批
+            </div>
+
+            <!-- urgent card -->
+            <div class="rounded-2xl border-2 border-rose-500/40 bg-gradient-to-br from-rose-500/10 to-transparent p-4 mb-3">
+              <div class="flex items-center gap-2 mb-2">
+                <span class="w-6 h-6 rounded-full bg-rose-500/20 text-rose-400 grid place-items-center text-xs">!</span>
+                <span class="text-xs font-semibold text-rose-400">高风险操作</span>
+                <span class="ml-auto text-[10px] text-zinc-500">刚刚</span>
+              </div>
+              <div class="mb-2">
+                <div class="text-[13px] font-medium mb-0.5">Bash · 写文件</div>
+                <div class="text-[11px] text-zinc-500">Session: rcc</div>
+              </div>
+              <div class="mono text-[11px] bg-zinc-950 rounded-lg px-3 py-2.5 text-zinc-300 mb-3 break-all">
+                rm -rf node_modules && pnpm install
+              </div>
+              <div class="text-[11px] text-zinc-400 mb-3 leading-relaxed">
+                <span class="text-amber-400">💡 Claude 说明：</span> 之前安装失败残留了锁文件，需要清理 node_modules 重装。
+              </div>
+              <div class="grid grid-cols-2 gap-2">
+                <button class="py-2.5 text-xs rounded-lg bg-zinc-800 text-zinc-200 font-medium">拒绝</button>
+                <button class="py-2.5 text-xs rounded-lg bg-emerald-500 text-zinc-950 font-semibold flex items-center justify-center gap-1.5">
+                  <span>🔒</span> Face ID 允许
+                </button>
+              </div>
+            </div>
+
+            <!-- normal pending -->
+            <div class="rounded-2xl border border-amber-500/30 bg-amber-500/5 p-4 mb-3">
+              <div class="flex items-center gap-2 mb-2">
+                <span class="w-5 h-5 rounded-full bg-amber-500/20 text-amber-400 grid place-items-center text-[10px]">⚠</span>
+                <span class="text-[11px] font-medium text-amber-400">Bash</span>
+                <span class="ml-auto text-[10px] text-zinc-500">1m ago</span>
+              </div>
+              <div class="mono text-[11px] bg-zinc-950 rounded-lg px-3 py-2 text-zinc-300 mb-3">pnpm add zod</div>
+              <div class="grid grid-cols-3 gap-1.5">
+                <button class="py-2 text-[11px] rounded-lg bg-zinc-800 text-zinc-300">拒绝</button>
+                <button class="py-2 text-[11px] rounded-lg bg-emerald-500 text-zinc-950 font-semibold">允许</button>
+                <button class="py-2 text-[11px] rounded-lg border border-emerald-500/30 text-emerald-400">总是</button>
+              </div>
+            </div>
+
+            <!-- file write pending -->
+            <div class="rounded-2xl border border-sky-500/30 bg-sky-500/5 p-4 mb-4">
+              <div class="flex items-center gap-2 mb-2">
+                <span class="w-5 h-5 rounded-full bg-sky-500/20 text-sky-400 grid place-items-center text-[10px]">✎</span>
+                <span class="text-[11px] font-medium text-sky-400">Write · 新建文件</span>
+                <span class="ml-auto text-[10px] text-zinc-500">2m ago</span>
+              </div>
+              <div class="mono text-[11px] text-zinc-400 mb-2">packages/protocol/src/zod.ts</div>
+              <div class="text-[11px] text-zinc-500 mb-3">42 行 · TypeScript · 1.4 KB</div>
+              <div class="grid grid-cols-2 gap-2">
+                <button class="py-2 text-[11px] rounded-lg bg-zinc-800 text-zinc-300">预览内容</button>
+                <button class="py-2 text-[11px] rounded-lg bg-emerald-500 text-zinc-950 font-semibold">允许</button>
+              </div>
+            </div>
+
+            <!-- history -->
+            <div class="text-[10px] uppercase tracking-widest text-zinc-600 mb-2 mt-2">今天的历史</div>
+
+            <div class="space-y-1.5">
+              <div class="flex items-center gap-3 px-3 py-2.5 rounded-lg bg-zinc-900/40">
+                <span class="w-7 h-7 rounded-full bg-emerald-500/20 text-emerald-400 grid place-items-center text-xs">✓</span>
+                <div class="flex-1 min-w-0">
+                  <div class="mono text-[11px] text-zinc-300 truncate">Edit frames.ts</div>
+                  <div class="text-[10px] text-zinc-500">5 分钟前 · 你在 iPhone 允许</div>
+                </div>
+              </div>
+              <div class="flex items-center gap-3 px-3 py-2.5 rounded-lg bg-zinc-900/40">
+                <span class="w-7 h-7 rounded-full bg-emerald-500/20 text-emerald-400 grid place-items-center text-xs">✓</span>
+                <div class="flex-1 min-w-0">
+                  <div class="mono text-[11px] text-zinc-300 truncate">Read protocol.md</div>
+                  <div class="text-[10px] text-zinc-500">8 分钟前 · 自动 (总是)</div>
+                </div>
+              </div>
+              <div class="flex items-center gap-3 px-3 py-2.5 rounded-lg bg-zinc-900/40">
+                <span class="w-7 h-7 rounded-full bg-rose-500/20 text-rose-400 grid place-items-center text-xs">✕</span>
+                <div class="flex-1 min-w-0">
+                  <div class="mono text-[11px] text-zinc-300 truncate">Bash curl ...</div>
+                  <div class="text-[10px] text-zinc-500">22 分钟前 · 你在 Desktop 拒绝</div>
+                </div>
+              </div>
+              <div class="flex items-center gap-3 px-3 py-2.5 rounded-lg bg-zinc-900/40">
+                <span class="w-7 h-7 rounded-full bg-emerald-500/20 text-emerald-400 grid place-items-center text-xs">✓</span>
+                <div class="flex-1 min-w-0">
+                  <div class="mono text-[11px] text-zinc-300 truncate">Write schema.ts</div>
+                  <div class="text-[10px] text-zinc-500">34 分钟前 · 你在 iPhone 允许</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- tab bar -->
+          <div class="absolute left-0 right-0 bottom-0 pb-6 pt-2 px-4 bg-zinc-950/95 backdrop-blur border-t border-zinc-900">
+            <div class="flex items-center justify-around text-[10px]">
+              <button class="flex flex-col items-center gap-0.5 text-zinc-500"><span class="text-lg">💬</span><span>对话</span></button>
+              <button class="flex flex-col items-center gap-0.5 text-zinc-500"><span class="text-lg">📁</span><span>文件</span></button>
+              <button class="flex flex-col items-center gap-0.5 text-orange-400 relative">
+                <span class="text-lg">📋</span><span class="font-medium">审批</span>
+                <span class="absolute top-0 right-3 w-4 h-4 rounded-full bg-orange-500 text-[9px] text-white grid place-items-center">3</span>
+              </button>
+              <button class="flex flex-col items-center gap-0.5 text-zinc-500"><span class="text-lg">⚙</span><span>设置</span></button>
+            </div>
+          </div>
+          <div class="home-indicator"></div>
+        </div>
+      </div>
+      <div class="mt-4 text-center">
+        <div class="text-sm font-medium text-zinc-300">03 · 审批 Tab</div>
+        <div class="text-xs text-zinc-500 mt-1">Face ID 批准 + 风险分级 + 全量历史</div>
+      </div>
+    </div>
+
+    <!-- ===== PHONE 4: Settings + Voice overlay ===== -->
+    <div class="flex flex-col items-center">
+      <div class="phone">
+        <div class="phone-screen">
+          <div class="notch"></div>
+          <div class="status-bar">
+            <span>9:41</span>
+            <span class="flex items-center gap-1 text-xs">●●●●<span class="ml-1">5G</span><span class="ml-1">🔋</span></span>
+          </div>
+          <div class="px-5 pb-4">
+            <div class="text-[22px] font-bold">设置</div>
+          </div>
+
+          <div class="overflow-y-auto scrollbar px-4" style="height: 650px">
+
+            <!-- host card -->
+            <div class="rounded-2xl p-4 bg-gradient-to-br from-orange-500/15 to-rose-500/5 border border-orange-500/30 mb-4">
+              <div class="flex items-center gap-3">
+                <div class="w-12 h-12 rounded-xl bg-zinc-950 grid place-items-center text-2xl">🖥</div>
+                <div class="flex-1">
+                  <div class="text-[15px] font-semibold">Mac-Studio</div>
+                  <div class="text-[11px] text-zinc-400 flex items-center gap-1.5 mt-0.5">
+                    <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 pulse-soft"></span>
+                    connected · 18ms · 上海
+                  </div>
+                </div>
+              </div>
+              <div class="mt-3 grid grid-cols-3 gap-2 text-center">
+                <div class="rounded-lg bg-zinc-950/60 py-2">
+                  <div class="text-[11px] text-zinc-500">运行时间</div>
+                  <div class="text-[13px] font-semibold text-zinc-200 mt-0.5">4h 12m</div>
+                </div>
+                <div class="rounded-lg bg-zinc-950/60 py-2">
+                  <div class="text-[11px] text-zinc-500">Sessions</div>
+                  <div class="text-[13px] font-semibold text-zinc-200 mt-0.5">3</div>
+                </div>
+                <div class="rounded-lg bg-zinc-950/60 py-2">
+                  <div class="text-[11px] text-zinc-500">Host 版本</div>
+                  <div class="text-[13px] font-semibold text-zinc-200 mt-0.5">0.1.3</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- settings groups -->
+            <div class="text-[10px] uppercase tracking-widest text-zinc-600 mb-2">Claude Code 配置</div>
+            <div class="rounded-xl bg-zinc-900/60 border border-zinc-800 divide-y divide-zinc-800 mb-4">
+              <a href="config.html" class="flex items-center gap-3 px-4 py-3">
+                <span class="w-7 h-7 rounded-lg bg-orange-500/20 text-orange-400 grid place-items-center text-sm">✨</span>
+                <div class="flex-1"><div class="text-[13px]">Skills</div><div class="text-[10px] text-zinc-500">5 启用 · 3 可用</div></div>
+                <span class="text-[11px] text-zinc-500">›</span>
+              </a>
+              <a href="config.html" class="flex items-center gap-3 px-4 py-3">
+                <span class="w-7 h-7 rounded-lg bg-sky-500/20 text-sky-400 grid place-items-center text-sm">🔌</span>
+                <div class="flex-1"><div class="text-[13px]">MCP Servers</div><div class="text-[10px] text-zinc-500">5 活跃 · 1 需配置</div></div>
+                <span class="text-amber-400 text-[10px]">!</span>
+                <span class="text-[11px] text-zinc-500">›</span>
+              </a>
+              <a href="config.html" class="flex items-center gap-3 px-4 py-3">
+                <span class="w-7 h-7 rounded-lg bg-violet-500/20 text-violet-400 grid place-items-center text-sm">/</span>
+                <div class="flex-1"><div class="text-[13px]">Slash Commands</div><div class="text-[10px] text-zinc-500">12 命令 · 4 已钉</div></div>
+                <span class="text-[11px] text-zinc-500">›</span>
+              </a>
+              <a href="config.html" class="flex items-center gap-3 px-4 py-3">
+                <span class="w-7 h-7 rounded-lg bg-emerald-500/20 text-emerald-400 grid place-items-center text-sm">🤖</span>
+                <div class="flex-1"><div class="text-[13px]">Subagents</div><div class="text-[10px] text-zinc-500">4 agents</div></div>
+                <span class="text-[11px] text-zinc-500">›</span>
+              </a>
+              <a href="config.html" class="flex items-center gap-3 px-4 py-3">
+                <span class="w-7 h-7 rounded-lg bg-rose-500/20 text-rose-400 grid place-items-center text-sm">⚡</span>
+                <div class="flex-1"><div class="text-[13px]">Hooks</div><div class="text-[10px] text-zinc-500">3 hooks · 全部启用</div></div>
+                <span class="text-[11px] text-zinc-500">›</span>
+              </a>
+              <a href="config.html" class="flex items-center gap-3 px-4 py-3">
+                <span class="w-7 h-7 rounded-lg bg-amber-500/20 text-amber-400 grid place-items-center text-sm">🛡</span>
+                <div class="flex-1"><div class="text-[13px]">权限策略</div><div class="text-[10px] text-zinc-500">远程模式 · 按规则</div></div>
+                <span class="text-[11px] text-zinc-500">›</span>
+              </a>
+            </div>
+
+            <div class="text-[10px] uppercase tracking-widest text-zinc-600 mb-2">此设备</div>
+            <div class="rounded-xl bg-zinc-900/60 border border-zinc-800 divide-y divide-zinc-800 mb-4">
+              <div class="flex items-center gap-3 px-4 py-3">
+                <span class="w-7 h-7 rounded-lg bg-zinc-800 grid place-items-center text-sm">🔔</span>
+                <div class="flex-1"><div class="text-[13px]">通知</div><div class="text-[10px] text-zinc-500">3 条未读</div></div>
+                <div class="w-9 h-5 rounded-full bg-orange-500 relative"><span class="absolute right-0.5 top-0.5 w-4 h-4 rounded-full bg-white"></span></div>
+              </div>
+              <div class="flex items-center gap-3 px-4 py-3">
+                <span class="w-7 h-7 rounded-lg bg-zinc-800 grid place-items-center text-sm">🎤</span>
+                <div class="flex-1"><div class="text-[13px]">语音输入</div><div class="text-[10px] text-zinc-500">Web Speech · 中文</div></div>
+                <span class="text-zinc-500">›</span>
+              </div>
+              <div class="flex items-center gap-3 px-4 py-3">
+                <span class="w-7 h-7 rounded-lg bg-zinc-800 grid place-items-center text-sm">📳</span>
+                <div class="flex-1"><div class="text-[13px]">触感反馈</div></div>
+                <div class="w-9 h-5 rounded-full bg-orange-500 relative"><span class="absolute right-0.5 top-0.5 w-4 h-4 rounded-full bg-white"></span></div>
+              </div>
+              <div class="flex items-center gap-3 px-4 py-3">
+                <span class="w-7 h-7 rounded-lg bg-zinc-800 grid place-items-center text-sm">🌙</span>
+                <div class="flex-1"><div class="text-[13px]">外观</div></div>
+                <span class="text-[11px] text-zinc-500">深色 ›</span>
+              </div>
+            </div>
+
+            <div class="text-[10px] uppercase tracking-widest text-zinc-600 mb-2">安全</div>
+            <div class="rounded-xl bg-zinc-900/60 border border-zinc-800 divide-y divide-zinc-800 mb-4">
+              <div class="flex items-center gap-3 px-4 py-3">
+                <span class="w-7 h-7 rounded-lg bg-emerald-500/20 text-emerald-400 grid place-items-center text-sm">🔐</span>
+                <div class="flex-1"><div class="text-[13px]">Passkey</div><div class="text-[10px] text-zinc-500">Face ID · 已启用</div></div>
+                <span class="text-emerald-400 text-xs">✓</span>
+              </div>
+              <div class="flex items-center gap-3 px-4 py-3">
+                <span class="w-7 h-7 rounded-lg bg-emerald-500/20 text-emerald-400 grid place-items-center text-sm">🔒</span>
+                <div class="flex-1"><div class="text-[13px]">端到端加密</div><div class="text-[10px] text-zinc-500">libsodium · x25519</div></div>
+                <span class="text-emerald-400 text-xs">✓</span>
+              </div>
+              <div class="flex items-center gap-3 px-4 py-3">
+                <span class="w-7 h-7 rounded-lg bg-zinc-800 grid place-items-center text-sm">📱</span>
+                <div class="flex-1"><div class="text-[13px]">已配对设备</div></div>
+                <span class="text-[11px] text-zinc-500">2 ›</span>
+              </div>
+              <div class="flex items-center gap-3 px-4 py-3">
+                <span class="w-7 h-7 rounded-lg bg-rose-500/20 text-rose-400 grid place-items-center text-sm">🚫</span>
+                <div class="flex-1"><div class="text-[13px] text-rose-400">紧急吊销此设备</div></div>
+                <span class="text-zinc-500">›</span>
+              </div>
+            </div>
+
+            <div class="text-[10px] uppercase tracking-widest text-zinc-600 mb-2">关于</div>
+            <div class="rounded-xl bg-zinc-900/60 border border-zinc-800 divide-y divide-zinc-800 mb-4">
+              <div class="flex items-center gap-3 px-4 py-3">
+                <div class="flex-1"><div class="text-[13px]">App 版本</div></div>
+                <span class="text-[11px] text-zinc-500">0.1.3</span>
+              </div>
+              <div class="flex items-center gap-3 px-4 py-3">
+                <div class="flex-1"><div class="text-[13px]">协议版本</div></div>
+                <span class="text-[11px] text-zinc-500">rcc/1</span>
+              </div>
+              <div class="flex items-center gap-3 px-4 py-3">
+                <div class="flex-1"><div class="text-[13px]">开源</div></div>
+                <span class="text-[11px] text-zinc-500">GitHub ›</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- voice overlay (shown as small floating hint) -->
+          <div class="absolute" style="bottom: 120px; right: 20px;">
+            <div class="relative">
+              <div class="absolute inset-0 rounded-full bg-orange-500/40 animate-ping"></div>
+              <button class="relative w-14 h-14 rounded-full bg-gradient-to-br from-orange-500 to-rose-500 text-white shadow-2xl grid place-items-center text-xl">🎤</button>
+            </div>
+          </div>
+
+          <!-- tab bar -->
+          <div class="absolute left-0 right-0 bottom-0 pb-6 pt-2 px-4 bg-zinc-950/95 backdrop-blur border-t border-zinc-900">
+            <div class="flex items-center justify-around text-[10px]">
+              <button class="flex flex-col items-center gap-0.5 text-zinc-500"><span class="text-lg">💬</span><span>对话</span></button>
+              <button class="flex flex-col items-center gap-0.5 text-zinc-500"><span class="text-lg">📁</span><span>文件</span></button>
+              <button class="flex flex-col items-center gap-0.5 text-zinc-500 relative"><span class="text-lg">📋</span><span>审批</span><span class="absolute top-0 right-3 w-1.5 h-1.5 rounded-full bg-orange-500"></span></button>
+              <button class="flex flex-col items-center gap-0.5 text-orange-400"><span class="text-lg">⚙</span><span class="font-medium">设置</span></button>
+            </div>
+          </div>
+          <div class="home-indicator"></div>
+        </div>
+      </div>
+      <div class="mt-4 text-center">
+        <div class="text-sm font-medium text-zinc-300">04 · 设置 Tab</div>
+        <div class="text-xs text-zinc-500 mt-1">Host 状态 + 配对设备管理 + 安全设置</div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- explainers -->
+  <div class="mt-20 max-w-4xl mx-auto grid grid-cols-1 md:grid-cols-3 gap-5 text-sm">
+    <div class="p-5 rounded-2xl border border-zinc-800 bg-zinc-900/40">
+      <div class="text-orange-400 font-medium mb-2">🎯 设计要点</div>
+      <div class="text-zinc-400 leading-relaxed">语义化展示优先 — tool_use 合并成小卡片、diff 默认折叠、approval 作为最醒目的卡片。</div>
+    </div>
+    <div class="p-5 rounded-2xl border border-zinc-800 bg-zinc-900/40">
+      <div class="text-emerald-400 font-medium mb-2">🤚 单手操作</div>
+      <div class="text-zinc-400 leading-relaxed">核心按钮放在拇指区（下 1/3），快捷键条紧贴虚拟键盘，所有高频操作都能不挪手完成。</div>
+    </div>
+    <div class="p-5 rounded-2xl border border-zinc-800 bg-zinc-900/40">
+      <div class="text-sky-400 font-medium mb-2">🔔 推送直达</div>
+      <div class="text-zinc-400 leading-relaxed">权限请求走 Web Push 到锁屏，app 后台也能被唤醒。Face ID 即批，10秒搞定。</div>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

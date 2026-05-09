@@ -1,0 +1,41 @@
+#!/usr/bin/env tsx
+// Admin CLI for the rcc-host trust store. Run from the host's terminal
+// when you need to inspect or revoke devices without going through the UI
+// (e.g. lost phone).
+import { TrustStore } from "./trust.ts";
+
+function usage(): never {
+  console.error(`
+Usage:
+  rcc-admin devices                # list paired devices
+  rcc-admin revoke <device-id>     # remove a device
+  rcc-admin rename <device-id> <new-name>
+`);
+  process.exit(1);
+}
+
+const args = process.argv.slice(2);
+const cmd = args[0];
+
+const trust = await TrustStore.load();
+
+if (cmd === "devices" || cmd === "list" || cmd === "ls") {
+  const rows = trust.devices();
+  if (rows.length === 0) {
+    console.log("(no paired devices)");
+  } else {
+    for (const d of rows) {
+      const paired = new Date(d.createdAt).toISOString().slice(0, 19).replace("T", " ");
+      const last = new Date(d.lastSeenAt).toISOString().slice(0, 19).replace("T", " ");
+      console.log(`${d.id}  ${d.name.padEnd(24)}  paired ${paired}  last seen ${last}`);
+    }
+  }
+} else if (cmd === "revoke" && args[1]) {
+  const ok = await trust.revoke(args[1]);
+  console.log(ok ? `revoked ${args[1]}` : `unknown device: ${args[1]}`);
+} else if (cmd === "rename" && args[1] && args[2]) {
+  const ok = await trust.rename(args[1], args[2]);
+  console.log(ok ? `renamed ${args[1]} -> "${args[2]}"` : `unknown device: ${args[1]}`);
+} else {
+  usage();
+}

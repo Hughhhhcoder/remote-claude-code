@@ -1,0 +1,516 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>rcc · Desktop</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: ui-sans-serif, -apple-system, "SF Pro", "PingFang SC", system-ui; -webkit-font-smoothing: antialiased; }
+  .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+  .scrollbar::-webkit-scrollbar { width: 8px; height: 8px; }
+  .scrollbar::-webkit-scrollbar-thumb { background: #27272a; border-radius: 4px; }
+  .scrollbar::-webkit-scrollbar-thumb:hover { background: #3f3f46; }
+  .gradient-text { background: linear-gradient(135deg, #fb923c, #f43f5e); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .dot { width:10px; height:10px; border-radius:50%; display:inline-block; }
+  @keyframes pulseSoft { 0%,100%{opacity:1} 50%{opacity:.4} }
+  .pulse-soft { animation: pulseSoft 1.6s ease-in-out infinite; }
+  .kbd { font-family: ui-monospace, monospace; font-size: 10px; padding: 1px 5px; border-radius: 4px; background:#27272a; color:#a1a1aa; border:1px solid #3f3f46; }
+  details > summary { list-style: none; cursor: pointer; }
+  details > summary::-webkit-details-marker { display:none; }
+</style>
+</head>
+<body class="bg-zinc-950 text-zinc-100 h-screen overflow-hidden">
+
+<!-- Top Bar -->
+<div class="h-11 flex items-center justify-between px-4 border-b border-zinc-900 bg-zinc-950">
+  <div class="flex items-center gap-3">
+    <div class="flex items-center gap-1.5 mr-3">
+      <span class="dot bg-rose-500"></span>
+      <span class="dot bg-amber-400"></span>
+      <span class="dot bg-emerald-500"></span>
+    </div>
+    <a href="index.html" class="flex items-center gap-2">
+      <div class="w-6 h-6 rounded-md bg-gradient-to-br from-orange-500 to-rose-600 grid place-items-center font-bold text-[11px]">R</div>
+      <span class="font-semibold text-sm">rcc</span>
+    </a>
+    <span class="text-zinc-700">/</span>
+    <span class="text-sm text-zinc-300">Mac-Studio</span>
+    <span class="text-xs text-zinc-500 mono">~/projects/rcc</span>
+  </div>
+  <div class="flex items-center gap-4 text-xs">
+    <div class="flex items-center gap-1.5 text-emerald-400">
+      <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 pulse-soft"></span>
+      <span>connected</span>
+      <span class="text-zinc-500">· 18ms</span>
+    </div>
+    <div class="text-zinc-500">2 devices</div>
+    <a href="config.html" class="px-2.5 py-1 rounded hover:bg-zinc-900 text-zinc-400 flex items-center gap-1.5" title="配置 Skills / MCP / Hooks">
+      <span>⚙</span>
+      <span class="text-[11px]">配置</span>
+    </a>
+    <a href="landing.html" class="px-2.5 py-1 rounded hover:bg-zinc-900 text-zinc-400">?</a>
+  </div>
+</div>
+
+<!-- Main 3-col -->
+<div class="grid" style="grid-template-columns: 240px 1fr 320px; height: calc(100vh - 44px);">
+
+  <!-- ============== LEFT: Sessions ============== -->
+  <aside class="bg-zinc-950 border-r border-zinc-900 flex flex-col">
+    <div class="p-3 border-b border-zinc-900">
+      <button class="w-full py-2 rounded-lg bg-gradient-to-r from-orange-500 to-rose-500 text-white text-sm font-medium flex items-center justify-center gap-2 hover:opacity-90 transition">
+        <span>+</span> New session
+      </button>
+    </div>
+
+    <div class="flex-1 overflow-y-auto scrollbar p-2">
+      <div class="text-[10px] uppercase tracking-widest text-zinc-600 px-2 py-2">Active</div>
+
+      <!-- session 1 active -->
+      <div class="group p-2.5 rounded-lg bg-zinc-900 border border-zinc-800 mb-1.5">
+        <div class="flex items-start gap-2">
+          <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 mt-1.5 pulse-soft shrink-0"></span>
+          <div class="min-w-0 flex-1">
+            <div class="text-sm font-medium truncate">rcc</div>
+            <div class="text-xs text-zinc-500 mono truncate">~/projects/rcc</div>
+            <div class="flex items-center gap-1.5 mt-1.5">
+              <span class="text-[10px] px-1.5 py-0.5 rounded bg-orange-500/20 text-orange-400">editing</span>
+              <span class="text-[10px] text-zinc-500">3m ago</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- session 2 -->
+      <div class="group p-2.5 rounded-lg hover:bg-zinc-900 mb-1.5 cursor-pointer">
+        <div class="flex items-start gap-2">
+          <span class="w-1.5 h-1.5 rounded-full bg-amber-400 mt-1.5 shrink-0"></span>
+          <div class="min-w-0 flex-1">
+            <div class="text-sm text-zinc-300 truncate">blog-api</div>
+            <div class="text-xs text-zinc-500 mono truncate">~/work/blog/api</div>
+            <div class="flex items-center gap-1.5 mt-1.5">
+              <span class="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400">awaiting</span>
+              <span class="text-[10px] text-zinc-500">12m</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- session 3 -->
+      <div class="group p-2.5 rounded-lg hover:bg-zinc-900 mb-1.5 cursor-pointer">
+        <div class="flex items-start gap-2">
+          <span class="w-1.5 h-1.5 rounded-full bg-zinc-600 mt-1.5 shrink-0"></span>
+          <div class="min-w-0 flex-1">
+            <div class="text-sm text-zinc-400 truncate">site-fix</div>
+            <div class="text-xs text-zinc-500 mono truncate">~/work/landing</div>
+            <div class="flex items-center gap-1.5 mt-1.5">
+              <span class="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-500">idle</span>
+              <span class="text-[10px] text-zinc-500">1h</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="text-[10px] uppercase tracking-widest text-zinc-600 px-2 py-2 mt-3">Recent</div>
+      <div class="p-2.5 rounded-lg hover:bg-zinc-900 cursor-pointer">
+        <div class="text-sm text-zinc-500 truncate">dotfiles</div>
+        <div class="text-xs text-zinc-600 mono truncate">yesterday</div>
+      </div>
+      <div class="p-2.5 rounded-lg hover:bg-zinc-900 cursor-pointer">
+        <div class="text-sm text-zinc-500 truncate">playground</div>
+        <div class="text-xs text-zinc-600 mono truncate">2d ago</div>
+      </div>
+    </div>
+
+    <!-- device list footer -->
+    <div class="p-3 border-t border-zinc-900">
+      <div class="text-[10px] uppercase tracking-widest text-zinc-600 mb-2">Paired devices</div>
+      <div class="space-y-1.5 text-xs">
+        <div class="flex items-center gap-2">
+          <span class="w-4 h-4 rounded bg-emerald-500/20 text-emerald-400 grid place-items-center text-[10px]">●</span>
+          <span class="text-zinc-400 truncate">iPhone 15 Pro</span>
+          <span class="text-zinc-600 ml-auto">此刻</span>
+        </div>
+        <div class="flex items-center gap-2">
+          <span class="w-4 h-4 rounded bg-zinc-800 text-zinc-500 grid place-items-center text-[10px]">○</span>
+          <span class="text-zinc-500 truncate">MBA (work)</span>
+          <span class="text-zinc-600 ml-auto">2h</span>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ============== CENTER: Conversation ============== -->
+  <main class="bg-zinc-950 flex flex-col overflow-hidden">
+
+    <!-- session header -->
+    <div class="h-12 border-b border-zinc-900 px-5 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <div class="text-sm font-medium">rcc</div>
+        <span class="text-zinc-700">·</span>
+        <div class="mono text-xs text-zinc-500">~/projects/rcc</div>
+        <span class="text-xs px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">main</span>
+      </div>
+      <div class="flex items-center gap-1">
+        <!-- view toggle -->
+        <div class="flex rounded-lg bg-zinc-900 border border-zinc-800 p-0.5 mr-2">
+          <button class="px-3 py-1 text-xs rounded-md bg-zinc-800 text-zinc-200 font-medium">对话</button>
+          <button class="px-3 py-1 text-xs rounded-md text-zinc-500 hover:text-zinc-300">终端</button>
+          <button class="px-3 py-1 text-xs rounded-md text-zinc-500 hover:text-zinc-300">混合</button>
+        </div>
+        <button class="px-2.5 py-1 text-xs rounded hover:bg-zinc-900 text-zinc-400">⟳</button>
+        <button class="px-2.5 py-1 text-xs rounded hover:bg-zinc-900 text-zinc-400">⤢</button>
+      </div>
+    </div>
+
+    <!-- conversation stream -->
+    <div class="flex-1 overflow-y-auto scrollbar">
+      <div class="max-w-3xl mx-auto px-6 py-6 space-y-5">
+
+        <!-- user message -->
+        <div class="flex justify-end">
+          <div class="max-w-[80%] px-4 py-2.5 rounded-2xl rounded-br-md bg-zinc-800 text-[14px] text-zinc-100">
+            帮我把 <span class="mono text-orange-300">protocol.ts</span> 里的 Frame 类型改成 zod schema，并给每个 frame 加一个 discriminator
+          </div>
+        </div>
+
+        <!-- claude thinking -->
+        <details class="group" open>
+          <summary class="flex items-center gap-2 text-xs text-zinc-500 hover:text-zinc-300">
+            <span class="mono text-zinc-600">▾</span>
+            <span>思考了 4.2 秒</span>
+          </summary>
+          <div class="mt-2 pl-4 border-l border-zinc-800 text-xs text-zinc-500 italic leading-relaxed">
+            用户希望引入 zod 做运行时校验。我应该先读一遍当前的 Frame 定义，了解有哪些变体，然后用 discriminatedUnion 重写…
+          </div>
+        </details>
+
+        <!-- tool uses -->
+        <div class="rounded-xl border border-zinc-800 bg-zinc-900/40 overflow-hidden">
+          <div class="px-4 py-2.5 text-xs flex items-center gap-2 border-b border-zinc-800">
+            <span class="w-5 h-5 rounded bg-blue-500/20 text-blue-400 grid place-items-center text-[10px]">R</span>
+            <span class="text-zinc-300 font-medium">Read</span>
+            <span class="mono text-zinc-500">packages/protocol/src/frames.ts</span>
+            <span class="ml-auto text-zinc-600">86 lines</span>
+          </div>
+          <div class="px-4 py-2.5 text-xs flex items-center gap-2 border-b border-zinc-800">
+            <span class="w-5 h-5 rounded bg-amber-500/20 text-amber-400 grid place-items-center text-[10px]">G</span>
+            <span class="text-zinc-300 font-medium">Grep</span>
+            <span class="mono text-zinc-500">"Frame" in packages/**</span>
+            <span class="ml-auto text-zinc-600">12 matches</span>
+          </div>
+          <div class="px-4 py-2.5 text-xs flex items-center gap-2">
+            <span class="w-5 h-5 rounded bg-emerald-500/20 text-emerald-400 grid place-items-center text-[10px]">E</span>
+            <span class="text-zinc-300 font-medium">Edit</span>
+            <span class="mono text-zinc-500">packages/protocol/src/frames.ts</span>
+            <span class="ml-auto">
+              <span class="text-emerald-400">+24</span>
+              <span class="text-zinc-600 mx-1">/</span>
+              <span class="text-rose-400">-12</span>
+            </span>
+          </div>
+        </div>
+
+        <!-- diff card -->
+        <div class="rounded-xl border border-zinc-800 overflow-hidden">
+          <div class="px-4 py-2 border-b border-zinc-800 bg-zinc-900/60 flex items-center justify-between">
+            <div class="flex items-center gap-2 text-xs">
+              <span class="mono text-zinc-400">packages/protocol/src/frames.ts</span>
+            </div>
+            <div class="flex items-center gap-2 text-[11px]">
+              <span class="text-emerald-400">+24</span>
+              <span class="text-rose-400">-12</span>
+              <button class="ml-2 px-2 py-0.5 rounded text-zinc-400 hover:bg-zinc-800">查看完整</button>
+            </div>
+          </div>
+          <div class="mono text-[12px] leading-relaxed">
+            <div class="grid grid-cols-[40px_1fr] bg-rose-500/5">
+              <div class="text-right pr-2 text-zinc-600 select-none border-r border-rose-500/10">12</div>
+              <div class="px-3 text-rose-300"><span class="text-rose-500">-</span> type Frame = { t: string; sid: string; data: any }</div>
+            </div>
+            <div class="grid grid-cols-[40px_1fr] bg-emerald-500/5">
+              <div class="text-right pr-2 text-zinc-600 select-none border-r border-emerald-500/10">12</div>
+              <div class="px-3 text-emerald-300"><span class="text-emerald-500">+</span> import { z } from "zod"</div>
+            </div>
+            <div class="grid grid-cols-[40px_1fr] bg-emerald-500/5">
+              <div class="text-right pr-2 text-zinc-600 select-none border-r border-emerald-500/10">13</div>
+              <div class="px-3 text-emerald-300"><span class="text-emerald-500">+</span></div>
+            </div>
+            <div class="grid grid-cols-[40px_1fr] bg-emerald-500/5">
+              <div class="text-right pr-2 text-zinc-600 select-none border-r border-emerald-500/10">14</div>
+              <div class="px-3 text-emerald-300"><span class="text-emerald-500">+</span> const PtyOut = z.object({</div>
+            </div>
+            <div class="grid grid-cols-[40px_1fr] bg-emerald-500/5">
+              <div class="text-right pr-2 text-zinc-600 select-none border-r border-emerald-500/10">15</div>
+              <div class="px-3 text-emerald-300"><span class="text-emerald-500">+</span> &nbsp;&nbsp;t: z.literal("pty.out"),</div>
+            </div>
+            <div class="grid grid-cols-[40px_1fr] bg-emerald-500/5">
+              <div class="text-right pr-2 text-zinc-600 select-none border-r border-emerald-500/10">16</div>
+              <div class="px-3 text-emerald-300"><span class="text-emerald-500">+</span> &nbsp;&nbsp;sid: z.string(),</div>
+            </div>
+            <div class="grid grid-cols-[40px_1fr] bg-emerald-500/5">
+              <div class="text-right pr-2 text-zinc-600 select-none border-r border-emerald-500/10">17</div>
+              <div class="px-3 text-emerald-300"><span class="text-emerald-500">+</span> &nbsp;&nbsp;seq: z.number(),</div>
+            </div>
+            <div class="grid grid-cols-[40px_1fr] bg-emerald-500/5">
+              <div class="text-right pr-2 text-zinc-600 select-none border-r border-emerald-500/10">18</div>
+              <div class="px-3 text-emerald-300"><span class="text-emerald-500">+</span> &nbsp;&nbsp;data: z.instanceof(Uint8Array)</div>
+            </div>
+            <div class="grid grid-cols-[40px_1fr] bg-emerald-500/5">
+              <div class="text-right pr-2 text-zinc-600 select-none border-r border-emerald-500/10">19</div>
+              <div class="px-3 text-emerald-300"><span class="text-emerald-500">+</span> })</div>
+            </div>
+            <div class="grid grid-cols-[40px_1fr]">
+              <div class="text-right pr-2 text-zinc-600 select-none border-r border-zinc-800">20</div>
+              <div class="px-3 text-zinc-500">&nbsp;&nbsp;<span class="text-zinc-700">// ... 更多 schema 已折叠</span></div>
+            </div>
+            <div class="grid grid-cols-[40px_1fr] bg-emerald-500/5">
+              <div class="text-right pr-2 text-zinc-600 select-none border-r border-emerald-500/10">44</div>
+              <div class="px-3 text-emerald-300"><span class="text-emerald-500">+</span> export const Frame = z.discriminatedUnion("t", [PtyOut, PtyIn, Resize, ...])</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- claude answer -->
+        <div class="text-[14px] text-zinc-200 leading-relaxed">
+          已经把 <span class="mono text-orange-300 text-[13px]">Frame</span> 改写成 zod schema。主要变化：
+          <ul class="mt-2 space-y-1 list-disc list-inside text-zinc-300 text-[13px]">
+            <li>每个 frame 类型都是独立的 <span class="mono text-orange-300">z.object</span></li>
+            <li>顶层用 <span class="mono text-orange-300">discriminatedUnion("t", ...)</span> 自动做类型收窄</li>
+            <li>二进制字段保留 <span class="mono text-orange-300">Uint8Array</span> 语义</li>
+          </ul>
+          接下来要不要我给每个 frame 加个单元测试？
+        </div>
+
+        <div class="flex items-center gap-3 text-xs text-zinc-500">
+          <span class="text-emerald-400">✓</span>
+          <span>完成于 3.4s · 1 文件 · 3 tool calls · 4.2k tokens</span>
+        </div>
+
+        <!-- pending approval inline -->
+        <div class="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4">
+          <div class="flex items-start gap-3">
+            <div class="w-8 h-8 rounded-lg bg-amber-500/20 text-amber-400 grid place-items-center shrink-0">⚠</div>
+            <div class="flex-1">
+              <div class="text-sm text-amber-400 font-medium mb-1">请求权限 · Bash</div>
+              <div class="text-xs text-zinc-400 mb-3">Claude 想安装依赖，以便运行新 schema 的校验。</div>
+              <div class="mono text-xs bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-zinc-300 mb-3">
+                pnpm add zod
+              </div>
+              <div class="flex gap-2">
+                <button class="px-3 py-1.5 text-xs rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300">拒绝</button>
+                <button class="px-3 py-1.5 text-xs rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300">查看详情</button>
+                <button class="ml-auto px-3 py-1.5 text-xs rounded bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-medium">允许一次</button>
+                <button class="px-3 py-1.5 text-xs rounded border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/10">总是允许</button>
+              </div>
+              <div class="mt-3 text-[11px] text-zinc-500 flex items-center gap-2">
+                <span>📱</span>
+                <span>已同步推送到 iPhone 15 Pro · 等你或手机批准</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- input bar -->
+    <div class="border-t border-zinc-900 p-4">
+      <div class="max-w-3xl mx-auto">
+
+        <!-- command bar (pinned commands + skills + MCP) -->
+        <div class="mb-2 flex items-center gap-1.5 overflow-x-auto scrollbar pb-1">
+          <!-- pinned slash commands -->
+          <button class="shrink-0 text-[11px] px-2.5 py-1.5 rounded-md bg-zinc-900 border border-zinc-800 text-zinc-300 hover:border-zinc-700 flex items-center gap-1.5" title="Slash command · /review">
+            <span class="w-1 h-1 rounded-full bg-sky-400"></span>
+            <span class="mono">/review</span>
+          </button>
+          <button class="shrink-0 text-[11px] px-2.5 py-1.5 rounded-md bg-zinc-900 border border-zinc-800 text-zinc-300 hover:border-zinc-700 flex items-center gap-1.5">
+            <span class="w-1 h-1 rounded-full bg-emerald-400"></span>
+            <span class="mono">/security-review</span>
+          </button>
+          <button class="shrink-0 text-[11px] px-2.5 py-1.5 rounded-md bg-orange-500/10 border border-orange-500/30 text-orange-300 hover:bg-orange-500/20 flex items-center gap-1.5">
+            <span class="w-1 h-1 rounded-full bg-orange-400"></span>
+            <span class="mono">/deploy-staging</span>
+          </button>
+          <button class="shrink-0 text-[11px] px-2.5 py-1.5 rounded-md bg-orange-500/10 border border-orange-500/30 text-orange-300 hover:bg-orange-500/20 flex items-center gap-1.5">
+            <span class="w-1 h-1 rounded-full bg-orange-400"></span>
+            <span class="mono">/test</span>
+          </button>
+
+          <span class="shrink-0 w-px h-5 bg-zinc-800 mx-0.5"></span>
+
+          <!-- skills -->
+          <button class="shrink-0 text-[11px] px-2.5 py-1.5 rounded-md bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-zinc-200 hover:border-zinc-700 flex items-center gap-1" title="Skill · simplify">
+            <span>✨</span>
+            <span>simplify</span>
+          </button>
+          <button class="shrink-0 text-[11px] px-2.5 py-1.5 rounded-md bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-zinc-200 hover:border-zinc-700 flex items-center gap-1" title="Skill · design-system">
+            <span>🎨</span>
+            <span>design-system</span>
+          </button>
+
+          <span class="shrink-0 w-px h-5 bg-zinc-800 mx-0.5"></span>
+
+          <!-- MCP tools -->
+          <button class="shrink-0 text-[11px] px-2.5 py-1.5 rounded-md bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-zinc-200 hover:border-zinc-700 flex items-center gap-1" title="MCP tool · tavily_search">
+            <span class="text-sky-400">🔌</span>
+            <span class="mono">tavily.search</span>
+          </button>
+          <button class="shrink-0 text-[11px] px-2.5 py-1.5 rounded-md bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-zinc-200 hover:border-zinc-700 flex items-center gap-1" title="MCP server · github">
+            <span class="text-violet-400">🔌</span>
+            <span class="mono">github.*</span>
+          </button>
+
+          <span class="shrink-0 w-px h-5 bg-zinc-800 mx-0.5"></span>
+
+          <!-- modes -->
+          <button class="shrink-0 text-[11px] px-2.5 py-1.5 rounded-md bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-zinc-200 hover:border-zinc-700 flex items-center gap-1">
+            <span>🧭</span>
+            <span>Plan mode</span>
+          </button>
+
+          <a href="config.html" class="shrink-0 text-[11px] px-2.5 py-1.5 rounded-md text-zinc-500 hover:text-zinc-300 flex items-center gap-1" title="管理命令、Skills、MCP">
+            <span>⚙</span>
+            <span>管理</span>
+          </a>
+        </div>
+
+        <div class="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-3 focus-within:border-zinc-700">
+          <div class="flex gap-2 mb-2 flex-wrap">
+            <span class="text-[11px] px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-400">📎 frames.ts</span>
+            <span class="text-[11px] px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-400">@ docs/protocol.md</span>
+          </div>
+          <textarea
+            rows="2"
+            placeholder="接下来给每个 frame 加一个单元测试…  用 @ 引用文件，/ 触发 slash command"
+            class="w-full bg-transparent text-sm text-zinc-100 placeholder-zinc-600 resize-none outline-none"></textarea>
+          <div class="flex items-center justify-between mt-2">
+            <div class="flex items-center gap-1 text-zinc-500">
+              <button class="p-1.5 hover:bg-zinc-800 rounded text-xs">📎</button>
+              <button class="p-1.5 hover:bg-zinc-800 rounded text-xs">/</button>
+              <button class="p-1.5 hover:bg-zinc-800 rounded text-xs">@</button>
+              <button class="p-1.5 hover:bg-zinc-800 rounded text-xs">🖼</button>
+              <span class="ml-2 text-[11px]">Plan mode <span class="kbd">⇧⇥</span></span>
+            </div>
+            <div class="flex items-center gap-2">
+              <button class="p-2 rounded-lg hover:bg-zinc-800 text-zinc-400">🎤</button>
+              <button class="px-4 py-1.5 rounded-lg bg-gradient-to-r from-orange-500 to-rose-500 text-white text-sm font-medium">
+                Send <span class="ml-1 kbd !bg-white/20 !border-white/10 !text-white/80">↵</span>
+              </button>
+            </div>
+          </div>
+        </div>
+        <div class="flex items-center justify-between mt-2 text-[11px] text-zinc-600">
+          <div class="flex items-center gap-3">
+            <span><span class="kbd">⌘K</span> 命令面板</span>
+            <span><span class="kbd">⌘T</span> 切换终端视图</span>
+            <span><span class="kbd">Esc</span> 打断</span>
+          </div>
+          <div>claude-opus-4-7 · 64k used of 200k</div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- ============== RIGHT: File + preview ============== -->
+  <aside class="bg-zinc-950 border-l border-zinc-900 flex flex-col overflow-hidden">
+
+    <div class="h-12 border-b border-zinc-900 px-4 flex items-center gap-1">
+      <button class="px-3 py-1 text-xs rounded-md bg-zinc-800 text-zinc-200 font-medium">文件</button>
+      <button class="px-3 py-1 text-xs rounded-md text-zinc-500 hover:text-zinc-300">Git</button>
+      <button class="px-3 py-1 text-xs rounded-md text-zinc-500 hover:text-zinc-300">终端</button>
+      <button class="ml-auto px-2 py-1 text-xs text-zinc-500 hover:text-zinc-300">⋯</button>
+    </div>
+
+    <!-- search -->
+    <div class="px-3 py-2 border-b border-zinc-900">
+      <div class="flex items-center gap-2 px-2.5 py-1.5 rounded-md bg-zinc-900 border border-zinc-800 text-xs">
+        <span class="text-zinc-600">⌕</span>
+        <input placeholder="搜索文件…" class="bg-transparent outline-none flex-1 text-zinc-300 placeholder-zinc-600" />
+        <span class="kbd">⌘P</span>
+      </div>
+    </div>
+
+    <!-- tree -->
+    <div class="flex-1 overflow-y-auto scrollbar px-2 py-2">
+      <div class="text-[10px] uppercase tracking-widest text-zinc-600 px-2 py-1">Working tree</div>
+      <div class="mono text-[12px] space-y-0.5">
+        <div class="px-2 py-0.5 text-zinc-300 hover:bg-zinc-900 rounded cursor-pointer">▾ packages</div>
+        <div class="pl-4">
+          <div class="px-2 py-0.5 text-zinc-300 hover:bg-zinc-900 rounded cursor-pointer">▾ protocol</div>
+          <div class="pl-4">
+            <div class="px-2 py-0.5 text-zinc-400 hover:bg-zinc-900 rounded cursor-pointer">▾ src</div>
+            <div class="pl-4">
+              <div class="px-2 py-0.5 bg-orange-500/10 text-orange-300 rounded flex items-center justify-between">
+                <span>frames.ts</span>
+                <span class="text-[10px] text-orange-400">M</span>
+              </div>
+              <div class="px-2 py-0.5 text-zinc-400 hover:bg-zinc-900 rounded cursor-pointer">schema.ts</div>
+              <div class="px-2 py-0.5 text-zinc-500 hover:bg-zinc-900 rounded cursor-pointer flex justify-between">
+                <span>index.ts</span>
+                <span class="text-[10px] text-zinc-600"></span>
+              </div>
+            </div>
+            <div class="px-2 py-0.5 text-zinc-400 hover:bg-zinc-900 rounded cursor-pointer">package.json</div>
+          </div>
+          <div class="px-2 py-0.5 text-zinc-400 hover:bg-zinc-900 rounded cursor-pointer">▸ host</div>
+          <div class="px-2 py-0.5 text-zinc-400 hover:bg-zinc-900 rounded cursor-pointer">▸ web</div>
+        </div>
+        <div class="px-2 py-0.5 text-zinc-300 hover:bg-zinc-900 rounded cursor-pointer">▸ docs</div>
+        <div class="px-2 py-0.5 text-zinc-300 hover:bg-zinc-900 rounded cursor-pointer">▸ .claude</div>
+        <div class="px-2 py-0.5 text-zinc-500 hover:bg-zinc-900 rounded cursor-pointer">README.md</div>
+        <div class="px-2 py-0.5 text-zinc-500 hover:bg-zinc-900 rounded cursor-pointer">package.json</div>
+        <div class="px-2 py-0.5 text-zinc-500 hover:bg-zinc-900 rounded cursor-pointer">pnpm-workspace.yaml</div>
+      </div>
+
+      <div class="text-[10px] uppercase tracking-widest text-zinc-600 px-2 py-1 mt-4">Recently opened</div>
+      <div class="space-y-0.5 text-xs">
+        <div class="px-2 py-1 text-zinc-400 hover:bg-zinc-900 rounded cursor-pointer flex items-center justify-between">
+          <span class="mono truncate">frames.ts</span>
+          <span class="text-[10px] text-zinc-600">now</span>
+        </div>
+        <div class="px-2 py-1 text-zinc-500 hover:bg-zinc-900 rounded cursor-pointer flex items-center justify-between">
+          <span class="mono truncate">schema.ts</span>
+          <span class="text-[10px] text-zinc-600">5m</span>
+        </div>
+        <div class="px-2 py-1 text-zinc-500 hover:bg-zinc-900 rounded cursor-pointer flex items-center justify-between">
+          <span class="mono truncate">protocol.md</span>
+          <span class="text-[10px] text-zinc-600">22m</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- git status footer -->
+    <div class="border-t border-zinc-900 p-3 text-xs">
+      <div class="flex items-center gap-2 mb-2">
+        <span class="w-4 h-4 rounded bg-violet-500/20 text-violet-400 grid place-items-center text-[10px]">⎇</span>
+        <span class="text-zinc-300">main</span>
+        <span class="text-zinc-600 ml-auto">↑0 ↓0</span>
+      </div>
+      <div class="space-y-1">
+        <div class="flex items-center gap-2 text-[11px]">
+          <span class="text-amber-400 w-3 text-center">M</span>
+          <span class="mono text-zinc-400 truncate">protocol/src/frames.ts</span>
+        </div>
+        <div class="flex items-center gap-2 text-[11px]">
+          <span class="text-emerald-400 w-3 text-center">A</span>
+          <span class="mono text-zinc-400 truncate">protocol/src/zod.ts</span>
+        </div>
+      </div>
+      <button class="mt-3 w-full py-1.5 rounded-md bg-zinc-900 border border-zinc-800 text-xs text-zinc-300 hover:bg-zinc-800">
+        提交 2 个变更
+      </button>
+    </div>
+  </aside>
+
+</div>
+
+<!-- back to index -->
+<a href="index.html" class="fixed bottom-4 left-4 px-3 py-1.5 rounded-lg bg-zinc-900 border border-zinc-800 text-xs text-zinc-400 hover:text-white hover:border-zinc-600">
+  ← 返回总览
+</a>
+
+</body>
+</html>

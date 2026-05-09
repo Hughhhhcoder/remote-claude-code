@@ -1,0 +1,19 @@
+{
+  "name": "rcc",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Remote Claude Code — 在任何网络下通过 Web 端稳定控制本地 Claude Code",
+  "workspaces": ["packages/*"],
+  "scripts": {
+    "postinstall": "node scripts/fix-node-pty.mjs",
+    "dev": "pnpm --parallel -r dev",
+    "dev:host": "pnpm --filter @rcc/host dev",
+    "dev:web": "pnpm --filter @rcc/web dev",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck"
+  },
+  "packageManager": "pnpm@9.4.0",
+  "engines": {
+    "node": ">=20"
+  }
+}

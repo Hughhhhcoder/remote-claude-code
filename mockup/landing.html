@@ -1,0 +1,599 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>RCC — 任何地方，控制你的 Claude Code</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: ui-sans-serif, -apple-system, "SF Pro", "PingFang SC", system-ui; -webkit-font-smoothing: antialiased; }
+  .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+  .grid-bg { background-image: radial-gradient(circle at 1px 1px, rgba(255,255,255,0.05) 1px, transparent 0); background-size: 32px 32px; }
+  .gradient-text { background: linear-gradient(135deg, #fb923c, #f43f5e, #a855f7); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .glow { box-shadow: 0 0 80px -20px rgba(251,146,60,0.3), 0 0 120px -60px rgba(244,63,94,0.4); }
+  .card-hover { transition: all .3s ease; }
+  .card-hover:hover { transform: translateY(-4px); border-color: rgba(251,146,60,0.5); }
+  .scroll-fade { mask-image: linear-gradient(to bottom, black 85%, transparent); }
+  /* terminal style */
+  .term-line { white-space: pre; font-size: 12px; line-height: 1.6; }
+  .dot { width:10px; height:10px; border-radius:50%; display:inline-block; }
+  /* pulse ring */
+  @keyframes pulsering { 0% { transform: scale(.9); opacity: 1 } 80%,100% { transform: scale(1.8); opacity: 0 } }
+  .ring-anim::before, .ring-anim::after { content:''; position:absolute; inset:0; border-radius:50%; border:2px solid rgba(16,185,129,.5); animation: pulsering 2s ease-out infinite; }
+  .ring-anim::after { animation-delay: 1s; }
+
+  /* connection line dash anim */
+  @keyframes dashmove { to { stroke-dashoffset: -30; } }
+  .dash-flow { stroke-dasharray: 6 4; animation: dashmove 1.2s linear infinite; }
+</style>
+</head>
+<body class="bg-zinc-950 text-zinc-100">
+
+<!-- ======= NAV ======= -->
+<header class="sticky top-0 z-40 backdrop-blur-xl bg-zinc-950/70 border-b border-zinc-900">
+  <div class="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
+    <div class="flex items-center gap-2.5">
+      <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-orange-500 to-rose-600 grid place-items-center font-bold text-sm">R</div>
+      <div class="font-semibold tracking-tight">rcc</div>
+      <span class="ml-2 text-xs px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-400">v0.1 preview</span>
+    </div>
+    <nav class="hidden md:flex items-center gap-8 text-sm text-zinc-400">
+      <a href="#features" class="hover:text-white transition">特性</a>
+      <a href="#how" class="hover:text-white transition">工作原理</a>
+      <a href="#security" class="hover:text-white transition">安全</a>
+      <a href="#pricing" class="hover:text-white transition">定价</a>
+      <a href="index.html" class="hover:text-white transition">全部 Mockup</a>
+    </nav>
+    <div class="flex items-center gap-3">
+      <a href="desktop.html" class="hidden sm:inline text-sm text-zinc-300 hover:text-white">打开应用 →</a>
+      <a href="pairing.html" class="text-sm px-4 py-2 rounded-lg bg-white text-zinc-900 hover:bg-zinc-200 font-medium transition">开始配对</a>
+    </div>
+  </div>
+</header>
+
+<!-- ======= HERO ======= -->
+<section class="relative overflow-hidden">
+  <div class="absolute inset-0 grid-bg"></div>
+  <div class="absolute -top-40 left-1/2 -translate-x-1/2 w-[900px] h-[600px] bg-gradient-to-br from-orange-500/20 via-rose-500/10 to-violet-500/20 blur-3xl rounded-full pointer-events-none"></div>
+
+  <div class="relative max-w-7xl mx-auto px-6 pt-20 pb-24 md:pt-28 md:pb-32">
+    <div class="max-w-3xl">
+      <div class="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border border-zinc-800 bg-zinc-900/60 text-xs text-zinc-400 mb-8">
+        <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+        Preview · 现已开放内测邀请
+      </div>
+      <h1 class="text-5xl md:text-7xl font-semibold tracking-tight leading-[1.05] mb-6">
+        在任何网络下，<br/>
+        <span class="gradient-text">控制你家里那台 Mac</span><br/>
+        跑 Claude Code。
+      </h1>
+      <p class="text-lg md:text-xl text-zinc-400 leading-relaxed max-w-2xl mb-10">
+        RCC 是一层薄薄的传输协议 + Web 端界面。你的 Claude Code 仍然跑在本地、访问本地文件、
+        调用本地 MCP。而你用任何手机或浏览器就能和它对话。
+        <span class="text-zinc-200">体感和坐在本地电脑前一模一样。</span>
+      </p>
+      <div class="flex flex-wrap gap-3">
+        <a href="pairing.html" class="px-6 py-3 rounded-xl bg-white text-zinc-900 font-medium hover:bg-zinc-200 transition">
+          1 分钟配对上手
+        </a>
+        <a href="#how" class="px-6 py-3 rounded-xl border border-zinc-800 hover:border-zinc-600 transition">
+          看看怎么工作的
+        </a>
+      </div>
+
+      <div class="mt-12 flex items-center gap-6 text-sm text-zinc-500">
+        <div class="flex items-center gap-2"><span class="text-emerald-400">✓</span> 不用开端口</div>
+        <div class="flex items-center gap-2"><span class="text-emerald-400">✓</span> 端到端加密</div>
+        <div class="flex items-center gap-2"><span class="text-emerald-400">✓</span> 手机/电脑共享会话</div>
+      </div>
+    </div>
+
+    <!-- hero device preview -->
+    <div class="mt-20 relative">
+      <div class="relative mx-auto" style="max-width: 1000px">
+        <!-- laptop -->
+        <div class="rounded-2xl bg-zinc-900 border border-zinc-800 shadow-2xl glow overflow-hidden">
+          <!-- title bar -->
+          <div class="flex items-center gap-2 px-4 py-3 border-b border-zinc-800 bg-zinc-900/80">
+            <span class="dot bg-rose-500"></span>
+            <span class="dot bg-amber-400"></span>
+            <span class="dot bg-emerald-500"></span>
+            <div class="ml-4 text-xs text-zinc-500 mono">rcc.yourname.cc  ·  Mac-Studio (home)</div>
+            <div class="ml-auto flex items-center gap-1.5 text-xs text-emerald-400">
+              <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> connected · 18ms
+            </div>
+          </div>
+
+          <div class="grid grid-cols-12 h-[460px]">
+            <!-- sidebar -->
+            <aside class="col-span-2 bg-zinc-950 border-r border-zinc-800 p-3 text-xs">
+              <div class="text-zinc-600 uppercase tracking-wider mb-2">Sessions</div>
+              <div class="space-y-1">
+                <div class="px-2 py-1.5 rounded bg-zinc-800 text-zinc-200 flex items-center gap-2"><span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>rcc</div>
+                <div class="px-2 py-1.5 rounded text-zinc-500 hover:bg-zinc-900">blog/api</div>
+                <div class="px-2 py-1.5 rounded text-zinc-500 hover:bg-zinc-900">site/fix</div>
+              </div>
+              <div class="text-zinc-600 uppercase tracking-wider mt-5 mb-2">Devices</div>
+              <div class="space-y-1">
+                <div class="px-2 py-1.5 rounded text-zinc-400">📱 iPhone 15</div>
+                <div class="px-2 py-1.5 rounded text-zinc-400">💻 MBA (work)</div>
+              </div>
+            </aside>
+
+            <!-- chat -->
+            <div class="col-span-7 p-5 overflow-hidden flex flex-col">
+              <div class="flex-1 space-y-4 scroll-fade">
+                <div class="flex justify-end">
+                  <div class="max-w-[75%] px-3.5 py-2 rounded-2xl rounded-br-md bg-zinc-800 text-sm text-zinc-100">
+                    帮我把 <span class="mono text-orange-300">protocol.ts</span> 里的 Frame 类型改成 zod schema
+                  </div>
+                </div>
+                <div class="text-xs text-zinc-500 flex items-center gap-2 mono">● Reading <span class="text-zinc-300">protocol.ts</span></div>
+                <div class="text-xs text-zinc-500 flex items-center gap-2 mono">● Editing <span class="text-zinc-300">protocol.ts</span> <span class="text-emerald-400">+24</span> <span class="text-rose-400">-12</span></div>
+                <div class="rounded-lg border border-zinc-800 overflow-hidden">
+                  <div class="px-3 py-1.5 text-xs text-zinc-500 bg-zinc-900 border-b border-zinc-800 mono flex items-center justify-between">
+                    <span>packages/protocol/src/frames.ts</span>
+                    <span class="text-zinc-600">+24 / -12</span>
+                  </div>
+                  <div class="bg-zinc-950 text-[11px] mono p-3 space-y-0.5">
+                    <div class="text-rose-400">- type Frame = { t: string; sid: string; data: any }</div>
+                    <div class="text-emerald-400">+ const PtyOut = z.object({ t: z.literal("pty.out"), sid: z.string(), ... })</div>
+                    <div class="text-emerald-400">+ const PtyIn  = z.object({ t: z.literal("pty.in"),  sid: z.string(), ... })</div>
+                    <div class="text-zinc-600">  ...</div>
+                    <div class="text-emerald-400">+ export const Frame = z.discriminatedUnion("t", [PtyOut, PtyIn, ...])</div>
+                  </div>
+                </div>
+                <div class="text-xs text-emerald-400 flex items-center gap-2 mono">✓ Done · 3.2s</div>
+              </div>
+              <div class="mt-4 flex items-center gap-2 p-2 rounded-xl border border-zinc-800 bg-zinc-900/60">
+                <div class="flex-1 text-sm text-zinc-500 px-2">接下来给每个 frame 加一个单元测试…</div>
+                <button class="text-xs px-2 py-1 rounded bg-zinc-800 text-zinc-400">🎤</button>
+                <button class="text-xs px-3 py-1 rounded bg-gradient-to-r from-orange-500 to-rose-500 text-white">发送</button>
+              </div>
+            </div>
+
+            <!-- right panel -->
+            <aside class="col-span-3 bg-zinc-950 border-l border-zinc-800 p-4 text-xs">
+              <div class="text-zinc-600 uppercase tracking-wider mb-2">Working tree</div>
+              <div class="space-y-0.5 text-zinc-400 mono">
+                <div>▸ packages/</div>
+                <div class="pl-3">▾ protocol/</div>
+                <div class="pl-6 text-orange-400">● frames.ts</div>
+                <div class="pl-6">  schema.ts</div>
+                <div>▸ docs/</div>
+                <div>▸ .claude/</div>
+              </div>
+              <div class="text-zinc-600 uppercase tracking-wider mt-5 mb-2">Pending approval</div>
+              <div class="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 space-y-2">
+                <div class="text-amber-400 font-medium">Bash · write</div>
+                <div class="mono text-[11px] text-zinc-300">pnpm add zod</div>
+                <div class="flex gap-1">
+                  <button class="flex-1 text-[11px] py-1 rounded bg-zinc-800 text-zinc-300">拒绝</button>
+                  <button class="flex-1 text-[11px] py-1 rounded bg-emerald-500 text-zinc-900 font-medium">允许</button>
+                </div>
+              </div>
+            </aside>
+          </div>
+        </div>
+
+        <!-- phone peeking in -->
+        <div class="hidden md:block absolute -right-4 -bottom-10 w-[200px] rounded-[32px] border-[10px] border-zinc-900 bg-zinc-950 shadow-2xl overflow-hidden" style="height:410px">
+          <div class="h-5 bg-zinc-900 flex items-center justify-center"><div class="w-20 h-3 bg-black rounded-full"></div></div>
+          <div class="bg-zinc-950 h-full text-[10px] p-3">
+            <div class="flex items-center justify-between mb-3">
+              <span class="text-zinc-500">rcc · Mac-Studio</span>
+              <span class="text-emerald-400">●</span>
+            </div>
+            <div class="space-y-2">
+              <div class="px-2 py-1.5 rounded bg-amber-500/10 border border-amber-500/30">
+                <div class="text-amber-400 font-medium">⚠ 请求权限</div>
+                <div class="mono text-zinc-300 mt-1">pnpm add zod</div>
+                <div class="flex gap-1 mt-2">
+                  <div class="flex-1 text-center py-1 rounded bg-zinc-800 text-zinc-400">拒</div>
+                  <div class="flex-1 text-center py-1 rounded bg-emerald-500 text-zinc-900">允</div>
+                </div>
+              </div>
+              <div class="px-2 py-1.5 rounded bg-zinc-900 text-zinc-400">● Editing frames.ts</div>
+              <div class="px-2 py-1.5 rounded bg-zinc-900 text-emerald-400">✓ Done</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<!-- ======= TRUST STRIP ======= -->
+<section class="border-y border-zinc-900 bg-zinc-950/50">
+  <div class="max-w-7xl mx-auto px-6 py-10 grid grid-cols-2 md:grid-cols-4 gap-6 text-center">
+    <div>
+      <div class="text-3xl font-semibold gradient-text">&lt;150ms</div>
+      <div class="text-sm text-zinc-500 mt-1">同城输入延迟</div>
+    </div>
+    <div>
+      <div class="text-3xl font-semibold gradient-text">100%</div>
+      <div class="text-sm text-zinc-500 mt-1">CC 原生功能兼容</div>
+    </div>
+    <div>
+      <div class="text-3xl font-semibold gradient-text">E2E</div>
+      <div class="text-sm text-zinc-500 mt-1">应用层加密</div>
+    </div>
+    <div>
+      <div class="text-3xl font-semibold gradient-text">0 开放端口</div>
+      <div class="text-sm text-zinc-500 mt-1">出站连接架构</div>
+    </div>
+  </div>
+</section>
+
+<!-- ======= FEATURES ======= -->
+<section id="features" class="py-24 relative">
+  <div class="max-w-7xl mx-auto px-6">
+    <div class="max-w-2xl mb-16">
+      <div class="text-orange-400 text-sm font-medium uppercase tracking-widest mb-3">Features</div>
+      <h2 class="text-4xl md:text-5xl font-semibold tracking-tight mb-6">像在本地一样用 CC，无论你在哪</h2>
+      <p class="text-zinc-400 leading-relaxed">
+        RCC 不是一个新的 AI Agent。它只做一件事：把你本地那个真实的 Claude Code 进程，安全地搬到任意浏览器里。
+      </p>
+    </div>
+
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+
+      <div class="card-hover p-6 rounded-2xl border border-zinc-800 bg-gradient-to-br from-zinc-900/80 to-zinc-900/40">
+        <div class="w-11 h-11 rounded-xl bg-orange-500/10 text-orange-400 grid place-items-center mb-5 text-xl">⚡</div>
+        <h3 class="text-lg font-semibold mb-2">不改 CC 任何一行</h3>
+        <p class="text-sm text-zinc-400 leading-relaxed">
+          Host daemon 用 pty 包住真实的 <code class="mono text-orange-300 text-xs">claude</code> 命令。
+          所有 slash commands / hooks / MCP / plan mode 原样生效。CC 官方升级，RCC 自动受益。
+        </p>
+      </div>
+
+      <div class="card-hover p-6 rounded-2xl border border-zinc-800 bg-gradient-to-br from-zinc-900/80 to-zinc-900/40">
+        <div class="w-11 h-11 rounded-xl bg-sky-500/10 text-sky-400 grid place-items-center mb-5 text-xl">🌐</div>
+        <h3 class="text-lg font-semibold mb-2">出站隧道，零配置穿透</h3>
+        <p class="text-sm text-zinc-400 leading-relaxed">
+          基于 Cloudflare Tunnel。无需路由器映射、DDNS、VPN。
+          第一次启动自动给你一个固定子域：<code class="mono text-xs text-sky-300">rcc-yourname.trycf.com</code>。
+        </p>
+      </div>
+
+      <div class="card-hover p-6 rounded-2xl border border-zinc-800 bg-gradient-to-br from-zinc-900/80 to-zinc-900/40">
+        <div class="w-11 h-11 rounded-xl bg-emerald-500/10 text-emerald-400 grid place-items-center mb-5 text-xl">📱</div>
+        <h3 class="text-lg font-semibold mb-2">手机是一等公民</h3>
+        <p class="text-sm text-zinc-400 leading-relaxed">
+          不是把桌面版塞进小屏。语义化卡片、虚拟键盘上方的 CC 快捷键条、
+          长按说话、权限请求直推锁屏。地铁上也能推进任务。
+        </p>
+      </div>
+
+      <div class="card-hover p-6 rounded-2xl border border-zinc-800 bg-gradient-to-br from-zinc-900/80 to-zinc-900/40">
+        <div class="w-11 h-11 rounded-xl bg-violet-500/10 text-violet-400 grid place-items-center mb-5 text-xl">🔁</div>
+        <h3 class="text-lg font-semibold mb-2">多端镜像，无缝接续</h3>
+        <p class="text-sm text-zinc-400 leading-relaxed">
+          电脑上开的任务，手机打开立刻看到进度。CRDT 同步输入状态，
+          两台设备同时写字也不会冲突。断线自动重连补帧，不丢字符。
+        </p>
+      </div>
+
+      <div class="card-hover p-6 rounded-2xl border border-zinc-800 bg-gradient-to-br from-zinc-900/80 to-zinc-900/40">
+        <div class="w-11 h-11 rounded-xl bg-rose-500/10 text-rose-400 grid place-items-center mb-5 text-xl">🛡</div>
+        <h3 class="text-lg font-semibold mb-2">权限审批走移动端</h3>
+        <p class="text-sm text-zinc-400 leading-relaxed">
+          CC 要执行危险命令？弹窗推到你手机锁屏。Face ID 一按即允许，
+          未确认不会执行。比坐在电脑前更安全。
+        </p>
+      </div>
+
+      <div class="card-hover p-6 rounded-2xl border border-zinc-800 bg-gradient-to-br from-zinc-900/80 to-zinc-900/40">
+        <div class="w-11 h-11 rounded-xl bg-amber-500/10 text-amber-400 grid place-items-center mb-5 text-xl">🔐</div>
+        <h3 class="text-lg font-semibold mb-2">端到端加密</h3>
+        <p class="text-sm text-zinc-400 leading-relaxed">
+          Passkey (WebAuthn) 免密码登录。应用层 libsodium E2E，
+          即便 Cloudflare 被攻破，攻击者只看到密文。
+        </p>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- ======= ARCHITECTURE ======= -->
+<section id="how" class="py-24 relative bg-gradient-to-b from-zinc-950 via-zinc-900/30 to-zinc-950">
+  <div class="max-w-7xl mx-auto px-6">
+    <div class="max-w-2xl mb-16">
+      <div class="text-sky-400 text-sm font-medium uppercase tracking-widest mb-3">How it works</div>
+      <h2 class="text-4xl md:text-5xl font-semibold tracking-tight mb-6">架构一图看懂</h2>
+      <p class="text-zinc-400 leading-relaxed">
+        你的 Mac 主动打一条出站连接到 Cloudflare 边缘节点。浏览器从另一头拨进来，
+        中间只做转发、不解密。你的代码从不离开本机。
+      </p>
+    </div>
+
+    <!-- architecture diagram -->
+    <div class="rounded-3xl border border-zinc-800 bg-zinc-950 p-8 md:p-12">
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-8 items-center">
+
+        <!-- host -->
+        <div class="relative">
+          <div class="text-xs uppercase tracking-widest text-zinc-500 mb-3">Local Mac</div>
+          <div class="rounded-2xl border border-zinc-800 bg-gradient-to-br from-zinc-900 to-zinc-950 p-5 space-y-3">
+            <div class="flex items-center gap-2">
+              <div class="w-8 h-8 rounded-lg bg-orange-500/20 grid place-items-center">🖥</div>
+              <div>
+                <div class="font-medium text-sm">rcc-host</div>
+                <div class="text-xs text-zinc-500">daemon · Bun</div>
+              </div>
+            </div>
+            <div class="border-t border-zinc-800 pt-3 space-y-1.5 text-xs mono">
+              <div class="text-zinc-400">▸ node-pty</div>
+              <div class="text-orange-300">  └─ claude (real CLI)</div>
+              <div class="text-zinc-400">▸ ws server</div>
+              <div class="text-zinc-400">▸ cloudflared</div>
+            </div>
+            <div class="flex items-center gap-2 text-xs">
+              <span class="relative"><span class="w-2 h-2 rounded-full bg-emerald-400 inline-block ring-anim absolute"></span><span class="w-2 h-2 rounded-full bg-emerald-400 inline-block relative"></span></span>
+              <span class="text-emerald-400 ml-3">online</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- center -->
+        <div class="relative text-center">
+          <svg class="mx-auto mb-4" width="100%" height="100" viewBox="0 0 300 100">
+            <line x1="0" y1="50" x2="120" y2="50" stroke="#fb923c" stroke-width="2" class="dash-flow"/>
+            <line x1="180" y1="50" x2="300" y2="50" stroke="#38bdf8" stroke-width="2" class="dash-flow"/>
+            <circle cx="150" cy="50" r="28" fill="none" stroke="#52525b" stroke-width="1"/>
+            <circle cx="150" cy="50" r="18" fill="#18181b" stroke="#71717a" stroke-width="1"/>
+            <text x="150" y="54" text-anchor="middle" fill="#d4d4d8" font-size="10" font-family="monospace">CF</text>
+          </svg>
+          <div class="text-xs text-zinc-500 uppercase tracking-widest">Cloudflare Edge</div>
+          <div class="mono text-sm text-zinc-300 mt-1">rcc-yourname.trycf.com</div>
+          <div class="text-xs text-zinc-500 mt-2">TLS · 仅转发 · 内容加密</div>
+        </div>
+
+        <!-- clients -->
+        <div class="relative">
+          <div class="text-xs uppercase tracking-widest text-zinc-500 mb-3 text-right">Your devices</div>
+          <div class="space-y-3">
+            <div class="rounded-xl border border-zinc-800 bg-gradient-to-br from-zinc-900 to-zinc-950 p-4 flex items-center gap-3">
+              <div class="w-9 h-9 rounded-lg bg-sky-500/20 grid place-items-center">💻</div>
+              <div class="flex-1">
+                <div class="text-sm font-medium">浏览器 · Desktop</div>
+                <div class="text-xs text-zinc-500">任意电脑 · PWA</div>
+              </div>
+              <span class="text-xs text-emerald-400">●</span>
+            </div>
+            <div class="rounded-xl border border-zinc-800 bg-gradient-to-br from-zinc-900 to-zinc-950 p-4 flex items-center gap-3">
+              <div class="w-9 h-9 rounded-lg bg-emerald-500/20 grid place-items-center">📱</div>
+              <div class="flex-1">
+                <div class="text-sm font-medium">iPhone · PWA</div>
+                <div class="text-xs text-zinc-500">4G / 5G / WiFi</div>
+              </div>
+              <span class="text-xs text-emerald-400">●</span>
+            </div>
+            <div class="rounded-xl border border-dashed border-zinc-800 bg-zinc-950/60 p-4 flex items-center gap-3 text-zinc-600">
+              <div class="w-9 h-9 rounded-lg bg-zinc-800 grid place-items-center">＋</div>
+              <div class="text-sm">添加设备…</div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- pipeline explanation -->
+      <div class="mt-10 pt-8 border-t border-zinc-800 grid grid-cols-1 md:grid-cols-4 gap-6 text-sm">
+        <div>
+          <div class="text-orange-400 font-medium mb-1">① Host 启动</div>
+          <div class="text-zinc-400">一条命令 <code class="mono text-xs">rcc-host start</code>，pty 拉起 CC，cloudflared 建隧道。</div>
+        </div>
+        <div>
+          <div class="text-orange-400 font-medium mb-1">② 配对</div>
+          <div class="text-zinc-400">电脑显示 QR + 6 位码，手机扫一下、Face ID 确认，生成 passkey。</div>
+        </div>
+        <div>
+          <div class="text-orange-400 font-medium mb-1">③ 工作</div>
+          <div class="text-zinc-400">任何浏览器打开子域名，输入/输出走加密 WebSocket，多端同步。</div>
+        </div>
+        <div>
+          <div class="text-orange-400 font-medium mb-1">④ 审批</div>
+          <div class="text-zinc-400">危险操作弹窗推到所有已配对设备，任一端允许即执行。</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======= USE CASES ======= -->
+<section class="py-24">
+  <div class="max-w-7xl mx-auto px-6">
+    <div class="max-w-2xl mb-16">
+      <div class="text-emerald-400 text-sm font-medium uppercase tracking-widest mb-3">Use cases</div>
+      <h2 class="text-4xl md:text-5xl font-semibold tracking-tight mb-6">它什么时候最有用</h2>
+    </div>
+
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-5">
+      <div class="p-7 rounded-2xl border border-zinc-800 bg-gradient-to-br from-sky-500/5 to-transparent">
+        <div class="text-3xl mb-4">🚇</div>
+        <h3 class="font-semibold mb-2">通勤路上继续推进</h3>
+        <p class="text-sm text-zinc-400 leading-relaxed">
+          出门前让 CC 开始重构，地铁上打开手机看进度、批准权限、发新指令。
+          到公司前代码已经提交好 PR。
+        </p>
+      </div>
+      <div class="p-7 rounded-2xl border border-zinc-800 bg-gradient-to-br from-orange-500/5 to-transparent">
+        <div class="text-3xl mb-4">✈</div>
+        <h3 class="font-semibold mb-2">出差不用背电脑</h3>
+        <p class="text-sm text-zinc-400 leading-relaxed">
+          家里的 Mac 保持开机，带个 iPad 出差。在酒店 WiFi 下照常跑 CC，
+          享受家里机器的算力、MCP 配置、本地数据库。
+        </p>
+      </div>
+      <div class="p-7 rounded-2xl border border-zinc-800 bg-gradient-to-br from-rose-500/5 to-transparent">
+        <div class="text-3xl mb-4">🛋</div>
+        <h3 class="font-semibold mb-2">沙发上写代码</h3>
+        <p class="text-sm text-zinc-400 leading-relaxed">
+          不想回书房？拿着手机语音下指令："把 Header 改成 sticky"。
+          CC 改完、diff 推过来、你点个允许。整个过程不用坐起来。
+        </p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======= SECURITY ======= -->
+<section id="security" class="py-24 bg-gradient-to-b from-zinc-950 via-zinc-900/40 to-zinc-950 border-y border-zinc-900">
+  <div class="max-w-7xl mx-auto px-6">
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
+
+      <div>
+        <div class="text-rose-400 text-sm font-medium uppercase tracking-widest mb-3">Security</div>
+        <h2 class="text-4xl md:text-5xl font-semibold tracking-tight mb-6">比坐在电脑前还安全</h2>
+        <p class="text-zinc-400 leading-relaxed mb-8">
+          传统 SSH 远程方案有"完整 shell 权限"的问题。RCC 针对 AI Agent 场景重新设计了权限模型：
+          所有破坏性操作都需要移动端 Face ID 二次确认，形成天然的"双钥匙"。
+        </p>
+
+        <div class="space-y-4">
+          <div class="flex gap-4">
+            <div class="w-10 h-10 rounded-lg bg-rose-500/10 text-rose-400 grid place-items-center shrink-0 text-lg">🔐</div>
+            <div>
+              <div class="font-medium mb-1">无密码 · Passkey</div>
+              <div class="text-sm text-zinc-400">WebAuthn 标准。私钥在手机 Secure Enclave 里，连你自己都导不出来。</div>
+            </div>
+          </div>
+          <div class="flex gap-4">
+            <div class="w-10 h-10 rounded-lg bg-rose-500/10 text-rose-400 grid place-items-center shrink-0 text-lg">📦</div>
+            <div>
+              <div class="font-medium mb-1">应用层 E2E</div>
+              <div class="text-sm text-zinc-400">libsodium 在进入 TLS 前再加一层。Cloudflare 只看到加密字节。</div>
+            </div>
+          </div>
+          <div class="flex gap-4">
+            <div class="w-10 h-10 rounded-lg bg-rose-500/10 text-rose-400 grid place-items-center shrink-0 text-lg">🚫</div>
+            <div>
+              <div class="font-medium mb-1">设备管理 · 一键吊销</div>
+              <div class="text-sm text-zinc-400">手机丢了？从电脑端一条命令撤销它的 passkey，该设备立即断线。</div>
+            </div>
+          </div>
+          <div class="flex gap-4">
+            <div class="w-10 h-10 rounded-lg bg-rose-500/10 text-rose-400 grid place-items-center shrink-0 text-lg">⏸</div>
+            <div>
+              <div class="font-medium mb-1">默认 Plan Mode</div>
+              <div class="text-sm text-zinc-400">远程连接时 CC 默认不执行任何写操作，除非你明确同意。</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="relative">
+        <div class="rounded-2xl border border-zinc-800 bg-zinc-950 p-6 mono text-xs space-y-1">
+          <div class="text-zinc-500"># threat model</div>
+          <div class="mt-3"><span class="text-rose-400">[×]</span> <span class="text-zinc-400">MITM eavesdropping</span> → <span class="text-emerald-400">TLS + E2E</span></div>
+          <div><span class="text-rose-400">[×]</span> <span class="text-zinc-400">CF account pwned</span> → <span class="text-emerald-400">sees ciphertext only</span></div>
+          <div><span class="text-rose-400">[×]</span> <span class="text-zinc-400">Stolen phone</span> → <span class="text-emerald-400">revoke device</span></div>
+          <div><span class="text-rose-400">[×]</span> <span class="text-zinc-400">Replay attacks</span> → <span class="text-emerald-400">nonce + sliding window</span></div>
+          <div><span class="text-rose-400">[×]</span> <span class="text-zinc-400">Malicious prompt → rm -rf</span> → <span class="text-emerald-400">Face ID approve</span></div>
+          <div><span class="text-rose-400">[×]</span> <span class="text-zinc-400">Unknown device</span> → <span class="text-emerald-400">passkey required</span></div>
+          <div class="mt-3 text-zinc-500"># known residual risks</div>
+          <div><span class="text-amber-400">[!]</span> <span class="text-zinc-400">Host Mac compromised</span> → out of scope</div>
+          <div><span class="text-amber-400">[!]</span> <span class="text-zinc-400">You approve a bad command</span> → read before tapping allow</div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- ======= PRICING ======= -->
+<section id="pricing" class="py-24">
+  <div class="max-w-7xl mx-auto px-6">
+    <div class="text-center mb-14">
+      <div class="text-violet-400 text-sm font-medium uppercase tracking-widest mb-3">Pricing</div>
+      <h2 class="text-4xl md:text-5xl font-semibold tracking-tight mb-4">自托管免费，云托管按月</h2>
+      <p class="text-zinc-400 max-w-xl mx-auto">核心是开源的。想省心？我们提供托管版，帮你搞定域名、推送、设备同步。</p>
+    </div>
+
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-5 max-w-5xl mx-auto">
+
+      <div class="p-8 rounded-2xl border border-zinc-800 bg-zinc-950">
+        <div class="text-xs uppercase tracking-widest text-zinc-500 mb-3">Self-hosted</div>
+        <div class="text-3xl font-semibold mb-1">免费</div>
+        <div class="text-sm text-zinc-500 mb-6">开源 · 你自己跑</div>
+        <ul class="space-y-3 text-sm text-zinc-300 mb-8">
+          <li class="flex gap-2"><span class="text-emerald-400">✓</span> 全部功能</li>
+          <li class="flex gap-2"><span class="text-emerald-400">✓</span> 自带 cloudflared</li>
+          <li class="flex gap-2"><span class="text-emerald-400">✓</span> 无限设备</li>
+          <li class="flex gap-2"><span class="text-zinc-600">—</span> 自己处理升级</li>
+        </ul>
+        <button class="w-full py-2.5 rounded-lg border border-zinc-700 hover:border-zinc-500 transition text-sm">查看 GitHub</button>
+      </div>
+
+      <div class="p-8 rounded-2xl border-2 border-orange-500 bg-gradient-to-br from-orange-500/10 to-transparent relative">
+        <div class="absolute -top-3 left-1/2 -translate-x-1/2 text-xs px-3 py-1 rounded-full bg-orange-500 text-zinc-950 font-medium">Recommended</div>
+        <div class="text-xs uppercase tracking-widest text-orange-400 mb-3">Cloud</div>
+        <div class="text-3xl font-semibold mb-1">$9<span class="text-base text-zinc-500">/月</span></div>
+        <div class="text-sm text-zinc-500 mb-6">个人版 · 1 台主机</div>
+        <ul class="space-y-3 text-sm text-zinc-300 mb-8">
+          <li class="flex gap-2"><span class="text-emerald-400">✓</span> 一键托管域名</li>
+          <li class="flex gap-2"><span class="text-emerald-400">✓</span> Web Push 托管</li>
+          <li class="flex gap-2"><span class="text-emerald-400">✓</span> 崩溃上报 + 自升级</li>
+          <li class="flex gap-2"><span class="text-emerald-400">✓</span> 最多 10 台客户端</li>
+          <li class="flex gap-2"><span class="text-emerald-400">✓</span> 邮件支持</li>
+        </ul>
+        <button class="w-full py-2.5 rounded-lg bg-white text-zinc-900 font-medium hover:bg-zinc-200 transition text-sm">开始 14 天试用</button>
+      </div>
+
+      <div class="p-8 rounded-2xl border border-zinc-800 bg-zinc-950">
+        <div class="text-xs uppercase tracking-widest text-zinc-500 mb-3">Team</div>
+        <div class="text-3xl font-semibold mb-1">$29<span class="text-base text-zinc-500">/席/月</span></div>
+        <div class="text-sm text-zinc-500 mb-6">团队 · 多主机</div>
+        <ul class="space-y-3 text-sm text-zinc-300 mb-8">
+          <li class="flex gap-2"><span class="text-emerald-400">✓</span> Cloud 全部功能</li>
+          <li class="flex gap-2"><span class="text-emerald-400">✓</span> 共享 MCP 配置</li>
+          <li class="flex gap-2"><span class="text-emerald-400">✓</span> 审计日志</li>
+          <li class="flex gap-2"><span class="text-emerald-400">✓</span> SSO / SCIM</li>
+        </ul>
+        <button class="w-full py-2.5 rounded-lg border border-zinc-700 hover:border-zinc-500 transition text-sm">联系销售</button>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- ======= CTA ======= -->
+<section class="py-24 relative overflow-hidden">
+  <div class="absolute inset-0 bg-gradient-to-br from-orange-500/10 via-rose-500/5 to-violet-500/10"></div>
+  <div class="relative max-w-3xl mx-auto px-6 text-center">
+    <h2 class="text-4xl md:text-5xl font-semibold tracking-tight mb-6">准备好在任何地方写代码了吗</h2>
+    <p class="text-zinc-400 mb-10">安装 Host、手机扫一下、就能开始用。3 分钟搞定。</p>
+    <div class="inline-flex flex-col sm:flex-row gap-3 items-stretch">
+      <div class="mono text-sm bg-zinc-900 border border-zinc-800 rounded-xl px-5 py-3 text-zinc-300">
+        <span class="text-zinc-600">$</span> curl rcc.sh | sh
+      </div>
+      <a href="pairing.html" class="px-6 py-3 rounded-xl bg-white text-zinc-900 font-medium hover:bg-zinc-200 transition">
+        开始配对 →
+      </a>
+    </div>
+  </div>
+</section>
+
+<!-- ======= FOOTER ======= -->
+<footer class="border-t border-zinc-900 py-10">
+  <div class="max-w-7xl mx-auto px-6 flex flex-col md:flex-row items-start md:items-center gap-6 justify-between text-sm text-zinc-500">
+    <div class="flex items-center gap-2.5">
+      <div class="w-7 h-7 rounded-md bg-gradient-to-br from-orange-500 to-rose-600 grid place-items-center font-bold text-xs text-white">R</div>
+      <span>rcc — Remote Claude Code</span>
+      <span class="text-zinc-700">·</span>
+      <span>Mockup v0.1</span>
+    </div>
+    <div class="flex gap-6">
+      <a href="index.html" class="hover:text-white transition">全部 Mockup</a>
+      <a href="desktop.html" class="hover:text-white transition">Desktop</a>
+      <a href="mobile.html" class="hover:text-white transition">Mobile</a>
+      <a href="pairing.html" class="hover:text-white transition">Pairing</a>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>

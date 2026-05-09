@@ -1,0 +1,451 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>rcc · Pairing</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: ui-sans-serif, -apple-system, "SF Pro", "PingFang SC", system-ui; -webkit-font-smoothing: antialiased; }
+  .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+  .grid-bg { background-image: radial-gradient(circle at 1px 1px, rgba(255,255,255,0.04) 1px, transparent 0); background-size: 28px 28px; }
+  .dot { width:10px; height:10px; border-radius:50%; display:inline-block; }
+  .gradient-text { background: linear-gradient(135deg, #fb923c, #f43f5e, #a855f7); -webkit-background-clip: text; background-clip: text; color: transparent; }
+
+  /* phone */
+  .phone { width: 330px; height: 680px; background: #000; border-radius: 48px; padding: 12px; box-shadow: 0 0 0 2px #1c1c1e, 0 30px 60px -15px rgba(0,0,0,.8); position: relative; }
+  .phone-screen { width: 100%; height: 100%; background: #0a0a0a; border-radius: 36px; overflow: hidden; position: relative; }
+  .notch { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); width: 100px; height: 28px; background: #000; border-radius: 16px; z-index: 50; }
+  .home-indicator { position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%); width: 110px; height: 4px; border-radius: 3px; background: white; opacity: .8; }
+
+  /* laptop */
+  .laptop-screen { border-radius: 14px 14px 4px 4px; background: #0a0a0a; box-shadow: 0 0 0 8px #18181b, 0 0 0 9px #27272a, 0 30px 60px -15px rgba(0,0,0,.8); overflow: hidden; }
+  .laptop-base { background: linear-gradient(to bottom, #3f3f46, #18181b); height: 10px; border-radius: 0 0 14px 14px; width: 110%; margin-left: -5%; position: relative; }
+  .laptop-base::before { content: ''; position: absolute; top: 0; left: 50%; transform: translateX(-50%); width: 80px; height: 4px; background: #18181b; border-radius: 0 0 8px 8px; }
+
+  @keyframes pulseSoft { 0%,100%{opacity:1} 50%{opacity:.4} }
+  .pulse-soft { animation: pulseSoft 1.6s ease-in-out infinite; }
+
+  @keyframes scan { 0% { top: 10%; } 50% { top: 90%; } 100% { top: 10%; } }
+  .scan-line { animation: scan 2.4s ease-in-out infinite; }
+
+  /* qr mock using css grid */
+  .qr-cell { background: #000; }
+  .qr-grid { display: grid; grid-template-columns: repeat(25, 1fr); gap: 0; background: white; padding: 10px; border-radius: 8px; }
+
+  .step-active { background: linear-gradient(135deg, #fb923c, #f43f5e); color: white; }
+  .step-done { background: #065f46; color: #6ee7b7; }
+  .step-pending { background: #27272a; color: #71717a; }
+</style>
+</head>
+<body class="bg-zinc-950 text-zinc-100 min-h-screen grid-bg">
+
+<div class="max-w-7xl mx-auto px-6 py-10">
+
+  <!-- header -->
+  <div class="flex items-center justify-between mb-10">
+    <a href="index.html" class="flex items-center gap-3">
+      <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-orange-500 to-rose-600 grid place-items-center font-bold text-sm">R</div>
+      <div>
+        <div class="font-semibold text-sm">rcc · Pairing Flow</div>
+        <div class="text-xs text-zinc-500">首次配对流程</div>
+      </div>
+    </a>
+    <a href="index.html" class="text-xs text-zinc-500 hover:text-white">← 返回总览</a>
+  </div>
+
+  <!-- progress bar -->
+  <div class="flex items-center justify-center gap-4 mb-14">
+    <div class="flex items-center gap-3">
+      <div class="step-done w-9 h-9 rounded-full grid place-items-center text-sm font-semibold">✓</div>
+      <div class="text-sm">
+        <div class="font-medium">启动 Host</div>
+        <div class="text-xs text-zinc-500">3 秒前</div>
+      </div>
+    </div>
+    <div class="w-16 h-0.5 bg-emerald-500/40"></div>
+
+    <div class="flex items-center gap-3">
+      <div class="step-active w-9 h-9 rounded-full grid place-items-center text-sm font-semibold pulse-soft">2</div>
+      <div class="text-sm">
+        <div class="font-medium">扫码配对</div>
+        <div class="text-xs text-orange-400">正在进行…</div>
+      </div>
+    </div>
+    <div class="w-16 h-0.5 bg-zinc-800"></div>
+
+    <div class="flex items-center gap-3">
+      <div class="step-pending w-9 h-9 rounded-full grid place-items-center text-sm font-semibold">3</div>
+      <div class="text-sm text-zinc-500">
+        <div>Face ID 确认</div>
+        <div class="text-xs">待完成</div>
+      </div>
+    </div>
+    <div class="w-16 h-0.5 bg-zinc-800"></div>
+
+    <div class="flex items-center gap-3">
+      <div class="step-pending w-9 h-9 rounded-full grid place-items-center text-sm font-semibold">4</div>
+      <div class="text-sm text-zinc-500">
+        <div>完成</div>
+        <div class="text-xs">可以使用</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- main flow -->
+  <div class="grid lg:grid-cols-12 gap-6 items-start mb-20">
+
+    <!-- laptop side -->
+    <div class="lg:col-span-7">
+      <div class="text-xs uppercase tracking-widest text-sky-400 mb-3">Desktop · Mac-Studio</div>
+      <div class="laptop-screen">
+        <!-- titlebar -->
+        <div class="flex items-center gap-1.5 px-3 py-2 border-b border-zinc-900 bg-zinc-950">
+          <span class="dot bg-rose-500"></span>
+          <span class="dot bg-amber-400"></span>
+          <span class="dot bg-emerald-500"></span>
+          <div class="ml-3 text-[11px] text-zinc-500 mono">rcc-host · first run</div>
+        </div>
+        <div class="p-10 flex flex-col items-center">
+          <div class="text-[11px] uppercase tracking-widest text-zinc-500 mb-2">扫描二维码配对</div>
+          <div class="text-2xl font-semibold mb-1">用手机打开 rcc</div>
+          <div class="text-sm text-zinc-500 mb-8">或访问 <span class="mono text-orange-300">rcc-yourname.trycf.com/pair</span></div>
+
+          <!-- QR code (mocked with pattern) -->
+          <div class="relative">
+            <div class="qr-grid" style="width: 240px; height: 240px;">
+              <!-- generate fake qr cells with random-ish pattern -->
+              <script>
+                const cells = [];
+                // three corner markers
+                function isCornerMarker(r,c){
+                  const markers = [[0,0],[0,18],[18,0]];
+                  return markers.some(([mr,mc]) => r>=mr && r<mr+7 && c>=mc && c<mc+7 && (r===mr||r===mr+6||c===mc||c===mc+6 || (r>=mr+2 && r<=mr+4 && c>=mc+2 && c<=mc+4)));
+                }
+                let html = '';
+                const seed = 'rcc-pairing-token-482917';
+                let h = 0; for (const ch of seed) h = (h*31 + ch.charCodeAt(0))>>>0;
+                function rng(){ h = (h*1664525 + 1013904223)>>>0; return h; }
+                for(let r=0;r<25;r++) for(let c=0;c<25;c++){
+                  const filled = isCornerMarker(r,c) ? true : (rng() % 2 === 0);
+                  html += `<div style="width:100%;padding-bottom:100%;background:${filled?'#000':'white'}"></div>`;
+                }
+                document.write(html);
+              </script>
+            </div>
+            <!-- logo in middle -->
+            <div class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-12 h-12 rounded-xl bg-white grid place-items-center p-1">
+              <div class="w-full h-full rounded-lg bg-gradient-to-br from-orange-500 to-rose-600 grid place-items-center font-bold text-white">R</div>
+            </div>
+          </div>
+
+          <div class="mt-6 text-center">
+            <div class="text-xs text-zinc-500 uppercase tracking-widest mb-2">或手动输入</div>
+            <div class="flex items-center gap-1.5">
+              <div class="mono text-2xl font-semibold w-10 h-12 grid place-items-center rounded-lg bg-zinc-900 border border-zinc-800">4</div>
+              <div class="mono text-2xl font-semibold w-10 h-12 grid place-items-center rounded-lg bg-zinc-900 border border-zinc-800">8</div>
+              <div class="mono text-2xl font-semibold w-10 h-12 grid place-items-center rounded-lg bg-zinc-900 border border-zinc-800">2</div>
+              <span class="mx-1 text-zinc-600">·</span>
+              <div class="mono text-2xl font-semibold w-10 h-12 grid place-items-center rounded-lg bg-zinc-900 border border-zinc-800">9</div>
+              <div class="mono text-2xl font-semibold w-10 h-12 grid place-items-center rounded-lg bg-zinc-900 border border-zinc-800">1</div>
+              <div class="mono text-2xl font-semibold w-10 h-12 grid place-items-center rounded-lg bg-zinc-900 border border-zinc-800">7</div>
+            </div>
+            <div class="text-xs text-zinc-500 mt-3">5:47 后过期</div>
+          </div>
+
+          <!-- waiting indicator -->
+          <div class="mt-8 px-5 py-3 rounded-xl bg-zinc-900/60 border border-zinc-800 flex items-center gap-3">
+            <div class="relative w-4 h-4">
+              <div class="absolute inset-0 rounded-full border-2 border-orange-500 border-t-transparent animate-spin"></div>
+            </div>
+            <div class="text-xs text-zinc-400">等待设备扫描…</div>
+          </div>
+        </div>
+      </div>
+      <div class="laptop-base"></div>
+    </div>
+
+    <!-- arrow -->
+    <div class="lg:col-span-1 hidden lg:flex items-center justify-center pt-40">
+      <svg width="80" height="40" viewBox="0 0 80 40">
+        <defs>
+          <linearGradient id="arrowG" x1="0" x2="1">
+            <stop offset="0" stop-color="#fb923c"/>
+            <stop offset="1" stop-color="#f43f5e"/>
+          </linearGradient>
+        </defs>
+        <path d="M 5 20 L 65 20" stroke="url(#arrowG)" stroke-width="2" fill="none" stroke-dasharray="4 4">
+          <animate attributeName="stroke-dashoffset" from="0" to="-16" dur="1s" repeatCount="indefinite"/>
+        </path>
+        <path d="M 60 12 L 72 20 L 60 28" stroke="url(#arrowG)" stroke-width="2" fill="none"/>
+      </svg>
+    </div>
+
+    <!-- phone side -->
+    <div class="lg:col-span-4 flex flex-col items-center">
+      <div class="text-xs uppercase tracking-widest text-emerald-400 mb-3">Mobile · iPhone 15</div>
+      <div class="phone">
+        <div class="phone-screen">
+          <div class="notch"></div>
+          <div class="h-[54px] px-7 pt-5 pb-2 flex justify-between items-center text-sm font-semibold text-white">
+            <span>9:41</span>
+            <span>●●●● 5G 🔋</span>
+          </div>
+
+          <!-- scanning view -->
+          <div class="px-6">
+            <div class="flex items-center gap-2 mb-1 text-orange-400 text-xs">
+              <span>‹</span> <span>取消</span>
+            </div>
+            <div class="text-lg font-semibold mb-1">对准电脑上的二维码</div>
+            <div class="text-xs text-zinc-400 mb-5">自动识别后会弹出确认</div>
+
+            <!-- camera view mock -->
+            <div class="relative mx-auto rounded-2xl border border-zinc-800 overflow-hidden" style="width: 260px; height: 260px; background: #1c1c1e;">
+              <div class="absolute inset-0 opacity-30" style="background: radial-gradient(circle at center, #3f3f46, #18181b);"></div>
+              <!-- focus frame -->
+              <div class="absolute inset-4 border-2 border-white/60 rounded-xl pointer-events-none">
+                <div class="absolute -left-0.5 -top-0.5 w-6 h-6 border-l-4 border-t-4 border-orange-400 rounded-tl-xl"></div>
+                <div class="absolute -right-0.5 -top-0.5 w-6 h-6 border-r-4 border-t-4 border-orange-400 rounded-tr-xl"></div>
+                <div class="absolute -left-0.5 -bottom-0.5 w-6 h-6 border-l-4 border-b-4 border-orange-400 rounded-bl-xl"></div>
+                <div class="absolute -right-0.5 -bottom-0.5 w-6 h-6 border-r-4 border-b-4 border-orange-400 rounded-br-xl"></div>
+              </div>
+              <!-- qr partial in frame -->
+              <div class="absolute inset-8 grid place-items-center">
+                <div class="qr-grid" style="width: 160px; height: 160px; opacity: .85;">
+                  <script>
+                    const cells2 = [];
+                    function isCorner2(r,c){
+                      const markers = [[0,0],[0,18],[18,0]];
+                      return markers.some(([mr,mc]) => r>=mr && r<mr+7 && c>=mc && c<mc+7 && (r===mr||r===mr+6||c===mc||c===mc+6 || (r>=mr+2 && r<=mr+4 && c>=mc+2 && c<=mc+4)));
+                    }
+                    let html2 = '';
+                    let h2 = 0; const seed2 = 'rcc-pairing-token-482917';
+                    for (const ch of seed2) h2 = (h2*31 + ch.charCodeAt(0))>>>0;
+                    function rng2(){ h2 = (h2*1664525 + 1013904223)>>>0; return h2; }
+                    for(let r=0;r<25;r++) for(let c=0;c<25;c++){
+                      const filled = isCorner2(r,c) ? true : (rng2() % 2 === 0);
+                      html2 += `<div style="width:100%;padding-bottom:100%;background:${filled?'#000':'white'}"></div>`;
+                    }
+                    document.write(html2);
+                  </script>
+                </div>
+              </div>
+              <!-- scan line -->
+              <div class="absolute left-4 right-4 h-0.5 bg-gradient-to-r from-transparent via-orange-400 to-transparent scan-line" style="box-shadow: 0 0 20px rgba(251,146,60,.8);"></div>
+            </div>
+
+            <div class="mt-5 text-center text-xs text-zinc-500">
+              <div class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-zinc-900 border border-zinc-800">
+                <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 pulse-soft"></span>
+                识别中…
+              </div>
+            </div>
+          </div>
+
+          <div class="home-indicator"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 3 states strip -->
+  <div class="max-w-6xl mx-auto">
+    <div class="text-xs uppercase tracking-widest text-zinc-500 mb-6 text-center">三个关键状态</div>
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+
+      <!-- state 1: detected -->
+      <div class="flex flex-col items-center">
+        <div class="text-[11px] text-zinc-500 mb-2">A · 检测到 Host</div>
+        <div class="phone" style="width: 260px; height: 540px;">
+          <div class="phone-screen">
+            <div class="notch" style="width:80px;height:22px;top:10px"></div>
+            <div class="px-6 pt-10 pb-4">
+              <div class="text-center">
+                <div class="w-16 h-16 mx-auto rounded-2xl bg-emerald-500/15 border border-emerald-500/40 grid place-items-center text-3xl mb-4">🖥</div>
+                <div class="text-[16px] font-semibold mb-1">发现一台主机</div>
+                <div class="text-[12px] text-zinc-400 mb-5">确认这是你的设备？</div>
+
+                <div class="rounded-xl bg-zinc-900 border border-zinc-800 p-4 text-left space-y-2.5">
+                  <div class="flex items-center gap-2">
+                    <span class="text-[10px] text-zinc-500 w-12">名称</span>
+                    <span class="text-[12px] font-medium">Mac-Studio</span>
+                  </div>
+                  <div class="flex items-center gap-2">
+                    <span class="text-[10px] text-zinc-500 w-12">系统</span>
+                    <span class="text-[12px]">macOS 15.2</span>
+                  </div>
+                  <div class="flex items-center gap-2">
+                    <span class="text-[10px] text-zinc-500 w-12">位置</span>
+                    <span class="text-[12px]">上海 · 电信</span>
+                  </div>
+                  <div class="flex items-center gap-2">
+                    <span class="text-[10px] text-zinc-500 w-12">指纹</span>
+                    <span class="text-[12px] mono text-zinc-300">f8:3e:9a:...</span>
+                  </div>
+                </div>
+
+                <div class="mt-5 space-y-2">
+                  <button class="w-full py-3 rounded-xl bg-gradient-to-r from-orange-500 to-rose-500 text-white font-semibold text-[13px]">继续配对</button>
+                  <button class="w-full py-2 text-[12px] text-zinc-500">这不是我的设备</button>
+                </div>
+              </div>
+            </div>
+            <div class="home-indicator"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- state 2: Face ID -->
+      <div class="flex flex-col items-center">
+        <div class="text-[11px] text-zinc-500 mb-2">B · Face ID 确认</div>
+        <div class="phone" style="width: 260px; height: 540px;">
+          <div class="phone-screen">
+            <div class="notch" style="width:80px;height:22px;top:10px"></div>
+            <div class="absolute inset-0 backdrop-blur-sm bg-zinc-950/60"></div>
+
+            <!-- blurred background content -->
+            <div class="absolute inset-0 px-6 pt-10 pb-4 opacity-20">
+              <div class="w-16 h-16 mx-auto rounded-2xl bg-emerald-500/20"></div>
+              <div class="h-4 bg-zinc-800 rounded mt-4 mx-12"></div>
+              <div class="h-3 bg-zinc-900 rounded mt-2 mx-8"></div>
+              <div class="h-40 bg-zinc-900/60 rounded-xl mt-4"></div>
+            </div>
+
+            <!-- face id modal -->
+            <div class="absolute inset-x-4 bottom-10 rounded-2xl bg-zinc-900/95 backdrop-blur-xl border border-zinc-800 p-5 shadow-2xl">
+              <div class="text-center">
+                <div class="w-16 h-16 mx-auto mb-4 rounded-2xl bg-gradient-to-br from-sky-500/20 to-violet-500/20 border border-sky-400/30 grid place-items-center">
+                  <!-- face icon -->
+                  <svg width="40" height="40" viewBox="0 0 40 40" fill="none" stroke="#7dd3fc" stroke-width="1.5">
+                    <path d="M8 14 V 10 Q 8 8 10 8 H 14"/>
+                    <path d="M32 14 V 10 Q 32 8 30 8 H 26"/>
+                    <path d="M8 26 V 30 Q 8 32 10 32 H 14"/>
+                    <path d="M32 26 V 30 Q 32 32 30 32 H 26"/>
+                    <circle cx="15" cy="17" r="1" fill="#7dd3fc"/>
+                    <circle cx="25" cy="17" r="1" fill="#7dd3fc"/>
+                    <path d="M 20 17 L 20 23"/>
+                    <path d="M 15 26 Q 20 29 25 26"/>
+                  </svg>
+                </div>
+                <div class="text-[14px] font-semibold mb-1">使用 Face ID 登录</div>
+                <div class="text-[11px] text-zinc-400 mb-5 leading-relaxed">
+                  为 <span class="text-sky-300">Mac-Studio</span> 创建 passkey<br/>
+                  完成后可以永不再输密码
+                </div>
+                <div class="rounded-xl bg-zinc-950/60 p-3 mb-4 text-left">
+                  <div class="text-[10px] text-zinc-500 mb-1">将会授予</div>
+                  <div class="text-[11px] text-zinc-300">• 访问此 Host 的会话</div>
+                  <div class="text-[11px] text-zinc-300">• 批准权限请求</div>
+                  <div class="text-[11px] text-zinc-300">• 不会访问你的本地文件</div>
+                </div>
+                <button class="w-full py-2.5 rounded-xl bg-white text-zinc-900 font-semibold text-[13px]">面容 ID</button>
+                <button class="w-full py-2 mt-1 text-[12px] text-zinc-500">取消</button>
+              </div>
+            </div>
+            <div class="home-indicator"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- state 3: success -->
+      <div class="flex flex-col items-center">
+        <div class="text-[11px] text-zinc-500 mb-2">C · 配对成功</div>
+        <div class="phone" style="width: 260px; height: 540px;">
+          <div class="phone-screen">
+            <div class="notch" style="width:80px;height:22px;top:10px"></div>
+            <div class="absolute inset-0 bg-gradient-to-b from-emerald-500/10 via-zinc-950 to-zinc-950"></div>
+            <div class="relative px-6 pt-12 pb-4">
+              <div class="text-center">
+                <div class="relative w-20 h-20 mx-auto mb-5">
+                  <div class="absolute inset-0 rounded-full bg-emerald-500/20 animate-ping"></div>
+                  <div class="relative w-20 h-20 rounded-full bg-emerald-500 grid place-items-center text-4xl text-white shadow-2xl">✓</div>
+                </div>
+                <div class="text-[18px] font-semibold mb-1 gradient-text">连接成功！</div>
+                <div class="text-[12px] text-zinc-400 mb-6">可以开始在任何地方使用 Claude Code 了</div>
+
+                <div class="rounded-xl bg-zinc-900 border border-zinc-800 p-4 text-left mb-4">
+                  <div class="flex items-center gap-2.5 mb-2.5">
+                    <div class="w-8 h-8 rounded-lg bg-emerald-500/20 grid place-items-center">🖥</div>
+                    <div class="flex-1">
+                      <div class="text-[13px] font-medium">Mac-Studio</div>
+                      <div class="text-[10px] text-emerald-400 flex items-center gap-1">
+                        <span class="w-1 h-1 rounded-full bg-emerald-400 pulse-soft"></span>
+                        在线 · 刚刚配对
+                      </div>
+                    </div>
+                  </div>
+                  <div class="grid grid-cols-2 gap-1.5 text-[10px]">
+                    <div class="rounded bg-zinc-950 p-2">
+                      <div class="text-zinc-500">Passkey</div>
+                      <div class="text-emerald-400 mt-0.5">✓ 已创建</div>
+                    </div>
+                    <div class="rounded bg-zinc-950 p-2">
+                      <div class="text-zinc-500">E2E 加密</div>
+                      <div class="text-emerald-400 mt-0.5">✓ 已启用</div>
+                    </div>
+                    <div class="rounded bg-zinc-950 p-2">
+                      <div class="text-zinc-500">推送通知</div>
+                      <div class="text-emerald-400 mt-0.5">✓ 已订阅</div>
+                    </div>
+                    <div class="rounded bg-zinc-950 p-2">
+                      <div class="text-zinc-500">延迟</div>
+                      <div class="text-zinc-300 mt-0.5">18ms</div>
+                    </div>
+                  </div>
+                </div>
+
+                <button class="w-full py-3 rounded-xl bg-gradient-to-r from-orange-500 to-rose-500 text-white font-semibold text-[13px]">
+                  开始使用 →
+                </button>
+                <div class="mt-3 text-[11px] text-zinc-600">
+                  保存到主屏幕以便快速访问
+                </div>
+              </div>
+            </div>
+            <div class="home-indicator"></div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- explainer -->
+  <div class="mt-20 max-w-5xl mx-auto rounded-3xl border border-zinc-800 bg-gradient-to-br from-zinc-900/80 to-zinc-950 p-8">
+    <div class="grid md:grid-cols-4 gap-6">
+      <div>
+        <div class="text-xs uppercase tracking-widest text-orange-400 mb-2">① 启动</div>
+        <div class="text-sm text-zinc-300 font-medium mb-1">一条命令</div>
+        <div class="text-xs text-zinc-500 leading-relaxed">
+          <code class="mono bg-zinc-800 px-1.5 py-0.5 rounded">rcc-host start</code>
+          会拉起 cloudflared 隧道，分配固定子域名，并在浏览器打开配对页。
+        </div>
+      </div>
+      <div>
+        <div class="text-xs uppercase tracking-widest text-emerald-400 mb-2">② 扫码</div>
+        <div class="text-sm text-zinc-300 font-medium mb-1">二维码或 6 位码</div>
+        <div class="text-xs text-zinc-500 leading-relaxed">
+          码内包含一次性 token + 主机公钥。扫码后客户端用 ECDH 和 Host 协商出 E2E 密钥。
+        </div>
+      </div>
+      <div>
+        <div class="text-xs uppercase tracking-widest text-sky-400 mb-2">③ Face ID</div>
+        <div class="text-sm text-zinc-300 font-medium mb-1">创建 Passkey</div>
+        <div class="text-xs text-zinc-500 leading-relaxed">
+          WebAuthn 标准，私钥存在 Secure Enclave。以后每次连接免密，只需 Face ID。
+        </div>
+      </div>
+      <div>
+        <div class="text-xs uppercase tracking-widest text-violet-400 mb-2">④ 就绪</div>
+        <div class="text-sm text-zinc-300 font-medium mb-1">长期免密</div>
+        <div class="text-xs text-zinc-500 leading-relaxed">
+          设备登记在 Host 的 trust store 里。丢手机随时从电脑端吊销。
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>
