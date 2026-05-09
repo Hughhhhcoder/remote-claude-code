@@ -20,6 +20,7 @@ import { DevicesModal } from "./DevicesModal.tsx";
 import { ConfigView } from "./ConfigView.tsx";
 import { MarketplaceView } from "./MarketplaceView.tsx";
 import { FileBrowser } from "./FileBrowser.tsx";
+import { NotebookView } from "./NotebookView.tsx";
 import { MobileKeyBar } from "./MobileKeyBar.tsx";
 import { useIsMobile } from "./useIsMobile.ts";
 import { InstallPrompt } from "./InstallPrompt.tsx";
@@ -107,6 +108,7 @@ export function App() {
   const [configOpen, setConfigOpen] = createSignal(false);
   const [marketOpen, setMarketOpen] = createSignal(false);
   const [fileBrowserOpen, setFileBrowserOpen] = createSignal(false);
+  const [notebookOpen, setNotebookOpen] = createSignal(false);
   const [fileBrowserRoot, setFileBrowserRoot] = createSignal<string>("~");
   const [pinnedIds, setPinnedIds] = createSignal<string[]>([]);
   const [commandsById, setCommandsById] = createSignal<Record<string, CommandSummary>>({});
@@ -230,6 +232,7 @@ export function App() {
     { id: "market", label: "打开 Marketplace", icon: "🛍", hint: "Install skills & MCPs", run: () => setMarketOpen(true) },
     { id: "settings", label: "打开外观设置", icon: "🎨", hint: "主题 / 键位 / 字体", run: () => setSettingsOpen(true) },
     { id: "files", label: "切换文件浏览器", icon: "📁", hint: "Toggle file browser", run: () => setFileBrowserOpen((v) => !v) },
+    { id: "notebook", label: "切换协作笔记本", icon: "📓", hint: "Toggle notebook", run: () => setNotebookOpen((v) => !v) },
     { id: "devices", label: "打开已配对设备", icon: "🔑", hint: "Devices", run: () => setDevicesOpen(true) },
     { id: "projects", label: "管理项目", icon: "🗂", hint: "Projects", run: () => setProjectsModalOpen(true) },
   ]);
@@ -451,7 +454,14 @@ export function App() {
       <div
         class="flex-1 grid"
         style={{
-          "grid-template-columns": fileBrowserOpen() ? "240px 1fr 360px" : "240px 1fr",
+          "grid-template-columns":
+            fileBrowserOpen() && notebookOpen()
+              ? "240px 1fr 360px 360px"
+              : fileBrowserOpen()
+                ? "240px 1fr 360px"
+                : notebookOpen()
+                  ? "240px 1fr 360px"
+                  : "240px 1fr",
           "min-height": "0",
         }}
       >
@@ -694,6 +704,17 @@ export function App() {
                   </button>
                 </div>
                 <div class="flex items-center gap-2 text-[11px] text-zinc-500 shrink-0">
+                  <button
+                    onClick={() => setNotebookOpen((v) => !v)}
+                    class={`text-[10px] px-1.5 py-0.5 rounded border transition ${
+                      notebookOpen()
+                        ? "border-accent-500 text-accent-300 bg-accent-500/10"
+                        : "border-zinc-700 text-zinc-400 hover:text-zinc-100"
+                    }`}
+                    title="切换协作笔记本"
+                  >
+                    📓 笔记
+                  </button>
                   <RecordingPanel client={client} sid={activeSid()} />
                   <span class="text-zinc-700">{activeSession()?.cols}×{activeSession()?.rows}</span>
                 </div>
@@ -703,7 +724,26 @@ export function App() {
               <div class="flex-1 min-h-0 relative">
                 <Show
                   when={viewMode() === "terminal" && activeSession()?.driver !== "sdk"}
-                  fallback={<ChatView client={client} sid={activeSid()!} sessions={sessions()} />}
+                  fallback={
+                    <ChatView
+                      client={client}
+                      sid={activeSid()!}
+                      sessions={sessions()}
+                      onPinToNotebook={(messageId) => {
+                        setNotebookOpen(true);
+                        const cid =
+                          typeof crypto !== "undefined" && "randomUUID" in crypto
+                            ? crypto.randomUUID()
+                            : `c-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+                        client.send({
+                          v: 1,
+                          t: "notebook.append",
+                          sid: activeSid()!,
+                          cell: { kind: "chatRef", id: cid, messageId },
+                        });
+                      }}
+                    />
+                  }
                 >
                   <TerminalView client={client} sid={activeSid()!} />
                 </Show>
@@ -757,6 +797,11 @@ export function App() {
         <Show when={fileBrowserOpen()}>
           <aside class="bg-zinc-950 border-l border-zinc-900 overflow-hidden">
             <FileBrowser client={client} rootCwd={fileBrowserRoot()} />
+          </aside>
+        </Show>
+        <Show when={notebookOpen() && activeSid()}>
+          <aside class="bg-zinc-950 border-l border-zinc-900 overflow-hidden">
+            <NotebookView client={client} sid={activeSid()!} />
           </aside>
         </Show>
       </div>

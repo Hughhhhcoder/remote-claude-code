@@ -94,6 +94,8 @@ import { PrefsStore } from "./prefs.ts";
 import { metrics } from "./metrics.ts";
 import { ShareStore } from "./shares.ts";
 import { WorkflowStore } from "./workflows.ts";
+import { NotebookStore } from "./notebooks.ts";
+import { PromptStore } from "./prompts.ts";
 import { GitWatcher } from "./git-watcher.ts";
 import { runGit, isReadOnlyGitArgs, getStatus as getGitStatus } from "./git.ts";
 import { ActivityFeed } from "./activity.ts";
@@ -199,6 +201,8 @@ const push = await PushService.load();
 const prefs = await PrefsStore.load();
 const shares = await ShareStore.load();
 const workflows = await WorkflowStore.load();
+const notebooks = await NotebookStore.load();
+const prompts = await PromptStore.load();
 await ensureSodiumReady();
 const hostKeys = await loadOrCreateHostKeys();
 const webauthn = new WebAuthnService(trust);
@@ -2161,6 +2165,128 @@ function handle(ws: WebSocket, state: WsState, frame: Frame): void {
             t: "error",
             code: "workflow_remove_failed",
             message: err?.message ?? String(err),
+          });
+        });
+      return;
+    }
+    case "prompt.list.request": {
+      send(ws, { v: 1, t: "prompt.list", prompts: prompts.list() });
+      return;
+    }
+    case "prompt.save": {
+      prompts
+        .save({
+          id: frame.id,
+          name: frame.name,
+          template: frame.template,
+          description: frame.description,
+        })
+        .then((p) => {
+          send(ws, { v: 1, t: "prompt.saved", prompt: p });
+          broadcastFiltered({ v: 1, t: "prompt.list", prompts: prompts.list() });
+        })
+        .catch((err) => {
+          send(ws, {
+            v: 1,
+            t: "error",
+            code: "prompt_save_failed",
+            message: err?.message ?? String(err),
+          });
+        });
+      return;
+    }
+    case "prompt.remove": {
+      prompts
+        .remove(frame.id)
+        .then((ok) => {
+          if (ok) {
+            send(ws, { v: 1, t: "prompt.removed", id: frame.id });
+            broadcastFiltered({ v: 1, t: "prompt.list", prompts: prompts.list() });
+          } else {
+            send(ws, {
+              v: 1,
+              t: "error",
+              code: "prompt_not_found",
+              message: `no prompt with id ${frame.id}`,
+            });
+          }
+        })
+        .catch((err) => {
+          send(ws, {
+            v: 1,
+            t: "error",
+            code: "prompt_remove_failed",
+            message: err?.message ?? String(err),
+          });
+        });
+      return;
+    }
+    case "notebook.request": {
+      notebooks
+        .get(frame.sid)
+        .then((notebook) => {
+          send(ws, { v: 1, t: "notebook", sid: frame.sid, notebook: notebook ?? null });
+        })
+        .catch((err) => {
+          send(ws, {
+            v: 1,
+            t: "error",
+            code: "notebook_load_failed",
+            message: err?.message ?? String(err),
+            sid: frame.sid,
+          });
+        });
+      return;
+    }
+    case "notebook.upsert": {
+      notebooks
+        .upsert(frame.sid, frame.cells)
+        .then((nb) => {
+          send(ws, { v: 1, t: "notebook.upserted", sid: frame.sid, notebook: nb });
+          broadcastFiltered({ v: 1, t: "notebook", sid: frame.sid, notebook: nb });
+        })
+        .catch((err) => {
+          send(ws, {
+            v: 1,
+            t: "error",
+            code: "notebook_upsert_failed",
+            message: err?.message ?? String(err),
+            sid: frame.sid,
+          });
+        });
+      return;
+    }
+    case "notebook.append": {
+      notebooks
+        .append(frame.sid, frame.cell)
+        .then((nb) => {
+          broadcastFiltered({ v: 1, t: "notebook", sid: frame.sid, notebook: nb });
+        })
+        .catch((err) => {
+          send(ws, {
+            v: 1,
+            t: "error",
+            code: "notebook_append_failed",
+            message: err?.message ?? String(err),
+            sid: frame.sid,
+          });
+        });
+      return;
+    }
+    case "notebook.delete": {
+      notebooks
+        .remove(frame.sid)
+        .then(() => {
+          send(ws, { v: 1, t: "notebook.deleted", sid: frame.sid });
+          broadcastFiltered({ v: 1, t: "notebook", sid: frame.sid, notebook: null });
+        })
+        .catch((err) => {
+          send(ws, {
+            v: 1,
+            t: "error",
+            code: "notebook_delete_failed",
+            message: err?.message ?? String(err),
+            sid: frame.sid,
           });
         });
       return;

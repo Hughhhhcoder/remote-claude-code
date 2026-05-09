@@ -1806,6 +1806,138 @@ export const WorkflowRemoved = z.object({
   id: z.string(),
 });
 
+// [prompts] — M6 batch 12
+//
+// User-defined text snippets with `{{param}}` placeholders. Stored at
+// `~/.rcc/prompts.json` (0600). `params` is an array of unique placeholder
+// names in first-seen order, computed host-side from `template`. The web
+// client expands `/p:<name>` inline in the ChatView draft (local-only; the
+// filled-in text is not sent until the user hits send).
+
+export const PromptTemplate = z.object({
+  id: z.string(),
+  name: z.string().min(1).max(64),
+  template: z.string().min(1).max(8192),
+  params: z.array(z.string()).max(20),
+  description: z.string().max(500).optional(),
+  createdAt: z.number(),
+});
+export type PromptTemplate = z.infer<typeof PromptTemplate>;
+
+export const PromptListRequest = z.object({
+  ...base,
+  t: z.literal("prompt.list.request"),
+});
+
+export const PromptList = z.object({
+  ...base,
+  t: z.literal("prompt.list"),
+  prompts: z.array(PromptTemplate),
+});
+
+export const PromptSave = z.object({
+  ...base,
+  t: z.literal("prompt.save"),
+  id: z.string().optional(),
+  name: z.string().min(1).max(64),
+  template: z.string().min(1).max(8192),
+  description: z.string().max(500).optional(),
+});
+
+export const PromptSaved = z.object({
+  ...base,
+  t: z.literal("prompt.saved"),
+  prompt: PromptTemplate,
+});
+
+export const PromptRemove = z.object({
+  ...base,
+  t: z.literal("prompt.remove"),
+  id: z.string(),
+});
+
+export const PromptRemoved = z.object({
+  ...base,
+  t: z.literal("prompt.removed"),
+  id: z.string(),
+});
+
+// [notebooks] — M6 batch 12
+//
+// Per-session collaborative notebook: interleaved `note` (hand-written
+// markdown text) and `chatRef` (pointer to a chat message by id) cells.
+// Stored lazily at ~/.rcc/notebooks/<sid>.json (0600); file only appears
+// once a user adds something. Single notebook capped at 1MB.
+
+export const NotebookCellNote = z.object({
+  kind: z.literal("note"),
+  id: z.string(),
+  content: z.string(),
+});
+export const NotebookCellChatRef = z.object({
+  kind: z.literal("chatRef"),
+  id: z.string(),
+  messageId: z.string(),
+});
+export const NotebookCell = z.discriminatedUnion("kind", [
+  NotebookCellNote,
+  NotebookCellChatRef,
+]);
+export type NotebookCell = z.infer<typeof NotebookCell>;
+
+export const Notebook = z.object({
+  sid: z.string(),
+  cells: z.array(NotebookCell),
+  updatedAt: z.number(),
+});
+export type Notebook = z.infer<typeof Notebook>;
+
+export const NotebookRequest = z.object({
+  ...base,
+  t: z.literal("notebook.request"),
+  sid: z.string(),
+});
+
+export const NotebookFrame = z.object({
+  ...base,
+  t: z.literal("notebook"),
+  sid: z.string(),
+  notebook: Notebook.nullable(),
+});
+
+export const NotebookUpsert = z.object({
+  ...base,
+  t: z.literal("notebook.upsert"),
+  sid: z.string(),
+  cells: z.array(NotebookCell),
+});
+
+export const NotebookUpserted = z.object({
+  ...base,
+  t: z.literal("notebook.upserted"),
+  sid: z.string(),
+  notebook: Notebook,
+});
+
+export const NotebookAppend = z.object({
+  ...base,
+  t: z.literal("notebook.append"),
+  sid: z.string(),
+  cell: NotebookCell,
+});
+
+export const NotebookDelete = z.object({
+  ...base,
+  t: z.literal("notebook.delete"),
+  sid: z.string(),
+});
+
+export const NotebookDeleted = z.object({
+  ...base,
+  t: z.literal("notebook.deleted"),
+  sid: z.string(),
+});
+
 // ──────────────────────────────────────────────────────────────────────────
 
 export const Frame = z.discriminatedUnion("t", [
@@ -1959,6 +2091,19 @@ export const Frame = z.discriminatedUnion("t", [
   WorkflowSaved,
   WorkflowRemove,
   WorkflowRemoved,
+  PromptListRequest,
+  PromptList,
+  PromptSave,
+  PromptSaved,
+  PromptRemove,
+  PromptRemoved,
+  NotebookRequest,
+  NotebookFrame,
+  NotebookUpsert,
+  NotebookUpserted,
+  NotebookAppend,
+  NotebookDelete,
+  NotebookDeleted,
 ]);
 export type Frame = z.infer<typeof Frame>;
 

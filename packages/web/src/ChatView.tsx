@@ -1,8 +1,12 @@
 import { createSignal, createEffect, onCleanup, For, Show } from "solid-js";
 import type { RccClient } from "./client.ts";
-import type { ChatMessage, ChatSegment, SessionMeta } from "@rcc/protocol";
+import type { ChatMessage, ChatSegment, SessionMeta, PromptTemplate } from "@rcc/protocol";
 import { createSharedText, type SharedText } from "./crdt.ts";
 import { ContextInjector } from "./ContextInjector.tsx";
+import {
+  usePromptExpansion,
+  type PromptPrefixMatch,
+} from "./usePromptExpansion.ts";
 import {
   startDictation,
   isSpeechSupported,
@@ -16,7 +20,12 @@ import {
 // diffs line-coloured, tool_use collapsed by default. See host/chat-parser.ts
 // for the (lossy) classification rules — clients should offer a terminal
 // fallback toggle, which App.tsx does.
-export function ChatView(props: { client: RccClient; sid: string; sessions?: SessionMeta[] }) {
+export function ChatView(props: {
+  client: RccClient;
+  sid: string;
+  sessions?: SessionMeta[];
+  onPinToNotebook?: (messageId: string) => void;
+}) {
   const [messages, setMessages] = createSignal<ChatMessage[]>([]);
   // [crdt] The input draft is a Y.Text synced across every client attached
   // to this sid (docId "input-draft"). Local edits propagate via onInput;
@@ -27,6 +36,12 @@ export function ChatView(props: { client: RccClient; sid: string; sessions?: Ses
   const [voiceMode, setVoiceMode] = createSignal<"speech" | "recorder" | null>(null);
   const [voiceError, setVoiceError] = createSignal<string | null>(null);
   const [injectOpen, setInjectOpen] = createSignal(false);
+  const [paramPanel, setParamPanel] = createSignal<{
+    prompt: PromptTemplate;
+    match: PromptPrefixMatch;
+    values: Record<string, string>;
+  } | null>(null);
+  const promptApi = usePromptExpansion(props.client);
   let voiceHandle: DictationHandle | null = null;
   let draftAtStart = "";
   let shared: SharedText | null = null;
@@ -119,6 +134,46 @@ export function ChatView(props: { client: RccClient; sid: string; sessions?: Ses
     shared?.setValue(v);
   }
 
+  /**
+   * Detect `/p:<name>` prefix in the current draft and either (a) inline-expand
+   * the template when it takes no params, or (b) open the param panel. Called
+   * from onInput; the trigger is the trailing space or newline after the name.
+   */
+  function maybeExpandPrompt(raw: string): string {
+    const m = promptApi.detect(raw);
+    if (!m) return raw;
+    const tmpl = promptApi.findByName(m.name);
+    if (!tmpl) return raw;
+    // Only trigger once a delimiter (space/newline) or EOL follows the name —
+    // detect already captures that via the trailing group.
+    const before = raw.slice(0, m.matchStart);
+    const after = raw.slice(m.matchEnd);
+    if (tmpl.params.length === 0) {
+      const expanded = promptApi.fill(tmpl.template, {});
+      const next = before + expanded + after;
+      queueMicrotask(() => updateDraft(next));
+      return next;
+    }
+    // Has params — open panel and leave draft untouched for now.
+    setParamPanel({
+      prompt: tmpl,
+      match: m,
+      values: Object.fromEntries(tmpl.params.map((p) => [p, ""])),
+    });
+    return raw;
+  }
+
+  function applyParamPanel() {
+    const p = paramPanel();
+    if (!p) return;
+    const expanded = promptApi.fill(p.prompt.template, p.values);
+    const cur = draft();
+    const before = cur.slice(0, p.match.matchStart);
+    const after = cur.slice(p.match.matchEnd);
+    updateDraft(before + expanded + after);
+    setParamPanel(null);
+  }
+
   async function toggleMic() {
     if (recording()) {
       voiceHandle?.stop();
@@ -180,7 +235,7 @@ export function ChatView(props: { client: RccClient; sid: string; sessions?: Ses
             </div>
           }
         >
-          <For each={messages()}>{(m) => <MessageRow msg={m} />}</For>
+          <For each={messages()}>{(m) => <MessageRow msg={m} onPin={props.onPinToNotebook} />}</For>
         </Show>
       </div>
       <div class="border-t border-zinc-900 p-3 flex gap-2">
@@ -192,6 +247,7 @@ export function ChatView(props: { client: RccClient; sid: string; sessions?: Ses
             const v = e.currentTarget.value;
             setDraft(v);
             shared?.setValue(v);
+            maybeExpandPrompt(v);
           }}
           onKeyDown={(e) => {
             if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
@@ -249,17 +305,89 @@ export function ChatView(props: { client: RccClient; sid: string; sessions?: Ses
           onClose={() => setInjectOpen(false)}
         />
       </Show>
+      <Show when={paramPanel()}>
+        {(panel) => (
+          <div
+            class="fixed inset-0 z-[60] bg-black/70 backdrop-blur-sm grid place-items-center"
+            onClick={(ev) => ev.target === ev.currentTarget && setParamPanel(null)}
+          >
+            <div class="w-[460px] max-w-[calc(100vw-32px)] rounded-2xl border border-amber-500/40 bg-zinc-950 shadow-2xl overflow-hidden">
+              <div class="px-5 py-3 border-b border-zinc-900 flex items-center justify-between">
+                <div>
+                  <div class="text-sm font-semibold">
+                    填参数 · <span class="font-mono text-amber-300">/p:{panel().prompt.name}</span>
+                  </div>
+                  <Show when={panel().prompt.description}>
+                    <div class="text-[11px] text-zinc-500 mt-0.5">{panel().prompt.description}</div>
+                  </Show>
+                </div>
+                <button
+                  class="text-zinc-500 hover:text-zinc-200 text-sm px-2"
+                  onClick={() => setParamPanel(null)}
+                >
+                  ✕
+                </button>
+              </div>
+              <div class="p-4 space-y-2.5">
+                <For each={panel().prompt.params}>
+                  {(name) => (
+                    <div class="grid grid-cols-[100px_1fr] gap-2 items-center">
+                      <label class="text-xs text-zinc-400 font-mono truncate">{name}</label>
+                      <input
+                        autofocus={panel().prompt.params[0] === name}
+                        value={panel().values[name] ?? ""}
+                        onInput={(ev) =>
+                          setParamPanel({
+                            ...panel(),
+                            values: { ...panel().values, [name]: ev.currentTarget.value },
+                          })
+                        }
+                        onKeyDown={(ev) => {
+                          if (ev.key === "Enter" && (ev.metaKey || ev.ctrlKey)) {
+                            ev.preventDefault();
+                            applyParamPanel();
+                          }
+                        }}
+                        class="bg-zinc-900 border border-zinc-800 rounded px-2.5 py-1.5 text-sm outline-none focus:border-amber-500/60"
+                      />
+                    </div>
+                  )}
+                </For>
+              </div>
+              <div class="px-4 py-3 border-t border-zinc-900 flex items-center justify-end gap-2">
+                <button
+                  class="text-sm px-3 py-1.5 rounded text-zinc-400 hover:text-zinc-200"
+                  onClick={() => setParamPanel(null)}
+                >
+                  取消
+                </button>
+                <button
+                  class="text-sm px-3 py-1.5 rounded bg-gradient-to-r from-amber-500 to-orange-500 text-white font-medium hover:opacity-90"
+                  onClick={applyParamPanel}
+                >
+                  展开
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </Show>
     </div>
   );
 }
 
-function MessageRow(props: { msg: ChatMessage }) {
+function MessageRow(props: { msg: ChatMessage; onPin?: (messageId: string) => void }) {
   const isUser = () => props.msg.role === "user";
   const isSystem = () => props.msg.role === "system";
+  const [hover, setHover] = createSignal(false);
   return (
-    <div class={`flex ${isUser() ? "justify-end" : "justify-start"}`}>
+    <div
+      class={`group flex ${isUser() ? "justify-end" : "justify-start"}`}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+    >
       <div
-        class={`max-w-[85%] rounded-lg px-3 py-2 text-sm ${
+        class={`relative max-w-[85%] rounded-lg px-3 py-2 text-sm ${
           isUser()
             ? "bg-orange-500/20 border border-orange-500/30"
             : isSystem()
@@ -267,6 +395,19 @@ function MessageRow(props: { msg: ChatMessage }) {
               : "bg-zinc-900 border border-zinc-800"
         }`}
       >
+        <Show when={props.onPin && hover()}>
+          <button
+            class="absolute -top-2 -right-2 text-[10px] px-1.5 py-0.5 rounded-full border border-zinc-700 bg-zinc-900 text-zinc-300 hover:border-accent-500 hover:text-accent-300 shadow"
+            onClick={(e) => {
+              e.stopPropagation();
+              props.onPin!(props.msg.id);
+            }}
+            title="钉到笔记"
+            aria-label="钉到笔记"
+          >
+            📎
+          </button>
+        </Show>
         <For each={props.msg.segments}>{(seg) => <SegmentBlock seg={seg} />}</For>
         <Show when={props.msg.streaming}>
           <span class="inline-block ml-1 text-zinc-500 text-xs animate-pulse">▍</span>

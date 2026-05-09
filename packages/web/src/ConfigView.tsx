@@ -7,9 +7,10 @@ import { SubagentsTab } from "./SubagentsTab.tsx";
 import { HooksTab } from "./HooksTab.tsx";
 import { PermissionsTab } from "./PermissionsTab.tsx";
 import { WorkflowsTab } from "./WorkflowsTab.tsx";
+import { PromptsTab } from "./PromptsTab.tsx";
 import type { WorkflowRunRequest } from "./workflow-runner.ts";
 
-type TabKey = "skills" | "mcp" | "commands" | "subagents" | "hooks" | "permissions" | "workflows";
+type TabKey = "skills" | "mcp" | "commands" | "subagents" | "hooks" | "permissions" | "workflows" | "prompts";
 
 interface TabSpec {
   key: TabKey;
@@ -78,6 +79,13 @@ const TABS: readonly TabSpec[] = [
         onRun={ctx.onRunWorkflow}
       />
     ),
+  },
+  {
+    key: "prompts",
+    label: "Prompts",
+    icon: "📝",
+    accent: "text-amber-300",
+    render: (ctx) => <PromptsTab client={ctx.client} />,
   },
 ] as const;
 

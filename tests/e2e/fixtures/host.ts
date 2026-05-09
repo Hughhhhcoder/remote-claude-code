@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { createConnection } from "node:net";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -43,21 +43,6 @@ async function waitForPort(port: number, tries = 100, delayMs = 200): Promise<vo
 export async function startHost(opts: { port?: number } = {}): Promise<HostHandle> {
   const port = opts.port ?? 7799;
   const home = await mkdtemp(join(tmpdir(), "rcc-e2e-"));
-  // Pre-seed ~/.rcc/keys.json so the host's loadOrCreateHostKeys() skips the
-  // libsodium keypair generation path (which fails on some Node versions where
-  // the CJS interop exposes crypto_* methods only on the default export).
-  // Loopback connections never exercise E2E encryption, so the placeholder
-  // values are never actually used — they only satisfy the "is it a pair of
-  // strings on disk?" check.
-  await mkdir(join(home, ".rcc"), { recursive: true });
-  await writeFile(
-    join(home, ".rcc", "keys.json"),
-    JSON.stringify({
-      pub: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
-      priv: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
-    }),
-    { mode: 0o600 },
-  );
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     HOME: home,

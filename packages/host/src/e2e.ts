@@ -1,7 +1,25 @@
 import { mkdir, readFile, writeFile, rename } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import * as sodium from "libsodium-wrappers";
+import sodiumImport from "libsodium-wrappers";
+
+type SodiumLike = typeof import("libsodium-wrappers");
+
+/**
+ * libsodium-wrappers 0.8.x ships an ESM build that only statically re-exports
+ * a handful of names (`ready`, `from_base64`, …); the crypto primitives are
+ * attached as own-properties on the default export **after** `ready` resolves.
+ * Under Node 25's stricter CJS/ESM interop a namespace import (`import *`)
+ * therefore leaves `sodium.crypto_box_keypair` undefined. Always go through
+ * the default export and await readiness before touching any crypto_*.
+ */
+const sodium = ((sodiumImport as unknown as { default?: SodiumLike }).default ??
+  sodiumImport) as SodiumLike;
+
+export async function ensureSodium(): Promise<SodiumLike> {
+  await sodium.ready;
+  return sodium;
+}
 
 export interface HostKeypair {
   pub: string;
@@ -19,7 +37,7 @@ function defaultKeysPath(): string {
  * identity and invalidates every device's E2E key (they'd need to re-pair).
  */
 export async function loadOrCreateHostKeys(path = defaultKeysPath()): Promise<HostKeypair> {
-  await sodium.ready;
+  await ensureSodium();
   try {
     const raw = await readFile(path, "utf8");
     const parsed = JSON.parse(raw) as HostKeypair;
@@ -175,5 +193,5 @@ export class ReplayWindow {
 }
 
 export async function ensureSodiumReady(): Promise<void> {
-  await sodium.ready;
+  await ensureSodium();
 }
