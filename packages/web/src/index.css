@@ -51,3 +51,25 @@ body,
 .pulse-soft {
   animation: pulseSoft 1.6s ease-in-out infinite;
 }
+
+.no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+@keyframes slideUp {
+  from {
+    transform: translateY(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+.animate-slide-up {
+  animation: slideUp 220ms cubic-bezier(0.16, 1, 0.3, 1);
+}

@@ -7,6 +7,10 @@ import { PairingView } from "./PairingView.tsx";
 import { DevicesModal } from "./DevicesModal.tsx";
 import { ConfigView } from "./ConfigView.tsx";
 import { FileBrowser } from "./FileBrowser.tsx";
+import { MobileKeyBar } from "./MobileKeyBar.tsx";
+import { useIsMobile } from "./useIsMobile.ts";
+import { InstallPrompt } from "./InstallPrompt.tsx";
+import { PermissionApproval } from "./PermissionApproval.tsx";
 import { clearToken, loadToken } from "./auth.ts";
 
 const FALLBACK_PINNED: readonly CommandSummary[] = [
@@ -24,6 +28,7 @@ function dotForScope(scope: "builtin" | "user" | "project"): string {
 
 export function App() {
   const client = new RccClient({ url: defaultWsUrl(), token: loadToken() });
+  const isMobile = useIsMobile();
 
   const [sessions, setSessions] = createSignal<SessionMeta[]>([]);
   const [activeSid, setActiveSid] = createSignal<string | null>(null);
@@ -193,6 +198,7 @@ export function App() {
             </div>
           </Show>
           <TunnelBadge info={tunnel()} />
+          <InstallPrompt />
           <StatusBadge status={status()} />
         </div>
       </div>
@@ -300,41 +306,47 @@ export function App() {
               </div>
 
               {/* command bar */}
-              <div class="border-t border-zinc-900 p-3 shrink-0">
-                <div class="flex items-center gap-1.5 overflow-x-auto scrollbar">
-                  <For each={pinnedCommands()}>
-                    {(c) => (
-                      <button
-                        class={`shrink-0 text-[11px] px-2.5 py-1.5 rounded-md border flex items-center gap-1.5 font-mono ${
-                          c.scope === "project"
-                            ? "bg-orange-500/10 border-orange-500/30 text-orange-300 hover:bg-orange-500/20"
-                            : "bg-zinc-900 border-zinc-800 text-zinc-300 hover:border-zinc-700"
-                        }`}
-                        onClick={() => sendCommand(`/${c.name}`)}
-                        title={c.description || `发送 /${c.name}`}
-                      >
-                        <span class={`w-1 h-1 rounded-full ${dotForScope(c.scope)}`} />
-                        /{c.name}
-                      </button>
-                    )}
-                  </For>
-                  <span class="shrink-0 w-px h-5 bg-zinc-800 mx-0.5" />
-                  <KeyButton label="Esc" onClick={() => client.write(activeSid()!, "\x1b")} />
-                  <KeyButton label="Tab" onClick={() => client.write(activeSid()!, "\t")} />
-                  <KeyButton label="↑" onClick={() => client.write(activeSid()!, "\x1b[A")} />
-                  <KeyButton label="↓" onClick={() => client.write(activeSid()!, "\x1b[B")} />
-                  <KeyButton label="^C" onClick={() => client.write(activeSid()!, "\x03")} />
-                  <KeyButton
-                    label="Shift+Tab"
-                    onClick={() => client.write(activeSid()!, "\x1b[Z")}
-                    hint="plan mode toggle"
-                  />
+              <Show when={!isMobile()}>
+                <div class="border-t border-zinc-900 p-3 shrink-0">
+                  <div class="flex items-center gap-1.5 overflow-x-auto scrollbar">
+                    <For each={pinnedCommands()}>
+                      {(c) => (
+                        <button
+                          class={`shrink-0 text-[11px] px-2.5 py-1.5 rounded-md border flex items-center gap-1.5 font-mono ${
+                            c.scope === "project"
+                              ? "bg-orange-500/10 border-orange-500/30 text-orange-300 hover:bg-orange-500/20"
+                              : "bg-zinc-900 border-zinc-800 text-zinc-300 hover:border-zinc-700"
+                          }`}
+                          onClick={() => sendCommand(`/${c.name}`)}
+                          title={c.description || `发送 /${c.name}`}
+                        >
+                          <span class={`w-1 h-1 rounded-full ${dotForScope(c.scope)}`} />
+                          /{c.name}
+                        </button>
+                      )}
+                    </For>
+                    <span class="shrink-0 w-px h-5 bg-zinc-800 mx-0.5" />
+                    <KeyButton label="Esc" onClick={() => client.write(activeSid()!, "\x1b")} />
+                    <KeyButton label="Tab" onClick={() => client.write(activeSid()!, "\t")} />
+                    <KeyButton label="↑" onClick={() => client.write(activeSid()!, "\x1b[A")} />
+                    <KeyButton label="↓" onClick={() => client.write(activeSid()!, "\x1b[B")} />
+                    <KeyButton label="^C" onClick={() => client.write(activeSid()!, "\x03")} />
+                    <KeyButton
+                      label="Shift+Tab"
+                      onClick={() => client.write(activeSid()!, "\x1b[Z")}
+                      hint="plan mode toggle"
+                    />
+                  </div>
+                  <div class="mt-2 flex items-center justify-between text-[11px] text-zinc-600">
+                    <div>点击按钮向当前 session 发送字符</div>
+                    <div>M1 · 本地模式</div>
+                  </div>
                 </div>
-                <div class="mt-2 flex items-center justify-between text-[11px] text-zinc-600">
-                  <div>点击按钮向当前 session 发送字符</div>
-                  <div>M1 · 本地模式</div>
-                </div>
-              </div>
+              </Show>
+              <Show when={isMobile() && activeSid()}>
+                {/* reserve space so MobileKeyBar (2 rows ~ 92px + safe-area) doesn't cover terminal */}
+                <div class="shrink-0" style={{ height: "calc(96px + env(safe-area-inset-bottom))" }} />
+              </Show>
             </>
           </Show>
         </main>
@@ -364,6 +376,10 @@ export function App() {
         activeSid={activeSid()}
         onClose={() => setConfigOpen(false)}
       />
+      <PermissionApproval client={client} />
+      <Show when={isMobile() && activeSid()}>
+        <MobileKeyBar client={client} sid={activeSid()} pinnedCommands={pinnedCommands} />
+      </Show>
     </div>
     </Show>
   );

@@ -50,6 +50,7 @@ import {
 } from "./permissions.ts";
 import { listHooks, writeHook, deleteHook, testHook } from "./hooks.ts";
 import { ls as fsLs, read as fsRead, statEntry as fsStat } from "./fs.ts";
+import { ApprovalWatcher } from "./approvals.ts";
 
 interface WsState {
   attached: Set<string>;
@@ -187,6 +188,35 @@ function authenticate(req: { url?: string; headers: { [key: string]: any }; sock
 
 const registry = new SessionRegistry();
 
+// Approval watchers: one per session. Scan pty.out for Claude CLI y/n prompts
+// and surface structured `approval.request` frames to all clients. The actual
+// `broadcast()` function is defined further down; we route through a shim that
+// captures the `wss` reference in its closure so watchers can be created
+// before the ws server exists.
+const approvalWatchers = new Map<string, ApprovalWatcher>();
+
+function broadcastApproval(frame: Frame): void {
+  for (const client of wss.clients) {
+    if (client.readyState !== WebSocket.OPEN) continue;
+    try {
+      client.send(encode(frame));
+    } catch {
+      // ignore
+    }
+  }
+}
+
+function attachApprovalWatcher(session: Session): void {
+  const watcher = new ApprovalWatcher(session, broadcastApproval);
+  approvalWatchers.set(session.id, watcher);
+  const unsub = session.subscribe((chunk) => watcher.feed(chunk.data));
+  session.onExit(() => {
+    unsub();
+    watcher.dispose();
+    approvalWatchers.delete(session.id);
+  });
+}
+
 // Pinned slash command ids — loaded once from ~/.rcc/pinned-commands.json, kept
 // in memory, and broadcast via `cmd.pinned` whenever mutated.
 let pinnedCommandsCache: string[] = await loadPinned();
@@ -197,6 +227,7 @@ const boot = registry.create({
   cwd: DEFAULT_CWD,
   permissionMode: DEFAULT_PERMISSION_MODE,
 });
+attachApprovalWatcher(boot);
 console.log(
   `[rcc-host] bootstrapped session ${boot.id} at ${boot.cwd} (permission: ${boot.permissionMode})`,
 );
@@ -239,6 +270,7 @@ function handle(ws: WebSocket, state: WsState, frame: Frame): void {
         rows: frame.rows,
         permissionMode: frame.permissionMode ?? DEFAULT_PERMISSION_MODE,
       });
+      attachApprovalWatcher(s);
       send(ws, { v: 1, t: "session.created", session: s.meta() });
       send(ws, { v: 1, t: "session.list", sessions: registry.list().map((x) => x.meta()) });
       attach(ws, state, s, null);
@@ -268,6 +300,11 @@ function handle(ws: WebSocket, state: WsState, frame: Frame): void {
     }
     case "ping": {
       send(ws, { v: 1, t: "pong", ts: frame.ts });
+      return;
+    }
+    case "approval.response": {
+      const w = approvalWatchers.get(frame.sid);
+      if (w) w.resolve(frame.id, frame.approve);
       return;
     }
     case "device.list.request": {

@@ -43,11 +43,11 @@
 
 | Feature | Status | Since | Notes |
 |---|---|---|---|
-| PWA 外壳 (manifest + SW) | 🔴 | — | 安装到主屏 |
+| PWA 外壳 (manifest + SW) | 🟢 | 2026-05-09 | manifest + 手写 SW（static cache-first，HTML network-first，排除 ws/pair/health/tunnel）+ 📲 安装按钮（iOS Safari 提示手动 Share → Add to Home Screen） |
 | 语义化对话视图 | 🔴 | — | tool_use 卡片、diff 折叠、图片内联（替代纯 xterm） |
-| 权限审批专用页 | 🔴 | — | 风险分级 + Face ID |
+| 权限审批专用页 | 🟢 | 2026-05-09 | host ApprovalWatcher 启发式扫描 pty.out 中 Claude 的 y/n 提示，按工具名分 low/medium/high 三档，广播 approval.request 帧;web 端专用审批卡片（移动底部 / 桌面 modal）;高风险按钮 500ms 防误触。Face ID/Touch ID 留待 M5 WebAuthn |
 | Web Push | 🔴 | — | VAPID，推权限弹窗到锁屏 |
-| 虚拟键盘快捷键条（移动优化版） | 🔴 | — | 贴键盘上方 |
+| 虚拟键盘快捷键条（移动优化版） | 🟢 | 2026-05-09 | 移动端 sticky 底部键条,pinned commands + Esc/Tab/方向键/^C/Enter/斜杠,visualViewport 跟随键盘,safe-area-inset 适配刘海屏 |
 | 语音输入 | 🔴 | — | Web Speech API 优先，失败回退 Whisper API |
 
 ## M4 · Multi-device + Config UI  🟡 wip
@@ -104,3 +104,6 @@
 - 2026-05-09  M4 batch 2 · Permissions UI：`~/.claude/settings.json` + `<cwd>/.claude/settings.json` + `<cwd>/.claude/settings.local.json` 三 scope allow/deny/ask 规则读写，defaultMode（user/project）和 additionalDirectories 可视化编辑，所有变更广播 `perm.list` 到全部客户端。
 - 2026-05-09  M4 batch 2 · 文件浏览器：桌面右栏可 toggle（240px / 1fr / 360px）；host 端 `fs.ls` / `fs.read` / `fs.stat` 受限在 `<cwd>` 和 `~` 子树（realpath 比对防 symlink 越狱）；Monaco 只读预览 12 种语言，512KB 截断，NUL 嗅探二进制转 base64。
 - 2026-05-09  M4 batch 2 · Hooks UI：`~/.claude/settings.json` 和 `<cwd>/.claude/settings.json` 的 `hooks` 段读写（9 种事件 × matcher+command 列表），新建/编辑/删除/🧪测试按钮（`execFile sh -c`，stdout/stderr 32KB 截断），`hook.list` 广播到所有客户端。
+- 2026-05-09  M3 batch 1 · MobileKeyBar: 移动端（≤767px）底部固定快捷键条,两行布局（pinned commands + Esc/Tab/↑↓/Enter/slash/^C/Shift+Tab）,visualViewport 跟随软键盘,safe-area-inset-bottom 适配,桌面 command bar 在移动端隐藏。
+- 2026-05-09  M3 batch 1 · 审批页: host ApprovalWatcher 启发式扫描 pty.out 捕获 Claude y/n 提示,按工具名三档分级(low/medium/high),新增 approval.{request,response,cleared} 帧,web 端底部滑出卡片(mobile)/居中 modal(desktop),高风险 500ms 防误触,30s 超时自动清除。
+- 2026-05-09  M3 batch 1 · PWA: manifest.webmanifest + 手写 sw.js（static cache-first，HTML network-first + offline shell，严格排除 /ws、/pair/*、/health、/tunnel 实时路径），gen-icons.mjs 纯 Node 生成 192/512/maskable PNG，顶栏 📲 安装按钮（beforeinstallprompt 捕获 → prompt；iOS Safari 展开 Share → Add to Home Screen 提示）。

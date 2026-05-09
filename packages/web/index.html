@@ -2,11 +2,35 @@
 <html lang="zh-CN">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>rcc · Remote Claude Code</title>
+    <meta name="description" content="远程控制你家里那台 Mac 上的 Claude Code，从任何设备。" />
+    <meta name="theme-color" content="#09090b" />
+    <meta name="color-scheme" content="dark" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png" />
+    <link rel="icon" type="image/png" sizes="512x512" href="/icon-512.png" />
+    <link rel="apple-touch-icon" href="/icon-192.png" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="RCC" />
+    <meta name="mobile-web-app-capable" content="yes" />
   </head>
   <body class="bg-zinc-950 text-zinc-100">
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
+    <script>
+      // Register the PWA service worker. Skip when explicitly disabled via
+      // ?nosw=1 so devs can bypass aggressive caching if needed.
+      if ("serviceWorker" in navigator && !/[?&]nosw=1/.test(location.search)) {
+        window.addEventListener("load", function () {
+          navigator.serviceWorker
+            .register("/sw.js", { scope: "/" })
+            .catch(function (err) {
+              console.warn("[rcc] SW registration failed:", err);
+            });
+        });
+      }
+    </script>
   </body>
 </html>

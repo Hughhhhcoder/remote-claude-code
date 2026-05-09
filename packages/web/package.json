@@ -6,7 +6,8 @@
     "dev": "vite",
     "build": "vite build --outDir dist",
     "preview": "vite preview --port 5273",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "gen-icons": "node scripts/gen-icons.mjs"
   },
   "dependencies": {
     "@rcc/protocol": "workspace:*",

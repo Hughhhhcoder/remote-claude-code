@@ -755,6 +755,43 @@ export const PermDirAck = z.object({
   action: z.enum(["added", "removed"]),
 });
 
+// [approvals] — filled by M3 batch 1
+//
+// Claude CLI asks `y/n` on stdin for some tool uses. The host scans pty.out
+// for those prompts (heuristic regex + tool-name inference) and surfaces a
+// structured request so clients can display a dedicated, mobile-friendly
+// approval UI. The user's answer is echoed back into the pty's stdin.
+
+export const ApprovalRisk = z.enum(["low", "medium", "high"]);
+export type ApprovalRisk = z.infer<typeof ApprovalRisk>;
+
+export const ApprovalRequest = z.object({
+  ...base,
+  t: z.literal("approval.request"),
+  id: z.string(),
+  sid: z.string(),
+  tool: z.string(),
+  risk: ApprovalRisk,
+  summary: z.string(),
+  raw: z.string(),
+  timestamp: z.number(),
+});
+
+export const ApprovalResponse = z.object({
+  ...base,
+  t: z.literal("approval.response"),
+  id: z.string(),
+  sid: z.string(),
+  approve: z.boolean(),
+});
+
+export const ApprovalCleared = z.object({
+  ...base,
+  t: z.literal("approval.cleared"),
+  id: z.string(),
+  sid: z.string(),
+});
+
 // [files] — filled by M4 batch 2
 
 export const FileEntry = z.object({
@@ -890,6 +927,9 @@ export const Frame = z.discriminatedUnion("t", [
   FsRead,
   FsStatRequest,
   FsStat,
+  ApprovalRequest,
+  ApprovalResponse,
+  ApprovalCleared,
 ]);
 export type Frame = z.infer<typeof Frame>;
 
