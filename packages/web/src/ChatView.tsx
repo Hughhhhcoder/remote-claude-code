@@ -53,7 +53,35 @@ export function ChatView(props: { client: RccClient; sid: string }) {
       queueMicrotask(() => scrollRef?.scrollTo({ top: scrollRef.scrollHeight }));
     }
     if (frame.t === "chat.append" && frame.sid === props.sid) {
-      setMessages((ms) => [...ms, frame.message].slice(-200));
+      setMessages((ms) => {
+        // If the host is finalizing a streaming message we already have, swap
+        // in place (by id) rather than appending a duplicate.
+        const idx = ms.findIndex((m) => m.id === frame.message.id);
+        if (idx >= 0) {
+          const next = [...ms];
+          next[idx] = frame.message;
+          return next;
+        }
+        return [...ms, frame.message].slice(-200);
+      });
+      queueMicrotask(() => scrollRef?.scrollTo({ top: scrollRef.scrollHeight }));
+    }
+    // [sdk-driver] SDK sessions stream segment patches via chat.update. Apply
+    // them in place so text_delta / tool_result land without a full re-append.
+    if (frame.t === "chat.update" && frame.sid === props.sid) {
+      setMessages((ms) => {
+        const idx = ms.findIndex((m) => m.id === frame.messageId);
+        if (idx < 0) return ms;
+        const msg = ms[idx]!;
+        const segments = msg.segments.slice();
+        while (segments.length <= frame.segmentIndex) {
+          segments.push({ kind: "text", content: "" });
+        }
+        segments[frame.segmentIndex] = frame.segment;
+        const next = [...ms];
+        next[idx] = { ...msg, segments };
+        return next;
+      });
       queueMicrotask(() => scrollRef?.scrollTo({ top: scrollRef.scrollHeight }));
     }
   });
@@ -208,16 +236,22 @@ export function ChatView(props: { client: RccClient; sid: string }) {
 
 function MessageRow(props: { msg: ChatMessage }) {
   const isUser = () => props.msg.role === "user";
+  const isSystem = () => props.msg.role === "system";
   return (
     <div class={`flex ${isUser() ? "justify-end" : "justify-start"}`}>
       <div
         class={`max-w-[85%] rounded-lg px-3 py-2 text-sm ${
           isUser()
             ? "bg-orange-500/20 border border-orange-500/30"
-            : "bg-zinc-900 border border-zinc-800"
+            : isSystem()
+              ? "bg-amber-500/10 border border-amber-500/30 text-amber-200 text-xs"
+              : "bg-zinc-900 border border-zinc-800"
         }`}
       >
         <For each={props.msg.segments}>{(seg) => <SegmentBlock seg={seg} />}</For>
+        <Show when={props.msg.streaming}>
+          <span class="inline-block ml-1 text-zinc-500 text-xs animate-pulse">▍</span>
+        </Show>
       </div>
     </div>
   );
@@ -234,16 +268,35 @@ function SegmentBlock(props: { seg: ChatSegment }) {
 }
 
 function NonTextSegment(props: { seg: ChatSegment }) {
+  const kind = () => props.seg.kind;
   return (
     <Show
-      when={props.seg.kind === "code"}
+      when={kind() === "code"}
       fallback={
         <Show
-          when={props.seg.kind === "diff"}
+          when={kind() === "diff"}
           fallback={
-            <ToolUseBlock
-              seg={props.seg as Extract<ChatSegment, { kind: "tool_use" }>}
-            />
+            <Show
+              when={kind() === "thinking"}
+              fallback={
+                <Show
+                  when={kind() === "tool_result"}
+                  fallback={
+                    <ToolUseBlock
+                      seg={props.seg as Extract<ChatSegment, { kind: "tool_use" }>}
+                    />
+                  }
+                >
+                  <ToolResultBlock
+                    seg={props.seg as Extract<ChatSegment, { kind: "tool_result" }>}
+                  />
+                </Show>
+              }
+            >
+              <ThinkingBlock
+                seg={props.seg as Extract<ChatSegment, { kind: "thinking" }>}
+              />
+            </Show>
           }
         >
           <DiffBlock
@@ -308,6 +361,75 @@ function ToolUseBlock(props: { seg: Extract<ChatSegment, { kind: "tool_use" }> }
       <Show when={open() && props.seg.output}>
         <pre class="border-t border-zinc-800 p-2 overflow-x-auto">
           <code>{props.seg.output}</code>
+        </pre>
+      </Show>
+    </div>
+  );
+}
+
+// [sdk-driver] Thinking blocks are rendered collapsed-by-default in a muted
+// tone so they don't dominate the transcript. Only shown when the SDK emits
+// a real thinking block — CLI driver never produces these.
+function ThinkingBlock(props: { seg: Extract<ChatSegment, { kind: "thinking" }> }) {
+  const [open, setOpen] = createSignal(false);
+  return (
+    <div class="my-1 border border-zinc-800/60 rounded bg-zinc-900/40 text-xs italic text-zinc-400">
+      <button
+        class="w-full flex items-center gap-2 px-2 py-1 text-left"
+        onClick={() => setOpen(!open())}
+      >
+        <span class="text-zinc-600 w-3">{open() ? "▼" : "▶"}</span>
+        <span class="text-zinc-500">💭 思考</span>
+        <span class="text-zinc-600 truncate flex-1 not-italic">
+          {props.seg.content.slice(0, 80)}
+        </span>
+      </button>
+      <Show when={open()}>
+        <div class="border-t border-zinc-800/60 p-2 whitespace-pre-wrap break-words">
+          {props.seg.content}
+        </div>
+      </Show>
+    </div>
+  );
+}
+
+// [sdk-driver] tool_result pairs 1:1 with a tool_use by toolUseId. Red border
+// when is_error so errors are visible without opening the block.
+function ToolResultBlock(props: {
+  seg: Extract<ChatSegment, { kind: "tool_result" }>;
+}) {
+  const [open, setOpen] = createSignal(false);
+  return (
+    <div
+      class={`my-1 border rounded text-xs ${
+        props.seg.isError
+          ? "border-rose-600/50 bg-rose-950/20"
+          : "border-emerald-700/40 bg-emerald-950/10"
+      }`}
+    >
+      <button
+        class="w-full flex items-center gap-2 px-2 py-1 text-left"
+        onClick={() => setOpen(!open())}
+      >
+        <span class="text-zinc-500 w-3">{open() ? "▼" : "▶"}</span>
+        <span
+          class={`font-mono ${
+            props.seg.isError ? "text-rose-400" : "text-emerald-400"
+          }`}
+        >
+          {props.seg.isError ? "✗ 工具错误" : "✓ 工具返回"}
+        </span>
+        <span class="text-zinc-500 truncate flex-1">
+          {props.seg.content.slice(0, 80)}
+        </span>
+      </button>
+      <Show when={open()}>
+        <pre
+          class={`border-t p-2 overflow-x-auto ${
+            props.seg.isError ? "border-rose-600/30" : "border-emerald-700/30"
+          }`}
+        >
+          <code>{props.seg.content}</code>
         </pre>
       </Show>
     </div>

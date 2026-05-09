@@ -13,9 +13,10 @@ import {
   PROTOCOL_VERSION,
   PermissionMode as PermissionModeSchema,
 } from "@rcc/protocol";
-import { SessionRegistry, type Session } from "./session.ts";
+import { SessionRegistry, type AnySession, Session } from "./session.ts";
 import { startTunnel, type Tunnel } from "./tunnel.ts";
 import { loadConfig, resolveTunnelConfig } from "./config.ts";
+import { ProjectStore } from "./projects.ts";
 import { TrustStore, PairingCodes, type PairedDevice } from "./trust.ts";
 import { handlePairRoute } from "./pair.ts";
 import { handleWhisperRoute } from "./whisper.ts";
@@ -67,6 +68,11 @@ import { CrdtRelay, isUpdateTooLarge } from "./crdt.ts";
 import { WebAuthnService, rpIdFromHost, originFromReq } from "./webauthn.ts";
 import { installCrashHandler } from "./crash.ts";
 import { checkForUpdates, versionSummary } from "./version.ts";
+import {
+  fetchCatalogs,
+  installSkillFromCatalog,
+  installMcpFromCatalog,
+} from "./marketplace.ts";
 
 interface WsState {
   attached: Set<string>;
@@ -77,9 +83,11 @@ interface WsState {
 const CLAUDE_COMMAND = process.env.RCC_CLAUDE_CMD ?? "claude";
 const CLAUDE_ARGS = (process.env.RCC_CLAUDE_ARGS ?? "").split(" ").filter(Boolean);
 const PORT = Number(process.env.RCC_PORT ?? 7777);
-const DEFAULT_CWD = process.env.RCC_CWD ?? process.cwd();
+const BOOT_CWD = process.env.RCC_CWD ?? process.cwd();
 const RCC_CONFIG = await loadConfig();
 const TUNNEL_CONFIG = resolveTunnelConfig(RCC_CONFIG, process.env);
+const projects = await ProjectStore.load(BOOT_CWD);
+const DEFAULT_CWD = projects.getDefault().cwd;
 
 // Auth: every non-loopback connection must present a device token obtained
 // via the pairing flow. Set RCC_TRUST_LOOPBACK=0 to also require auth on
@@ -240,7 +248,24 @@ function broadcastApproval(frame: Frame): void {
   }
 }
 
-function attachApprovalWatcher(session: Session): void {
+function attachApprovalWatcher(session: AnySession): void {
+  // ApprovalWatcher scrapes pty.out for Claude CLI y/n prompts — only the CLI
+  // driver emits those. SDK driver surfaces permission decisions via the
+  // canUseTool callback path (not yet wired into RCC's approval UI).
+  if (!(session instanceof Session)) {
+    // Still wire session-exited push so users on SDK sessions hear "done".
+    session.onExit((code) => {
+      const short = session.id.slice(0, 8);
+      const codeStr = code === null ? "signal" : `exit ${code}`;
+      void push.broadcast("all", {
+        title: "✓ 会话已结束",
+        body: `session ${short} · ${codeStr}`,
+        tag: `session-exit-${session.id}`,
+        data: { sid: session.id, kind: "session.exited" },
+      });
+    });
+    return;
+  }
   const watcher = new ApprovalWatcher(session, broadcastApproval, (id, risk) => {
     if (risk !== "high") return;
     // Gate only if at least one currently-connected device has a passkey —
@@ -277,11 +302,25 @@ function attachApprovalWatcher(session: Session): void {
 
 // [messages] Bridge each session's ChatParser to a websocket broadcast so
 // every attached client sees assistant messages as they're classified.
-function attachChatBroadcast(session: Session): void {
+function attachChatBroadcast(session: AnySession): void {
   const unsub = session.chat.onMessage((message) => {
     broadcast({ v: 1, t: "chat.append", sid: session.id, message });
   });
-  session.onExit(() => unsub());
+  // SDK driver also fires streaming segment updates; CLI driver never does.
+  const unsubUpdate = session.chat.onUpdate((messageId, segmentIndex, segment) => {
+    broadcast({
+      v: 1,
+      t: "chat.update",
+      sid: session.id,
+      messageId,
+      segmentIndex,
+      segment,
+    });
+  });
+  session.onExit(() => {
+    unsub();
+    unsubUpdate();
+  });
 }
 
 // Pinned slash command ids — loaded once from ~/.rcc/pinned-commands.json, kept
@@ -289,10 +328,12 @@ function attachChatBroadcast(session: Session): void {
 let pinnedCommandsCache: string[] = await loadPinned();
 
 const boot = registry.create({
+  driver: "cli",
   command: CLAUDE_COMMAND,
   args: CLAUDE_ARGS,
   cwd: DEFAULT_CWD,
   permissionMode: DEFAULT_PERMISSION_MODE,
+  projectId: projects.getDefault().id,
 });
 attachApprovalWatcher(boot);
 attachChatBroadcast(boot);
@@ -335,7 +376,7 @@ function send(ws: WebSocket, frame: Frame): void {
   }
 }
 
-function attach(ws: WebSocket, state: WsState, session: Session, since: number | null): void {
+function attach(ws: WebSocket, state: WsState, session: AnySession, since: number | null): void {
   if (state.attached.has(session.id)) return;
   state.attached.add(session.id);
 
@@ -356,19 +397,47 @@ function attach(ws: WebSocket, state: WsState, session: Session, since: number |
 function handle(ws: WebSocket, state: WsState, frame: Frame): void {
   switch (frame.t) {
     case "session.new": {
+      // Project binding rules:
+      //  - projectId given  → use that project's cwd (or the explicit cwd if
+      //    caller also passed one; client opt-in to override).
+      //  - cwd only         → match cwd against known projects; fall back to
+      //    default project but stamp the explicit cwd.
+      //  - neither          → default project.
+      let project = frame.projectId ? projects.getById(frame.projectId) : undefined;
+      if (!project && frame.cwd) project = projects.findByCwd(frame.cwd);
+      if (!project) project = projects.getDefault();
+      const cwd = frame.cwd ?? project.cwd;
+      const driver = frame.driver ?? "cli";
       const s = registry.create({
-        command: CLAUDE_COMMAND,
-        args: CLAUDE_ARGS,
-        cwd: frame.cwd ?? DEFAULT_CWD,
+        driver,
+        command: driver === "cli" ? CLAUDE_COMMAND : undefined,
+        args: driver === "cli" ? CLAUDE_ARGS : undefined,
+        cwd,
         cols: frame.cols,
         rows: frame.rows,
         permissionMode: frame.permissionMode ?? DEFAULT_PERMISSION_MODE,
+        projectId: project.id,
       });
       attachApprovalWatcher(s);
       attachChatBroadcast(s);
       send(ws, { v: 1, t: "session.created", session: s.meta() });
       send(ws, { v: 1, t: "session.list", sessions: registry.list().map((x) => x.meta()) });
       attach(ws, state, s, null);
+      // SDK sessions need an explicit `start()` to open the query stream.
+      // Failures surface as system chat messages (and close the session); we
+      // also emit a one-shot error frame so the client doesn't have to
+      // parse chat to discover the problem.
+      if (s.driver === "sdk") {
+        s.start().catch((err: Error) => {
+          send(ws, {
+            v: 1,
+            t: "error",
+            code: "sdk_start_failed",
+            message: err.message,
+            sid: s.id,
+          });
+        });
+      }
       return;
     }
     case "session.attach": {
@@ -533,6 +602,82 @@ function handle(ws: WebSocket, state: WsState, frame: Frame): void {
     // [config-handlers] — each config agent adds its case blocks below.
     // Keep handlers self-contained; if they need background state they
     // register it at module level (see SessionRegistry for the pattern).
+    case "project.list.request": {
+      send(ws, { v: 1, t: "project.list", projects: projects.list() });
+      return;
+    }
+    case "project.add": {
+      projects
+        .create({ name: frame.name, cwd: frame.cwd, color: frame.color })
+        .then((p) => {
+          send(ws, { v: 1, t: "project.added", project: p });
+          broadcastProjectList();
+        })
+        .catch((err) => {
+          send(ws, {
+            v: 1,
+            t: "error",
+            code: "project_add_failed",
+            message: err?.message ?? String(err),
+          });
+        });
+      return;
+    }
+    case "project.remove": {
+      projects
+        .remove(frame.id)
+        .then((ok) => {
+          if (!ok) {
+            send(ws, { v: 1, t: "error", code: "project_not_found", message: frame.id });
+            return;
+          }
+          send(ws, { v: 1, t: "project.removed", id: frame.id });
+          broadcastProjectList();
+        })
+        .catch((err) => {
+          send(ws, {
+            v: 1,
+            t: "error",
+            code: "project_remove_failed",
+            message: err?.message ?? String(err),
+          });
+        });
+      return;
+    }
+    case "project.rename": {
+      projects
+        .rename(frame.id, frame.name)
+        .then((p) => {
+          send(ws, { v: 1, t: "project.renamed", project: p });
+          broadcastProjectList();
+        })
+        .catch((err) => {
+          send(ws, {
+            v: 1,
+            t: "error",
+            code: "project_rename_failed",
+            message: err?.message ?? String(err),
+          });
+        });
+      return;
+    }
+    case "project.update": {
+      projects
+        .update(frame.id, { cwd: frame.cwd, color: frame.color ?? undefined })
+        .then((p) => {
+          send(ws, { v: 1, t: "project.updated", project: p });
+          broadcastProjectList();
+        })
+        .catch((err) => {
+          send(ws, {
+            v: 1,
+            t: "error",
+            code: "project_update_failed",
+            message: err?.message ?? String(err),
+          });
+        });
+      return;
+    }
     case "skill.list.request": {
       listSkills(DEFAULT_CWD)
         .then((skills) => send(ws, { v: 1, t: "skill.list", skills }))
@@ -1225,6 +1370,94 @@ function handle(ws: WebSocket, state: WsState, frame: Frame): void {
       }
       return;
     }
+    case "market.catalog.request": {
+      fetchCatalogs(!!frame.force)
+        .then((cat) =>
+          send(ws, {
+            v: 1,
+            t: "market.catalog",
+            skills: cat.skills,
+            mcps: cat.mcps,
+            sources: cat.sources,
+            fetchedAt: cat.fetchedAt,
+          }),
+        )
+        .catch((err) => {
+          send(ws, {
+            v: 1,
+            t: "error",
+            code: "market_catalog_failed",
+            message: err?.message ?? String(err),
+          });
+        });
+      return;
+    }
+    case "market.install.skill": {
+      installSkillFromCatalog(frame.id, frame.scope, DEFAULT_CWD)
+        .then((res) => {
+          if (res.ok) {
+            send(ws, {
+              v: 1,
+              t: "market.skill.installed",
+              id: frame.id,
+              ok: true,
+              installedName: res.installedName,
+            });
+            return listSkills(DEFAULT_CWD).then((skills) =>
+              send(ws, { v: 1, t: "skill.list", skills }),
+            );
+          }
+          send(ws, {
+            v: 1,
+            t: "market.skill.installed",
+            id: frame.id,
+            ok: false,
+            error: res.error,
+          });
+        })
+        .catch((err) => {
+          send(ws, {
+            v: 1,
+            t: "market.skill.installed",
+            id: frame.id,
+            ok: false,
+            error: err?.message ?? String(err),
+          });
+        });
+      return;
+    }
+    case "market.install.mcp": {
+      installMcpFromCatalog(frame.id, frame.scope, frame.env ?? {}, DEFAULT_CWD)
+        .then((res) => {
+          if (res.ok) {
+            send(ws, {
+              v: 1,
+              t: "market.mcp.installed",
+              id: frame.id,
+              ok: true,
+              installedName: res.installedName,
+            });
+            return listMcp(DEFAULT_CWD).then((servers) => broadcastMcpList(servers));
+          }
+          send(ws, {
+            v: 1,
+            t: "market.mcp.installed",
+            id: frame.id,
+            ok: false,
+            error: res.error,
+          });
+        })
+        .catch((err) => {
+          send(ws, {
+            v: 1,
+            t: "market.mcp.installed",
+            id: frame.id,
+            ok: false,
+            error: err?.message ?? String(err),
+          });
+        });
+      return;
+    }
     default:
       return;
   }
@@ -1354,6 +1587,18 @@ function broadcastPermList(): void {
       }
     })
     .catch(() => {});
+}
+
+function broadcastProjectList(): void {
+  const frame: Frame = { v: 1, t: "project.list", projects: projects.list() };
+  for (const client of wss.clients) {
+    if (client.readyState !== WebSocket.OPEN) continue;
+    try {
+      client.send(frameForClient(client as E2EWebSocket, frame));
+    } catch {
+      // ignore
+    }
+  }
 }
 
 function broadcastDeviceList(): void {
@@ -1719,6 +1964,7 @@ wss.on("connection", (ws) => {
     tunnel: currentTunnelInfo(),
     device: device ? { id: device.id, name: device.name, hasPasskey: !!device.passkey } : null,
     pinnedCommands: pinnedCommandsCache,
+    projects: projects.list(),
   });
 
   ws.on("message", (raw) => {

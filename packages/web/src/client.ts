@@ -1,4 +1,4 @@
-import { tryDecode, encode, type Frame, type PermissionMode, type SessionMeta, type TunnelInfo } from "@rcc/protocol";
+import { tryDecode, encode, type Frame, type PermissionMode, type SessionDriver, type SessionMeta, type TunnelInfo } from "@rcc/protocol";
 import sodium from "libsodium-wrappers";
 import { loadE2EKey } from "./auth.ts";
 
@@ -356,7 +356,7 @@ export class RccClient {
     this.send({ v: 1, t: "pty.resize", sid, cols, rows });
   }
 
-  newSession(opts: { cwd?: string; cols?: number; rows?: number; permissionMode?: PermissionMode } = {}): void {
+  newSession(opts: { cwd?: string; cols?: number; rows?: number; permissionMode?: PermissionMode; projectId?: string; driver?: SessionDriver } = {}): void {
     this.send({
       v: 1,
       t: "session.new",
@@ -364,6 +364,8 @@ export class RccClient {
       cols: opts.cols,
       rows: opts.rows,
       permissionMode: opts.permissionMode,
+      projectId: opts.projectId,
+      driver: opts.driver,
     });
   }
 

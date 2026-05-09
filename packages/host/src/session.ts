@@ -5,6 +5,7 @@ import { homedir } from "node:os";
 import type { PermissionMode, SessionMeta } from "@rcc/protocol";
 import { RingBuffer } from "./ring-buffer.ts";
 import { ChatParser } from "./chat-parser.ts";
+import { SdkSession } from "./sdk-session.ts";
 
 export interface BufferedChunk {
   seq: number;
@@ -24,6 +25,13 @@ export class Session {
   readonly cwd: string;
   readonly createdAt = Date.now();
   readonly permissionMode: PermissionMode;
+  readonly driver = "cli" as const;
+  /**
+   * Added in M4 batch 3: which project this session belongs to. Callers set
+   * it via opts.projectId; legacy callers pass nothing and the session is
+   * treated as "default project" by clients.
+   */
+  projectId: string | null;
   cols: number;
   rows: number;
   status: "running" | "exited" = "running";
@@ -46,12 +54,14 @@ export class Session {
     rows?: number;
     env?: Record<string, string>;
     permissionMode?: PermissionMode;
+    projectId?: string | null;
   }) {
     this.id = randomUUID().slice(0, 8);
     this.cwd = opts.cwd ?? process.cwd();
     this.cols = opts.cols ?? 120;
     this.rows = opts.rows ?? 32;
     this.permissionMode = opts.permissionMode ?? "default";
+    this.projectId = opts.projectId ?? null;
     this.chat = new ChatParser(this.id);
 
     const env: Record<string, string> = {
@@ -146,6 +156,8 @@ export class Session {
       createdAt: this.createdAt,
       status: this.status,
       permissionMode: this.permissionMode,
+      driver: "cli",
+      projectId: this.projectId ?? undefined,
     };
   }
 }
@@ -162,18 +174,62 @@ function isClaudeLike(command: string): boolean {
   return base === "claude" || base.startsWith("claude-");
 }
 
-export class SessionRegistry {
-  private readonly sessions = new Map<string, Session>();
+/**
+ * A Session-like value the rest of the host can treat uniformly — CLI driver
+ * (node-pty) or SDK driver (@anthropic-ai/claude-agent-sdk). pty-specific ops
+ * (resize, raw key writes) are no-ops on SDK sessions; clients are expected
+ * to render SDK sessions via ChatView only.
+ */
+export type AnySession = Session | SdkSession;
 
-  create(opts: {
-    command: string;
-    args?: string[];
-    cwd?: string;
-    cols?: number;
-    rows?: number;
-    permissionMode?: PermissionMode;
-  }): Session {
-    const session = new Session(opts);
+export interface CreateSessionOpts {
+  driver?: "cli" | "sdk";
+  // CLI-specific (ignored by SDK):
+  command?: string;
+  args?: string[];
+  // Both:
+  cwd?: string;
+  cols?: number;
+  rows?: number;
+  permissionMode?: PermissionMode;
+  projectId?: string | null;
+}
+
+/**
+ * Factory: instantiate the right session class for the requested driver.
+ * Callers that know they want a CLI session can still `new Session(...)`
+ * directly; new call-sites should prefer {@link SessionRegistry.create}
+ * which threads the driver choice from `session.new` frames.
+ */
+export function createSession(opts: CreateSessionOpts): AnySession {
+  if (opts.driver === "sdk") {
+    return new SdkSession({
+      cwd: opts.cwd,
+      cols: opts.cols,
+      rows: opts.rows,
+      permissionMode: opts.permissionMode,
+      projectId: opts.projectId ?? null,
+    });
+  }
+  if (!opts.command) {
+    throw new Error("CLI session requires a command");
+  }
+  return new Session({
+    command: opts.command,
+    args: opts.args,
+    cwd: opts.cwd,
+    cols: opts.cols,
+    rows: opts.rows,
+    permissionMode: opts.permissionMode,
+    projectId: opts.projectId ?? null,
+  });
+}
+
+export class SessionRegistry {
+  private readonly sessions = new Map<string, AnySession>();
+
+  create(opts: CreateSessionOpts): AnySession {
+    const session = createSession(opts);
     this.sessions.set(session.id, session);
     session.onExit(() => {
       setTimeout(() => this.sessions.delete(session.id), 30_000);
@@ -181,11 +237,11 @@ export class SessionRegistry {
     return session;
   }
 
-  get(id: string): Session | undefined {
+  get(id: string): AnySession | undefined {
     return this.sessions.get(id);
   }
 
-  list(): Session[] {
+  list(): AnySession[] {
     return [...this.sessions.values()];
   }
 

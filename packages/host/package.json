@@ -13,6 +13,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.2.138",
     "@rcc/protocol": "workspace:*",
     "@simplewebauthn/server": "^13.3.0",
     "libsodium-wrappers": "^0.8.4",

@@ -44,7 +44,7 @@
 | Feature | Status | Since | Notes |
 |---|---|---|---|
 | PWA 外壳 (manifest + SW) | 🟢 | 2026-05-09 | manifest + 手写 SW（static cache-first，HTML network-first，排除 ws/pair/health/tunnel）+ 📲 安装按钮（iOS Safari 提示手动 Share → Add to Home Screen） |
-| 语义化对话视图 | 🟢 | 2026-05-09 | host ChatParser 启发式 ANSI 剥离 + 段落分类 (text/code/diff/tool_use),per-session 100 条消息滚动窗口;前端 ChatView 气泡 + 可折叠 tool_use + 红绿 diff;session header 🔀 终端/对话切换(移动默认对话);图片内联 + 结构化流留 M5 |
+| 语义化对话视图 | 🟢 | 2026-05-09 | host ChatParser 启发式 ANSI 剥离 + 段落分类 (text/code/diff/tool_use),per-session 100 条消息滚动窗口;前端 ChatView 气泡 + 可折叠 tool_use + 红绿 diff;session header 🔀 终端/对话切换(移动默认对话);图片内联保留;M6 追加 SDK driver 走真实结构化流,启发式作为 CLI driver fallback |
 | 权限审批专用页 | 🟢 | 2026-05-09 | host ApprovalWatcher 启发式扫描 pty.out 中 Claude 的 y/n 提示，按工具名分 low/medium/high 三档，广播 approval.request 帧;web 端专用审批卡片（移动底部 / 桌面 modal）;高风险按钮 500ms 防误触。Face ID/Touch ID 留待 M5 WebAuthn |
 | Web Push | 🟢 | 2026-05-09 | web-push + VAPID 自动生成到 ~/.rcc/config.json;push-subs.json 订阅存储;SW push event → showNotification;高风险审批 + session.exited 触发推送;🔔 通知按钮一键开关 |
 | 虚拟键盘快捷键条（移动优化版） | 🟢 | 2026-05-09 | 移动端 sticky 底部键条,pinned commands + Esc/Tab/方向键/^C/Enter/斜杠,visualViewport 跟随键盘,safe-area-inset 适配刘海屏 |
@@ -62,6 +62,8 @@
 | 文件树 + Monaco 预览 | 🟢 | 2026-05-09 | 右栏可 toggle,fs.ls/read 后端 + Monaco 只读预览,512KB 截断,二进制检测转 base64 |
 | Hooks 管理 UI | 🟢 | 2026-05-09 | ~/.claude/settings.json + <cwd>/.claude/settings.json 的 hooks 段读写，9 种事件支持 matcher+command 列表，🧪 测试按钮 execFile sh -c 跑命令 |
 | 权限策略 UI | 🟢 | 2026-05-09 | user/project/local 三 scope，allow/deny/ask 三 bucket 规则读写；defaultMode 和 additionalDirectories 可视化 |
+| 多项目工作区 | 🟢 | 2026-05-09 | ~/.rcc/config.json projects 段读写;session 绑 projectId;sidebar 按项目分组;ProjectsModal CRUD(默认项目不可删);NewSessionModal 项目下拉 |
+| Skills + MCP Marketplace | 🟢 | 2026-05-09 | manifest-driven catalog(~/.rcc/config.json marketplace.manifestUrls + 内置 seed);1h cache 合并去重;Skills 一键写 SKILL.md 到 user/project scope;MCPs 一键 claude mcp add 填 env 表单;搜索过滤 |
 
 ## M5 · Hardening  🔴 planned
 
@@ -71,6 +73,12 @@
 | 重放防护（nonce + window） | 🟢 | 2026-05-09 | envelope 加 seq+ts;host/client 各自 64-bit sliding window 拒重放;±60s 时间戳倾斜保护;decrypt 失败或 replay 检测到关闭 code 4402;仅加密连接启用 |
 | 设备吊销 | 🔴 | — | CLI 命令 + Web 管理界面 |
 | 崩溃上报 + 自升级 | 🟢 | 2026-05-09 | host 捕获 uncaughtException/unhandledRejection 写 ~/.rcc/crashes.log JSONL(1MB rotate)+ 广播 health.crash;GET /version + /version/check 通过用户配的 manifestUrl 查 GitHub releases(10 分钟缓存);Web 顶栏 VersionBadge 有更新时橙点 + popover 显示 release notes + 复制 git pull 命令 |
+
+## M6 · Depth  🟡 wip
+
+| Feature | Status | Since | Notes |
+|---|---|---|---|
+| Claude Agent SDK 结构化流 | 🟢 | 2026-05-09 | SdkSession 通过 @anthropic-ai/claude-agent-sdk.query() 消费 text_delta / tool_use / tool_result / thinking 事件;真实结构化 segments;新建会话选 driver: CLI/SDK;需 ANTHROPIC_API_KEY 或 ~/.rcc/config.json anthropic.apiKey;SDK 会话无 pty,UI 强制对话视图 |
 
 ---
 
@@ -116,3 +124,6 @@
 - 2026-05-09  M5 batch 2 · 重放防护: E2E envelope 扩 `s`(uint32 seq)+`ts`(Date.now ms),host 和 web 各自维护 per-connection 64-slot 滑动窗 + 单调 outbound 计数器,±60s 时间戳倾斜保护,host 拒绝时 close(4402),web 相应重连重置双端序号流。
 - 2026-05-09  M5 batch 2 · 崩溃+自升级: host 安装 uncaughtException/unhandledRejection 钩子写 ~/.rcc/crashes.log JSONL(1MB 自动 rotate 到 .1)+ 广播 health.crash 帧;新增 GET /version 和 GET /version/check(读 ~/.rcc/config.json update.manifestUrl,fetch GitHub releases JSON,semver 比对,10 分钟缓存);Web 顶栏 VersionBadge 显示 v<ver>,有更新变橙 + 圆点 + popover 内 release notes 和复制 git pull 命令,health.crash 帧触发右下 toast。
 - 2026-05-09  M5 batch 2 · Passkey: @simplewebauthn 服务端+浏览器端落地;trust.json PairedDevice 加可选 `passkey{credId,publicKey,counter,registeredAt}`;`POST /webauthn/{register,assert}/{begin,complete}` 四端点(Host 头派生 rpId,localhost 友好,挑战 5 分钟 TTL 内存 Map);高风险审批触发时 ApprovalWatcher 回调 gate,仅当至少一个连接设备有 passkey 才 require,`approval.response` 携 webauthnToken 被 server-side gate 校验通过才写 y\r 到 pty;DevicesModal 顶部横幅升级/移除按钮,PermissionApproval 高风险+passkey 时按钮改为 🔐 Touch ID/Face ID 确认(调 navigator.credentials.get);hello.device 加 hasPasskey 供前端分支。
+- 2026-05-09  M4 batch 3 · 多项目: ProjectStore 读写 ~/.rcc/config.json `projects` 段(保留其他键),启动无 projects 时用 RCC_CWD||cwd 自动建 default(isDefault=true,不可删);protocol 新增 `[projects]` 11 frame(list(.request)/add(ed)/remove(d)/rename(d)/update(d))+ProjectMeta+PROJECT_COLORS(橙青紫粉绿)+SessionMeta.projectId+SessionNew.projectId;host session.new 按 projectId→cwd→default 三段解析项目绑定,所有 project mutation 广播 project.list 全客户端;hello 加 projects;Web App.tsx sidebar 改两级项目+sessions,createMemo 分组(无 projectId 归 default),每项目 header 可折叠+hover 出现 + 按钮新建该项目 session,顶部 + 新建项目;NewProjectModal(name/cwd/颜色)+ ProjectsModal(列表/inline 编辑/删除/默认不可删);NewSessionModal 加项目下拉,留空 cwd 用项目 cwd;Session.projectId 字段 session.meta() 带出。
+- 2026-05-09  M4 batch 3 · Marketplace: manifest-driven skills+mcp 目录(~/.rcc/config.json marketplace.manifestUrls 只接 https,10s 超时,512KB 上限,无 url 时走内置 seed),host/marketplace.ts 并发拉取+1h 缓存+按 id 去重;seed 含 3 条 rcc skills(test-writer/commit-message/todo-sweep)和 4 条真实 MCP(filesystem/github/memory/fetch,全 npx 启动);安装复用 skills.writeSkill 和 mcp.addMcp,MCP 仅允许 npx/uvx/node/python 白名单,从不下载二进制;protocol 加 market.{catalog.request,catalog,install.skill,skill.installed,install.mcp,mcp.installed};Web MarketplaceView 全屏 modal 双 tab+搜索+scope+env 表单+source 错误折叠展示,入口位于 SkillsTab 按钮+sidebar footer+tab 内大块卡片。
+- 2026-05-09  M6 · SDK driver: 新增 SdkSession 与 CLI Session 并列,通过 @anthropic-ai/claude-agent-sdk@0.2.138 query() 消费 SDKMessage 流,text_delta / tool_use / tool_result / thinking 真实结构化事件映射成 ChatSegment;Protocol 加 SessionDriver 枚举 + SessionMeta.driver + session.new.driver,新 segment kind thinking/tool_result,ChatMessage.streaming,新帧 chat.update(messageId,segmentIndex,segment);host/session.ts 抽 AnySession union + createSession 工厂,SessionRegistry 持 AnySession,approval watcher 仅 instanceof Session 时挂;API key 从 ANTHROPIC_API_KEY 或 ~/.rcc/config.json anthropic.apiKey 取,缺失时 start() 抛错并系统消息通知;Web NewSessionModal 加 CLI/SDK radio 选择(默认 CLI),SessionRow/header 加 DriverChip,SDK 会话强制 ChatView 且终端切换禁用;ChatView 消费 chat.update 做增量更新,新增 ThinkingBlock(灰色斜体可折叠)+ ToolResultBlock(绿/红按 isError),streaming 光标 ▍。

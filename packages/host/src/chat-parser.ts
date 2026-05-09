@@ -24,13 +24,17 @@ function stripAnsi(s: string): string {
  *   - Cursor-relative redraws produce garbled fragments.
  *   - Tool output inference relies on CLI prefix glyphs (●/⏺) which may drift.
  *   - Diff detection is ratio-based (>40% of lines starting with +/-).
- * A structured stream via the Agent SDK is planned for M5; until then a raw
- * terminal view must remain available as a fallback.
+ * This class is still the CLI-driver backend; the SDK driver (M6) bypasses it
+ * entirely via {@link ChatParser.appendMessage} / {@link ChatParser.updateSegment}
+ * and feeds real structured events from @anthropic-ai/claude-agent-sdk.
  */
 export class ChatParser {
   private messages: ChatMessage[] = [];
   private pending = "";
   private readonly listeners = new Set<(m: ChatMessage) => void>();
+  private readonly updateListeners = new Set<
+    (messageId: string, segmentIndex: number, segment: ChatSegment) => void
+  >();
 
   constructor(private readonly sid: string) {}
 
@@ -67,6 +71,44 @@ export class ChatParser {
     });
   }
 
+  /**
+   * SDK-driver entry point: append a fully-formed message (or the skeleton of
+   * a streaming one, `streaming: true`). Emits through the normal chat.append
+   * channel so listeners don't care which driver produced it.
+   */
+  appendMessage(m: ChatMessage): void {
+    this.push(m);
+  }
+
+  /**
+   * SDK-driver entry point: mutate an existing message's segment in place.
+   * Used for text_delta streaming and for filling in tool_result outputs.
+   * Returns the message index if found, -1 otherwise.
+   */
+  updateSegment(messageId: string, segmentIndex: number, segment: ChatSegment): number {
+    const idx = this.messages.findIndex((m) => m.id === messageId);
+    if (idx < 0) return -1;
+    const msg = this.messages[idx]!;
+    // Grow the segment array if the caller is appending past the end so the
+    // SDK can "add new segment" without a separate frame.
+    while (msg.segments.length <= segmentIndex) {
+      msg.segments.push({ kind: "text", content: "" });
+    }
+    msg.segments[segmentIndex] = segment;
+    for (const l of this.updateListeners) l(messageId, segmentIndex, segment);
+    return idx;
+  }
+
+  /** Replace or flip streaming flag on an existing message. Used by SdkSession
+   * to broadcast the final chat.append once streaming completes. */
+  finalizeMessage(messageId: string, patch: Partial<ChatMessage>): ChatMessage | null {
+    const idx = this.messages.findIndex((m) => m.id === messageId);
+    if (idx < 0) return null;
+    const merged: ChatMessage = { ...this.messages[idx]!, ...patch };
+    this.messages[idx] = merged;
+    return merged;
+  }
+
   private push(m: ChatMessage): void {
     this.messages.push(m);
     if (this.messages.length > MAX_MESSAGES) this.messages.shift();
@@ -81,6 +123,15 @@ export class ChatParser {
     this.listeners.add(l);
     return () => {
       this.listeners.delete(l);
+    };
+  }
+
+  onUpdate(
+    l: (messageId: string, segmentIndex: number, segment: ChatSegment) => void,
+  ): () => void {
+    this.updateListeners.add(l);
+    return () => {
+      this.updateListeners.delete(l);
     };
   }
 

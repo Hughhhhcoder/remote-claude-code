@@ -57,6 +57,17 @@ export const PERMISSION_MODE_INFO: Record<
   },
 };
 
+const base = { v: z.literal(1).default(1) };
+
+// [sdk-driver] Added in M6: which runtime is driving the session.
+//   - "cli"  — node-pty spawns the `claude` binary and the host scrapes a
+//              rendered terminal byte stream (legacy; still the default so
+//              existing sessions parse without a driver field).
+//   - "sdk"  — host calls @anthropic-ai/claude-agent-sdk `query()` directly
+//              and consumes a structured event stream. No pty, no xterm.
+export const SessionDriver = z.enum(["cli", "sdk"]);
+export type SessionDriver = z.infer<typeof SessionDriver>;
+
 export const SessionMeta = z.object({
   id: z.string(),
   cwd: z.string(),
@@ -66,8 +77,103 @@ export const SessionMeta = z.object({
   createdAt: z.number(),
   status: z.enum(["running", "exited"]).default("running"),
   permissionMode: PermissionMode.default("default"),
+  /**
+   * Added in M4 batch 3: the project this session belongs to. Optional so old
+   * hosts/clients still parse; undefined means "default project" on the host.
+   */
+  projectId: z.string().optional(),
+  /**
+   * Added in M6: "cli" (pty) or "sdk" (agent sdk). Default "cli" so sessions
+   * created by older hosts / sent without a driver hint still parse.
+   */
+  driver: SessionDriver.default("cli"),
 });
 export type SessionMeta = z.infer<typeof SessionMeta>;
+
+// [projects] — M4 batch 3
+//
+// Users can manage multiple workspaces, each with its own cwd. Sessions bind
+// to a project at creation; new sessions inherit that project's cwd unless
+// the client passes one. The host persists projects in ~/.rcc/config.json
+// under the `projects` key and broadcasts `project.list` on every mutation
+// so every connected device stays in sync.
+
+export const PROJECT_COLORS = ["orange", "teal", "violet", "pink", "green"] as const;
+export const ProjectColor = z.enum(PROJECT_COLORS);
+export type ProjectColor = z.infer<typeof ProjectColor>;
+
+export const ProjectMeta = z.object({
+  id: z.string(),
+  name: z.string(),
+  cwd: z.string(),
+  color: ProjectColor.optional(),
+  isDefault: z.boolean().optional(),
+});
+export type ProjectMeta = z.infer<typeof ProjectMeta>;
+
+export const ProjectListRequest = z.object({
+  ...base,
+  t: z.literal("project.list.request"),
+});
+
+export const ProjectList = z.object({
+  ...base,
+  t: z.literal("project.list"),
+  projects: z.array(ProjectMeta),
+});
+
+export const ProjectAdd = z.object({
+  ...base,
+  t: z.literal("project.add"),
+  name: z.string().min(1).max(64),
+  cwd: z.string().min(1).max(1024),
+  color: ProjectColor.optional(),
+});
+
+export const ProjectAdded = z.object({
+  ...base,
+  t: z.literal("project.added"),
+  project: ProjectMeta,
+});
+
+export const ProjectRemove = z.object({
+  ...base,
+  t: z.literal("project.remove"),
+  id: z.string(),
+});
+
+export const ProjectRemoved = z.object({
+  ...base,
+  t: z.literal("project.removed"),
+  id: z.string(),
+});
+
+export const ProjectRename = z.object({
+  ...base,
+  t: z.literal("project.rename"),
+  id: z.string(),
+  name: z.string().min(1).max(64),
+});
+
+export const ProjectRenamed = z.object({
+  ...base,
+  t: z.literal("project.renamed"),
+  project: ProjectMeta,
+});
+
+export const ProjectUpdate = z.object({
+  ...base,
+  t: z.literal("project.update"),
+  id: z.string(),
+  cwd: z.string().min(1).max(1024).optional(),
+  color: ProjectColor.nullable().optional(),
+});
+
+export const ProjectUpdated = z.object({
+  ...base,
+  t: z.literal("project.updated"),
+  project: ProjectMeta,
+});
 
 export const TunnelInfo = z.object({
   state: z.enum(["disabled", "starting", "ready", "error"]),
@@ -80,8 +186,6 @@ export const TunnelInfo = z.object({
   name: z.string().nullable().optional(),
 });
 export type TunnelInfo = z.infer<typeof TunnelInfo>;
-
-const base = { v: z.literal(1).default(1) };
 
 export const Hello = z.object({
   ...base,
@@ -105,6 +209,8 @@ export const Hello = z.object({
     .optional(),
   /** Pinned slash command ids (scope:name) for the chat quick-button bar. */
   pinnedCommands: z.array(z.string()).optional(),
+  /** Added in M4 batch 3: known projects (workspaces). Optional for old hosts. */
+  projects: z.array(ProjectMeta).optional(),
 });
 
 export const SessionNew = z.object({
@@ -114,6 +220,13 @@ export const SessionNew = z.object({
   cols: z.number().int().positive().optional(),
   rows: z.number().int().positive().optional(),
   permissionMode: PermissionMode.optional(),
+  /** Added in M4 batch 3: which project this session belongs to. */
+  projectId: z.string().optional(),
+  /**
+   * Added in M6: pick the runtime. Defaults to "cli" host-side when omitted so
+   * legacy clients keep spawning pty-backed sessions.
+   */
+  driver: SessionDriver.optional(),
 });
 
 export const SessionCreated = z.object({
@@ -898,12 +1011,33 @@ export const ChatSegmentToolUse = z.object({
   input: z.string(),
   output: z.string().optional(),
   collapsed: z.boolean().default(true),
+  /**
+   * Added in M6: SDK-driver sets this so tool_result segments can be linked
+   * back to the tool_use that spawned them. Absent for CLI-driver tool_use
+   * segments (which don't carry an id through the pty stream).
+   */
+  toolUseId: z.string().optional(),
+});
+// [sdk-driver] Two new segment kinds backed by real SDK events.
+// `thinking` wraps extended-thinking blocks; `tool_result` is paired to the
+// tool_use segment via toolUseId so the UI can show output next to input.
+export const ChatSegmentThinking = z.object({
+  kind: z.literal("thinking"),
+  content: z.string(),
+});
+export const ChatSegmentToolResult = z.object({
+  kind: z.literal("tool_result"),
+  toolUseId: z.string(),
+  content: z.string(),
+  isError: z.boolean().optional(),
 });
 export const ChatSegment = z.discriminatedUnion("kind", [
   ChatSegmentText,
   ChatSegmentCode,
   ChatSegmentDiff,
   ChatSegmentToolUse,
+  ChatSegmentThinking,
+  ChatSegmentToolResult,
 ]);
 export type ChatSegment = z.infer<typeof ChatSegment>;
 
@@ -913,6 +1047,13 @@ export const ChatMessage = z.object({
   role: z.enum(["user", "assistant", "system"]),
   segments: z.array(ChatSegment),
   timestamp: z.number(),
+  /**
+   * Added in M6: assistant messages are incrementally filled while the SDK
+   * streams text_delta / content-block events. Flips to false (or omitted) on
+   * the final `chat.append` once the message is complete. CLI driver never
+   * sets this.
+   */
+  streaming: z.boolean().optional(),
 });
 export type ChatMessage = z.infer<typeof ChatMessage>;
 
@@ -934,6 +1075,21 @@ export const ChatAppend = z.object({
   t: z.literal("chat.append"),
   sid: z.string(),
   message: ChatMessage,
+});
+
+// [sdk-driver] Incremental segment patch for an already-appended streaming
+// message. The SDK driver sends one `chat.append` with streaming:true when a
+// new assistant message starts, then a flurry of `chat.update` frames as
+// text_delta / content-block events arrive, then a final `chat.append`
+// (streaming:false) with the completed message. Clients reconcile by looking
+// up messageId and replacing segments[segmentIndex].
+export const ChatUpdate = z.object({
+  ...base,
+  t: z.literal("chat.update"),
+  sid: z.string(),
+  messageId: z.string(),
+  segmentIndex: z.number().int().nonnegative(),
+  segment: ChatSegment,
 });
 
 export const ChatReset = z.object({
@@ -1031,6 +1187,101 @@ export const CrdtSyncRequest = z.object({
   docId: z.string(),
 });
 
+// [marketplace] — filled by M4 batch 3
+//
+// Manifest-driven catalog of Skills + MCP servers. The host fetches one or
+// more JSON manifest URLs (configured in ~/.rcc/config.json → marketplace.
+// manifestUrls), merges them with a hard-coded seed, caches for 1h, and
+// serves the combined catalog. Install actions reuse `skills.ts` /
+// `mcp.ts` writers; the host never downloads or runs arbitrary binaries —
+// MCP manifest entries MUST use `npx | uvx | node | python | python3` as
+// command or they are rejected during manifest parsing.
+
+export const MarketScope = z.enum(["user", "project"]);
+export type MarketScope = z.infer<typeof MarketScope>;
+
+export const MarketSkillEntry = z.object({
+  id: z.string(),
+  name: z.string(),
+  description: z.string().default(""),
+  source: z.string(),
+  content: z.string().optional(),
+  tags: z.array(z.string()).optional(),
+  author: z.string().optional(),
+  homepage: z.string().optional(),
+});
+export type MarketSkillEntry = z.infer<typeof MarketSkillEntry>;
+
+export const MarketMcpEntry = z.object({
+  id: z.string(),
+  name: z.string(),
+  description: z.string().default(""),
+  transport: McpTransport,
+  command: z.string().optional(),
+  args: z.array(z.string()).optional(),
+  url: z.string().optional(),
+  envHints: z.array(z.string()).optional(),
+  author: z.string().optional(),
+  homepage: z.string().optional(),
+  tags: z.array(z.string()).optional(),
+});
+export type MarketMcpEntry = z.infer<typeof MarketMcpEntry>;
+
+export const MarketSource = z.object({
+  url: z.string(),
+  ok: z.boolean(),
+  error: z.string().optional(),
+});
+export type MarketSource = z.infer<typeof MarketSource>;
+
+export const MarketCatalogRequest = z.object({
+  ...base,
+  t: z.literal("market.catalog.request"),
+  force: z.boolean().optional(),
+});
+
+export const MarketCatalog = z.object({
+  ...base,
+  t: z.literal("market.catalog"),
+  skills: z.array(MarketSkillEntry),
+  mcps: z.array(MarketMcpEntry),
+  sources: z.array(MarketSource),
+  fetchedAt: z.number(),
+});
+
+export const MarketInstallSkill = z.object({
+  ...base,
+  t: z.literal("market.install.skill"),
+  id: z.string(),
+  scope: MarketScope,
+});
+
+export const MarketSkillInstalled = z.object({
+  ...base,
+  t: z.literal("market.skill.installed"),
+  id: z.string(),
+  ok: z.boolean(),
+  installedName: z.string().optional(),
+  error: z.string().optional(),
+});
+
+export const MarketInstallMcp = z.object({
+  ...base,
+  t: z.literal("market.install.mcp"),
+  id: z.string(),
+  scope: MarketScope,
+  env: z.record(z.string(), z.string()).optional(),
+});
+
+export const MarketMcpInstalled = z.object({
+  ...base,
+  t: z.literal("market.mcp.installed"),
+  id: z.string(),
+  ok: z.boolean(),
+  installedName: z.string().optional(),
+  error: z.string().optional(),
+});
+
 // [health] — filled by M5 batch 6
 //
 // Host captures uncaughtException / unhandledRejection, writes JSONL to
@@ -1067,6 +1318,16 @@ export const Frame = z.discriminatedUnion("t", [
   DeviceListRequest,
   DeviceRevoke,
   DeviceRename,
+  ProjectListRequest,
+  ProjectList,
+  ProjectAdd,
+  ProjectAdded,
+  ProjectRemove,
+  ProjectRemoved,
+  ProjectRename,
+  ProjectRenamed,
+  ProjectUpdate,
+  ProjectUpdated,
   // [config-frames] — each config agent adds its frames after this marker
   SkillListRequest,
   SkillList,
@@ -1135,6 +1396,7 @@ export const Frame = z.discriminatedUnion("t", [
   ChatListRequest,
   ChatList,
   ChatAppend,
+  ChatUpdate,
   ChatReset,
   ChatResetted,
   PushPublicKeyRequest,
@@ -1147,6 +1409,12 @@ export const Frame = z.discriminatedUnion("t", [
   CrdtUpdate,
   CrdtSync,
   CrdtSyncRequest,
+  MarketCatalogRequest,
+  MarketCatalog,
+  MarketInstallSkill,
+  MarketSkillInstalled,
+  MarketInstallMcp,
+  MarketMcpInstalled,
   HealthCrash,
 ]);
 export type Frame = z.infer<typeof Frame>;

@@ -1,6 +1,7 @@
 import { createSignal, createMemo, For, Show, onCleanup, onMount } from "solid-js";
 import type { SkillSummary, SkillScope } from "@rcc/protocol";
 import type { RccClient } from "./client.ts";
+import { MarketplaceView } from "./MarketplaceView.tsx";
 
 interface Props {
   client: RccClient;
@@ -42,6 +43,7 @@ export function SkillsTab(props: Props) {
     content: string;
     loading?: boolean;
   }>(null);
+  const [marketOpen, setMarketOpen] = createSignal(false);
 
   const unsub = props.client.on((frame) => {
     if (frame.t === "skill.list") {
@@ -159,8 +161,9 @@ export function SkillsTab(props: Props) {
             />
           </div>
           <button
-            class="px-3 py-1.5 rounded-lg border border-zinc-800 text-xs text-zinc-500 cursor-not-allowed"
-            title="Marketplace 即将上线"
+            onClick={() => setMarketOpen(true)}
+            class="px-3 py-1.5 rounded-lg border border-zinc-800 text-xs text-zinc-300 hover:border-orange-500/40 hover:text-orange-300"
+            title="浏览 skills + MCP marketplace"
           >
             📥 Marketplace
           </button>
@@ -234,15 +237,24 @@ export function SkillsTab(props: Props) {
         </Show>
       </Show>
 
-      <div class="rounded-xl border border-dashed border-zinc-800 bg-zinc-950/40 p-4 grid place-items-center text-center md:col-span-2 mb-8 opacity-60">
+      <button
+        onClick={() => setMarketOpen(true)}
+        class="w-full rounded-xl border border-dashed border-zinc-800 hover:border-orange-500/40 bg-zinc-950/40 hover:bg-zinc-900/40 p-4 grid place-items-center text-center md:col-span-2 mb-8 transition"
+      >
         <div class="py-2">
           <div class="text-3xl mb-2">📥</div>
           <div class="text-sm font-medium text-zinc-300 mb-1">浏览 Marketplace</div>
           <div class="text-xs text-zinc-500">
-            社区共享的 skills · 即将上线
+            社区共享的 skills + MCP servers · 一键安装
           </div>
         </div>
-      </div>
+      </button>
+
+      <MarketplaceView
+        open={marketOpen()}
+        client={props.client}
+        onClose={() => setMarketOpen(false)}
+      />
 
       {renderEditor()}
     </div>

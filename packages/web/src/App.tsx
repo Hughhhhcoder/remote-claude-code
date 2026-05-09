@@ -1,12 +1,23 @@
 import { createSignal, createMemo, onCleanup, onMount, For, Show } from "solid-js";
-import type { CommandSummary, PermissionMode, SessionMeta, TunnelInfo } from "@rcc/protocol";
+import type {
+  CommandSummary,
+  PermissionMode,
+  ProjectColor,
+  ProjectMeta,
+  SessionDriver,
+  SessionMeta,
+  TunnelInfo,
+} from "@rcc/protocol";
 import { RccClient, defaultWsUrl, type ConnStatus } from "./client.ts";
 import { TerminalView } from "./TerminalView.tsx";
 import { ChatView } from "./ChatView.tsx";
 import { NewSessionModal, permissionChip } from "./NewSessionModal.tsx";
+import { NewProjectModal, PROJECT_DOT_CLS } from "./NewProjectModal.tsx";
+import { ProjectsModal } from "./ProjectsModal.tsx";
 import { PairingView } from "./PairingView.tsx";
 import { DevicesModal } from "./DevicesModal.tsx";
 import { ConfigView } from "./ConfigView.tsx";
+import { MarketplaceView } from "./MarketplaceView.tsx";
 import { FileBrowser } from "./FileBrowser.tsx";
 import { MobileKeyBar } from "./MobileKeyBar.tsx";
 import { useIsMobile } from "./useIsMobile.ts";
@@ -42,10 +53,16 @@ export function App() {
   const [currentDevice, setCurrentDevice] = createSignal<{ id: string; name: string; hasPasskey?: boolean } | null>(null);
   const [devicesOpen, setDevicesOpen] = createSignal(false);
   const [configOpen, setConfigOpen] = createSignal(false);
+  const [marketOpen, setMarketOpen] = createSignal(false);
   const [fileBrowserOpen, setFileBrowserOpen] = createSignal(false);
   const [fileBrowserRoot, setFileBrowserRoot] = createSignal<string>("~");
   const [pinnedIds, setPinnedIds] = createSignal<string[]>([]);
   const [commandsById, setCommandsById] = createSignal<Record<string, CommandSummary>>({});
+  const [projects, setProjects] = createSignal<ProjectMeta[]>([]);
+  const [projectsModalOpen, setProjectsModalOpen] = createSignal(false);
+  const [newProjectOpen, setNewProjectOpen] = createSignal(false);
+  const [newSessionProjectId, setNewSessionProjectId] = createSignal<string | null>(null);
+  const [collapsedProjects, setCollapsedProjects] = createSignal<Set<string>>(new Set());
   // [messages] Default to chat on mobile (terminal is unusable there) and
   // terminal on desktop (power users expect raw xterm until the heuristic
   // parser is replaced with a structured stream in M5).
@@ -69,7 +86,9 @@ export function App() {
       if (frame.tunnel) setTunnel(frame.tunnel);
       if (frame.device !== undefined) setCurrentDevice(frame.device ?? null);
       if (frame.pinnedCommands) setPinnedIds(frame.pinnedCommands);
+      if (frame.projects) setProjects(frame.projects);
     }
+    if (frame.t === "project.list") setProjects(frame.projects);
     if (frame.t === "cmd.pinned") setPinnedIds(frame.ids);
     if (frame.t === "cmd.list") {
       const map: Record<string, CommandSummary> = {};
@@ -121,17 +140,79 @@ export function App() {
     client.dispose();
   });
 
-  function onNewSession() {
+  // Group sessions by projectId. Sessions without a projectId (legacy or
+  // pre-projects hosts) are grouped under the default project so no session
+  // is orphaned in the sidebar.
+  const sessionsByProject = createMemo(() => {
+    const ps = projects();
+    const fallback = defaultProjectId();
+    const groups = new Map<string, SessionMeta[]>();
+    for (const p of ps) groups.set(p.id, []);
+    if (fallback && !groups.has(fallback)) groups.set(fallback, []);
+    for (const s of sessions()) {
+      const key = s.projectId && groups.has(s.projectId) ? s.projectId : fallback;
+      if (!key) continue;
+      const arr = groups.get(key) ?? [];
+      arr.push(s);
+      groups.set(key, arr);
+    }
+    return groups;
+  });
+
+  function defaultProjectId(): string | null {
+    const ps = projects();
+    if (ps.length === 0) return null;
+    return (ps.find((p) => p.isDefault) ?? ps[0]!).id;
+  }
+
+  function onNewSession(projectId?: string) {
+    setNewSessionProjectId(projectId ?? activeSessionProjectId() ?? defaultProjectId());
     setModalOpen(true);
   }
 
-  function onCreateSession(opts: { cwd: string; permissionMode: PermissionMode }) {
+  function onCreateSession(opts: {
+    cwd: string;
+    permissionMode: PermissionMode;
+    projectId: string | null;
+    driver: SessionDriver;
+  }) {
     setModalOpen(false);
     setLastMode(opts.permissionMode);
+    // SDK-driver sessions have no xterm, so force the chat view for them and
+    // leave the toggle disabled in the session header.
+    if (opts.driver === "sdk") setViewMode("chat");
     client.newSession({
       cwd: opts.cwd || undefined,
       permissionMode: opts.permissionMode,
+      projectId: opts.projectId ?? undefined,
+      driver: opts.driver,
     });
+  }
+
+  function onCreateProject(opts: { name: string; cwd: string; color: ProjectColor }) {
+    client.send({
+      v: 1,
+      t: "project.add",
+      name: opts.name,
+      cwd: opts.cwd,
+      color: opts.color,
+    });
+    setNewProjectOpen(false);
+  }
+
+  function toggleProjectCollapsed(id: string) {
+    setCollapsedProjects((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function activeSessionProjectId(): string | null {
+    const sid = activeSid();
+    const s = sessions().find((x) => x.id === sid);
+    return s?.projectId ?? null;
   }
 
   function onCloseSession(sid: string) {
@@ -224,31 +305,96 @@ export function App() {
       >
         {/* Sessions */}
         <aside class="bg-zinc-950 border-r border-zinc-900 flex flex-col overflow-hidden">
-          <div class="p-3 border-b border-zinc-900">
+          <div class="p-3 border-b border-zinc-900 space-y-2">
             <button
               class="w-full py-2 rounded-lg bg-gradient-to-r from-orange-500 to-rose-500 text-white text-sm font-medium flex items-center justify-center gap-2 hover:opacity-90 transition"
-              onClick={onNewSession}
+              onClick={() => onNewSession()}
             >
               <span>+</span> New session
             </button>
+            <button
+              class="w-full py-1.5 rounded-lg border border-zinc-800 text-xs text-zinc-300 hover:border-zinc-700 hover:text-zinc-100 flex items-center justify-center gap-1.5"
+              onClick={() => setNewProjectOpen(true)}
+            >
+              <span>+</span> 新建项目
+            </button>
           </div>
           <div class="flex-1 overflow-y-auto scrollbar p-2">
-            <div class="text-[10px] uppercase tracking-widest text-zinc-600 px-2 py-2">
-              Sessions
+            <div class="flex items-center justify-between px-2 py-2">
+              <div class="text-[10px] uppercase tracking-widest text-zinc-600">Projects</div>
+              <button
+                onClick={() => setProjectsModalOpen(true)}
+                class="text-[10px] text-zinc-500 hover:text-zinc-200"
+                title="管理项目"
+              >
+                管理
+              </button>
             </div>
             <Show
-              when={sessions().length > 0}
-              fallback={<div class="px-2 py-4 text-xs text-zinc-600">暂无会话</div>}
+              when={projects().length > 0}
+              fallback={<div class="px-2 py-4 text-xs text-zinc-600">暂无项目</div>}
             >
-              <For each={sessions()}>
-                {(s) => (
-                  <SessionRow
-                    meta={s}
-                    active={activeSid() === s.id}
-                    onActivate={() => setActiveSid(s.id)}
-                    onClose={() => onCloseSession(s.id)}
-                  />
-                )}
+              <For each={projects()}>
+                {(p) => {
+                  const sess = () => sessionsByProject().get(p.id) ?? [];
+                  const collapsed = () => collapsedProjects().has(p.id);
+                  const dot =
+                    PROJECT_DOT_CLS[(p.color ?? "orange") as ProjectColor];
+                  return (
+                    <div class="mb-2">
+                      <div class="flex items-center gap-1.5 px-2 py-1.5 rounded hover:bg-zinc-900 group">
+                        <button
+                          onClick={() => toggleProjectCollapsed(p.id)}
+                          class="flex items-center gap-1.5 min-w-0 flex-1 text-left"
+                          title={collapsed() ? "展开" : "收起"}
+                        >
+                          <span class="text-[10px] text-zinc-600 w-2 shrink-0">
+                            {collapsed() ? "▶" : "▼"}
+                          </span>
+                          <span class={`w-1.5 h-1.5 rounded-full shrink-0 ${dot}`} />
+                          <span class="text-xs font-medium text-zinc-200 truncate">{p.name}</span>
+                          <span class="text-[10px] text-zinc-600 shrink-0">
+                            {sess().length}
+                          </span>
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onNewSession(p.id);
+                          }}
+                          class="text-[10px] text-zinc-500 hover:text-orange-300 opacity-0 group-hover:opacity-100 px-1"
+                          title={`在 ${p.name} 中新建会话`}
+                        >
+                          +
+                        </button>
+                      </div>
+                      <Show when={!collapsed()}>
+                        <div class="pl-4 text-[10px] text-zinc-600 font-mono px-2 mb-1 truncate">
+                          {p.cwd}
+                        </div>
+                        <Show
+                          when={sess().length > 0}
+                          fallback={
+                            <div class="pl-4 px-2 py-1 text-[11px] text-zinc-600 italic">
+                              无会话
+                            </div>
+                          }
+                        >
+                          <For each={sess()}>
+                            {(s) => (
+                              <SessionRow
+                                meta={s}
+                                active={activeSid() === s.id}
+                                onActivate={() => setActiveSid(s.id)}
+                                onClose={() => onCloseSession(s.id)}
+                              />
+                            )}
+                          </For>
+                        </Show>
+                      </Show>
+                    </div>
+                  );
+                }}
               </For>
             </Show>
           </div>
@@ -261,6 +407,14 @@ export function App() {
             >
               <span>⚙</span>
               <span>Claude Code 配置</span>
+            </button>
+            <button
+              class="w-full text-xs text-zinc-500 hover:text-zinc-200 flex items-center gap-1.5 py-1.5 px-2 rounded hover:bg-zinc-900"
+              onClick={() => setMarketOpen(true)}
+              title="浏览 skills + MCP marketplace"
+            >
+              <span>📥</span>
+              <span>Marketplace</span>
             </button>
             <button
               class={`w-full text-xs flex items-center gap-1.5 py-1.5 px-2 rounded hover:bg-zinc-900 ${
@@ -304,13 +458,32 @@ export function App() {
                   <div class="font-mono text-xs text-zinc-500">{activeSid()}</div>
                   <Show when={activeSession()}>
                     <PermissionChip mode={activeSession()!.permissionMode} />
+                    <DriverChip driver={activeSession()!.driver ?? "cli"} />
                   </Show>
                   <button
-                    onClick={() => setViewMode((v) => (v === "chat" ? "terminal" : "chat"))}
-                    class="text-[10px] px-1.5 py-0.5 rounded border border-zinc-700 text-zinc-400 hover:text-zinc-100"
-                    title="切换终端 / 语义化对话视图（启发式）"
+                    onClick={() => {
+                      // SDK sessions have no pty → terminal view is pointless;
+                      // lock it to chat.
+                      if (activeSession()?.driver === "sdk") return;
+                      setViewMode((v) => (v === "chat" ? "terminal" : "chat"));
+                    }}
+                    disabled={activeSession()?.driver === "sdk"}
+                    class={`text-[10px] px-1.5 py-0.5 rounded border ${
+                      activeSession()?.driver === "sdk"
+                        ? "border-zinc-800 text-zinc-600 cursor-not-allowed"
+                        : "border-zinc-700 text-zinc-400 hover:text-zinc-100"
+                    }`}
+                    title={
+                      activeSession()?.driver === "sdk"
+                        ? "SDK 会话只有对话视图"
+                        : "切换终端 / 语义化对话视图"
+                    }
                   >
-                    {viewMode() === "chat" ? "💬 对话" : "▶ 终端"}
+                    {activeSession()?.driver === "sdk"
+                      ? "💬 SDK"
+                      : viewMode() === "chat"
+                        ? "💬 对话"
+                        : "▶ 终端"}
                   </button>
                 </div>
                 <div class="text-[11px] text-zinc-500 shrink-0">
@@ -321,7 +494,7 @@ export function App() {
               {/* terminal / chat view */}
               <div class="flex-1 min-h-0 relative">
                 <Show
-                  when={viewMode() === "terminal"}
+                  when={viewMode() === "terminal" && activeSession()?.driver !== "sdk"}
                   fallback={<ChatView client={client} sid={activeSid()!} />}
                 >
                   <TerminalView client={client} sid={activeSid()!} />
@@ -385,8 +558,21 @@ export function App() {
         open={modalOpen()}
         defaultCwd=""
         defaultMode={lastMode()}
+        projects={projects()}
+        defaultProjectId={newSessionProjectId() ?? defaultProjectId()}
         onCancel={() => setModalOpen(false)}
         onConfirm={onCreateSession}
+      />
+      <NewProjectModal
+        open={newProjectOpen()}
+        onCancel={() => setNewProjectOpen(false)}
+        onConfirm={onCreateProject}
+      />
+      <ProjectsModal
+        open={projectsModalOpen()}
+        client={client}
+        projects={projects()}
+        onClose={() => setProjectsModalOpen(false)}
       />
       <DevicesModal
         open={devicesOpen()}
@@ -403,6 +589,11 @@ export function App() {
         client={client}
         activeSid={activeSid()}
         onClose={() => setConfigOpen(false)}
+      />
+      <MarketplaceView
+        open={marketOpen()}
+        client={client}
+        onClose={() => setMarketOpen(false)}
       />
       <PermissionApproval client={client} device={currentDevice()} />
       <Show when={isMobile() && activeSid()}>
@@ -426,6 +617,26 @@ function PermissionChip(props: { mode: PermissionMode }) {
       title={info.description}
     >
       {info.label}
+    </span>
+  );
+}
+
+function DriverChip(props: { driver: SessionDriver }) {
+  const isSdk = () => props.driver === "sdk";
+  return (
+    <span
+      class={`text-[10px] px-1.5 py-0.5 rounded border font-medium ${
+        isSdk()
+          ? "border-violet-500/30 bg-violet-500/5 text-violet-300"
+          : "border-sky-500/30 bg-sky-500/5 text-sky-300"
+      }`}
+      title={
+        isSdk()
+          ? "Claude Agent SDK 结构化事件流"
+          : "传统 claude CLI (pty + 启发式解析)"
+      }
+    >
+      {isSdk() ? "🧠 SDK" : "⌨ CLI"}
     </span>
   );
 }
@@ -530,6 +741,7 @@ function SessionRow(props: {
           <div class="flex items-center gap-1.5 mt-0.5">
             <span class="text-xs text-zinc-500 font-mono truncate">{props.meta.id}</span>
             <PermissionChip mode={props.meta.permissionMode} />
+            <DriverChip driver={props.meta.driver ?? "cli"} />
           </div>
         </div>
         <button
