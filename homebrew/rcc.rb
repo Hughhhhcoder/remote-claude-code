@@ -1,7 +1,7 @@
 class Rcc < Formula
   desc "Remote Claude Code — control claude CLI from any device"
   homepage "https://github.com/Hughhhhcoder/remote-claude-code"
-  version "0.1.1"
+  version "0.1.2"
   license "MIT"
 
   depends_on "node"

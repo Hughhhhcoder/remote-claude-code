@@ -161,7 +161,24 @@ const DEFAULT_CWD = projects.getDefault().cwd;
 // via the pairing flow. Set RCC_TRUST_LOOPBACK=0 to also require auth on
 // localhost connections (useful if someone on the same machine should not
 // have implicit access).
-const TRUST_LOOPBACK = process.env.RCC_TRUST_LOOPBACK !== "0";
+//
+// Tunnel safety: when a public tunnel is enabled we default to NOT trusting
+// loopback because cloudflared proxies remote traffic to 127.0.0.1:7777 —
+// the socket would lie and every visitor would be "local". The per-request
+// isProxiedRequest() check above catches header-tagged proxy traffic, but
+// disabling loopback trust entirely in tunnel mode removes the attack
+// surface if any edge case slips past the header detection. Users who need
+// loopback trust even with the tunnel on can set RCC_TRUST_LOOPBACK=1
+// explicitly.
+const tunnelModeRequested =
+  TUNNEL_CONFIG.mode === "try" || TUNNEL_CONFIG.mode === "named";
+const TRUST_LOOPBACK_EXPLICIT = process.env.RCC_TRUST_LOOPBACK;
+const TRUST_LOOPBACK =
+  TRUST_LOOPBACK_EXPLICIT === "1"
+    ? true
+    : TRUST_LOOPBACK_EXPLICIT === "0"
+      ? false
+      : !tunnelModeRequested;
 
 // Web bundle: if `@rcc/web` has been built (`pnpm -F @rcc/web build`), the
 // host will serve its dist/ directly so a single public URL ships both the
@@ -252,6 +269,37 @@ function isLoopback(req: { socket: { remoteAddress?: string | undefined } }): bo
   );
 }
 
+/**
+ * Returns true when the request arrived via the cloudflared tunnel (or any
+ * reverse proxy) rather than a genuine local process. cloudflared terminates
+ * TLS on its side and forwards to 127.0.0.1:7777 so req.socket.remoteAddress
+ * would otherwise lie — callers still see "loopback". We distinguish:
+ *
+ *   1. `cf-connecting-ip` / `x-forwarded-for` headers (added by the tunnel)
+ *   2. `Host:` header not in {localhost, 127.0.0.1, ::1} → request came
+ *      addressed to a public domain, so it went through the tunnel.
+ *
+ * Any of these → treat as remote, require real device token, never grant
+ * loopback trust.
+ */
+function isProxiedRequest(req: { headers: { [key: string]: any } }): boolean {
+  const h = req.headers;
+  if (h["cf-connecting-ip"]) return true;
+  if (h["cf-ray"]) return true;
+  if (h["x-forwarded-for"]) return true;
+  if (h["x-forwarded-proto"]) return true;
+  if (h["x-forwarded-host"]) return true;
+  const host = typeof h["host"] === "string" ? (h["host"] as string).toLowerCase() : "";
+  if (!host) return false;
+  const bare = host.split(":")[0] ?? "";
+  if (bare === "localhost" || bare === "127.0.0.1" || bare === "::1") return false;
+  // Bare IP literal on a non-loopback address (LAN access) — still a real
+  // client over the wire, but that's governed by isLoopback (will be false).
+  // Anything else (trycloudflare, custom domain, …) is proxied.
+  if (/^[0-9.]+$/.test(bare)) return false;
+  return true;
+}
+
 function tokenFromReq(req: { url?: string; headers: { [key: string]: any } }): string | null {
   // 1. Authorization: Bearer <token>
   const auth = req.headers["authorization"] as string | undefined;
@@ -285,7 +333,10 @@ function authenticate(req: { url?: string; headers: { [key: string]: any }; sock
     metrics.incr("auth.fails");
     return { ok: false, reason: "invalid_token" };
   }
-  if (TRUST_LOOPBACK && isLoopback(req)) {
+  // Loopback trust ONLY when the request genuinely came from the local
+  // machine. cloudflared forwards to 127.0.0.1:7777 so req.socket would lie
+  // otherwise — isProxiedRequest catches tunnel ingress and requires token.
+  if (TRUST_LOOPBACK && isLoopback(req) && !isProxiedRequest(req)) {
     return { ok: true, device: null };
   }
   metrics.incr("auth.fails");
@@ -4140,8 +4191,13 @@ httpServer.listen(PORT, () => {
     }`,
   );
   console.log(`[rcc-host] web bundle: ${SERVE_WEB ? WEB_DIST : "not built (run `pnpm -F @rcc/web build`)"}`);
+  const loopbackNote = TRUST_LOOPBACK
+    ? "loopback trusted"
+    : tunnelModeRequested && TRUST_LOOPBACK_EXPLICIT !== "0"
+      ? "loopback REQUIRES token (tunnel active — all traffic must authenticate)"
+      : "loopback requires token";
   console.log(
-    `[rcc-host] auth: ${trust.devices().length} paired device(s)${TRUST_LOOPBACK ? ", loopback trusted" : ""}`,
+    `[rcc-host] auth: ${trust.devices().length} paired device(s), ${loopbackNote}`,
   );
   console.log(`[rcc-host] host id: ${trust.hostId}`);
 });

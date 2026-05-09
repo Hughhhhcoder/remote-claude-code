@@ -1,6 +1,6 @@
 {
   "name": "rcc",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "description": "Remote Claude Code — 在任何网络下通过 Web 端稳定控制本地 Claude Code",
   "workspaces": [
