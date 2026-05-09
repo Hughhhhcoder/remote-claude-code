@@ -17,6 +17,29 @@ import { SessionRegistry, type Session } from "./session.ts";
 import { CloudflaredTunnel } from "./tunnel.ts";
 import { TrustStore, PairingCodes, type PairedDevice } from "./trust.ts";
 import { handlePairRoute } from "./pair.ts";
+import { listMcp, getMcp, addMcp, removeMcp, setMcpEnabled } from "./mcp.ts";
+import {
+  listSkills,
+  toggleSkill,
+  readSkillContent,
+  writeSkill,
+  deleteSkill,
+} from "./skills.ts";
+import {
+  listCommands,
+  readCommand,
+  saveCommand,
+  deleteCommand,
+  pinCommand,
+  reorderPinned,
+  loadPinned,
+} from "./commands.ts";
+import {
+  listSubagents,
+  readSubagent,
+  saveSubagent,
+  deleteSubagent,
+} from "./subagents.ts";
 
 interface WsState {
   attached: Set<string>;
@@ -153,6 +176,10 @@ function authenticate(req: { url?: string; headers: { [key: string]: any }; sock
 }
 
 const registry = new SessionRegistry();
+
+// Pinned slash command ids — loaded once from ~/.rcc/pinned-commands.json, kept
+// in memory, and broadcast via `cmd.pinned` whenever mutated.
+let pinnedCommandsCache: string[] = await loadPinned();
 
 const boot = registry.create({
   command: CLAUDE_COMMAND,
@@ -303,8 +330,507 @@ function handle(ws: WebSocket, state: WsState, frame: Frame): void {
     // [config-handlers] — each config agent adds its case blocks below.
     // Keep handlers self-contained; if they need background state they
     // register it at module level (see SessionRegistry for the pattern).
+    case "skill.list.request": {
+      listSkills(DEFAULT_CWD)
+        .then((skills) => send(ws, { v: 1, t: "skill.list", skills }))
+        .catch((err) => {
+          console.warn("[rcc-host] skill.list failed:", err?.message ?? err);
+          send(ws, {
+            v: 1,
+            t: "error",
+            code: "skill_list_failed",
+            message: err?.message ?? String(err),
+          });
+        });
+      return;
+    }
+    case "skill.toggle": {
+      toggleSkill(frame.id, frame.enabled, DEFAULT_CWD)
+        .then(() => listSkills(DEFAULT_CWD))
+        .then((skills) => send(ws, { v: 1, t: "skill.list", skills }))
+        .catch((err) => {
+          send(ws, {
+            v: 1,
+            t: "error",
+            code: "skill_toggle_failed",
+            message: err?.message ?? String(err),
+          });
+        });
+      return;
+    }
+    case "skill.read.request": {
+      readSkillContent(frame.id, DEFAULT_CWD)
+        .then((res) => {
+          if (!res) {
+            send(ws, {
+              v: 1,
+              t: "error",
+              code: "skill_not_found",
+              message: frame.id,
+            });
+            return;
+          }
+          send(ws, { v: 1, t: "skill.read", id: res.id, content: res.content });
+        })
+        .catch((err) => {
+          send(ws, {
+            v: 1,
+            t: "error",
+            code: "skill_read_failed",
+            message: err?.message ?? String(err),
+          });
+        });
+      return;
+    }
+    case "skill.save": {
+      writeSkill(
+        {
+          scope: frame.scope,
+          name: frame.name,
+          description: frame.description,
+          body: frame.body,
+          tags: frame.tags,
+        },
+        DEFAULT_CWD,
+      )
+        .then(() => listSkills(DEFAULT_CWD))
+        .then((skills) => send(ws, { v: 1, t: "skill.list", skills }))
+        .catch((err) => {
+          send(ws, {
+            v: 1,
+            t: "error",
+            code: "skill_save_failed",
+            message: err?.message ?? String(err),
+          });
+        });
+      return;
+    }
+    case "skill.delete": {
+      deleteSkill(frame.id, DEFAULT_CWD)
+        .then((ok) => {
+          if (!ok) {
+            send(ws, {
+              v: 1,
+              t: "error",
+              code: "skill_not_found",
+              message: frame.id,
+            });
+            return;
+          }
+          send(ws, { v: 1, t: "skill.deleted", id: frame.id });
+          return listSkills(DEFAULT_CWD).then((skills) =>
+            send(ws, { v: 1, t: "skill.list", skills }),
+          );
+        })
+        .catch((err) => {
+          send(ws, {
+            v: 1,
+            t: "error",
+            code: "skill_delete_failed",
+            message: err?.message ?? String(err),
+          });
+        });
+      return;
+    }
+    case "mcp.list.request": {
+      listMcp(DEFAULT_CWD)
+        .then((servers) => send(ws, { v: 1, t: "mcp.list", servers }))
+        .catch((err) => {
+          console.warn("[rcc-host] mcp.list failed:", err?.message ?? err);
+          send(ws, {
+            v: 1,
+            t: "error",
+            code: "mcp_list_failed",
+            message: err?.message ?? String(err),
+          });
+        });
+      return;
+    }
+    case "mcp.get.request": {
+      getMcp(frame.name, DEFAULT_CWD)
+        .then((server) => send(ws, { v: 1, t: "mcp.get", server }))
+        .catch((err) => {
+          send(ws, {
+            v: 1,
+            t: "error",
+            code: "mcp_get_failed",
+            message: err?.message ?? String(err),
+          });
+        });
+      return;
+    }
+    case "mcp.add": {
+      addMcp(
+        {
+          name: frame.name,
+          transport: frame.transport,
+          scope: frame.scope,
+          command: frame.command,
+          args: frame.args,
+          env: frame.env,
+          headers: frame.headers,
+          url: frame.url,
+        },
+        DEFAULT_CWD,
+      )
+        .then(() => listMcp(DEFAULT_CWD))
+        .then((servers) => {
+          const server = servers.find((s) => s.name === frame.name);
+          if (server) broadcastMcp(server, "added");
+          broadcastMcpList(servers);
+        })
+        .catch((err) => {
+          send(ws, {
+            v: 1,
+            t: "error",
+            code: "mcp_add_failed",
+            message: err?.stderr || err?.message || String(err),
+          });
+        });
+      return;
+    }
+    case "mcp.remove": {
+      removeMcp(frame.name, frame.scope, DEFAULT_CWD)
+        .then(() => {
+          broadcastMcpRemoved(frame.name);
+          return listMcp(DEFAULT_CWD);
+        })
+        .then((servers) => broadcastMcpList(servers))
+        .catch((err) => {
+          send(ws, {
+            v: 1,
+            t: "error",
+            code: "mcp_remove_failed",
+            message: err?.stderr || err?.message || String(err),
+          });
+        });
+      return;
+    }
+    case "mcp.toggle": {
+      setMcpEnabled(frame.name, frame.enabled, null, DEFAULT_CWD)
+        .then(() => listMcp(DEFAULT_CWD))
+        .then((servers) => broadcastMcpList(servers))
+        .catch((err) => {
+          send(ws, {
+            v: 1,
+            t: "error",
+            code: "mcp_toggle_failed",
+            message: err?.stderr || err?.message || String(err),
+          });
+        });
+      return;
+    }
+    case "cmd.list.request": {
+      listCommands(DEFAULT_CWD)
+        .then((commands) => {
+          send(ws, {
+            v: 1,
+            t: "cmd.list",
+            commands: commands.map((c) => ({
+              id: c.id,
+              name: c.name,
+              description: c.description,
+              scope: c.scope,
+              pinned: c.pinned,
+            })),
+          });
+        })
+        .catch((err) => {
+          send(ws, { v: 1, t: "error", code: "cmd_list_failed", message: err?.message ?? String(err) });
+        });
+      return;
+    }
+    case "cmd.read.request": {
+      readCommand(frame.id, DEFAULT_CWD)
+        .then((r) => {
+          if (!r) {
+            send(ws, { v: 1, t: "error", code: "cmd_not_found", message: frame.id });
+            return;
+          }
+          send(ws, {
+            v: 1,
+            t: "cmd.read",
+            id: r.id,
+            content: r.content,
+            description: r.description,
+            scope: r.scope,
+          });
+        })
+        .catch((err) => {
+          send(ws, { v: 1, t: "error", code: "cmd_read_failed", message: err?.message ?? String(err) });
+        });
+      return;
+    }
+    case "cmd.save": {
+      saveCommand(
+        {
+          scope: frame.scope,
+          name: frame.name,
+          description: frame.description,
+          body: frame.body,
+          originalId: frame.originalId,
+        },
+        DEFAULT_CWD,
+      )
+        .then(async (meta) => {
+          send(ws, {
+            v: 1,
+            t: "cmd.saved",
+            command: {
+              id: meta.id,
+              name: meta.name,
+              description: meta.description,
+              scope: meta.scope,
+              pinned: meta.pinned,
+            },
+          });
+          // If renamed, pinned list may hold a stale id — trim.
+          if (frame.originalId && frame.originalId !== meta.id) {
+            const trimmed = pinnedCommandsCache.filter((x) => x !== frame.originalId);
+            if (trimmed.length !== pinnedCommandsCache.length) {
+              pinnedCommandsCache = await reorderPinned(trimmed);
+              broadcastPinned();
+            }
+          }
+          broadcastCmdList();
+        })
+        .catch((err) => {
+          send(ws, { v: 1, t: "error", code: "cmd_save_failed", message: err?.message ?? String(err) });
+        });
+      return;
+    }
+    case "cmd.delete": {
+      deleteCommand(frame.id, DEFAULT_CWD)
+        .then(async (ok) => {
+          if (!ok) {
+            send(ws, { v: 1, t: "error", code: "cmd_not_found", message: frame.id });
+            return;
+          }
+          send(ws, { v: 1, t: "cmd.deleted", id: frame.id });
+          // deleteCommand also prunes pinned; sync cache.
+          pinnedCommandsCache = await loadPinned();
+          broadcastPinned();
+          broadcastCmdList();
+        })
+        .catch((err) => {
+          send(ws, { v: 1, t: "error", code: "cmd_delete_failed", message: err?.message ?? String(err) });
+        });
+      return;
+    }
+    case "cmd.pin": {
+      pinCommand(frame.id, frame.pinned)
+        .then((ids) => {
+          pinnedCommandsCache = ids;
+          broadcastPinned();
+        })
+        .catch((err) => {
+          send(ws, { v: 1, t: "error", code: "cmd_pin_failed", message: err?.message ?? String(err) });
+        });
+      return;
+    }
+    case "cmd.reorder-pinned": {
+      reorderPinned(frame.ids)
+        .then((ids) => {
+          pinnedCommandsCache = ids;
+          broadcastPinned();
+        })
+        .catch((err) => {
+          send(ws, { v: 1, t: "error", code: "cmd_reorder_failed", message: err?.message ?? String(err) });
+        });
+      return;
+    }
+    case "subagent.list.request": {
+      listSubagents(DEFAULT_CWD)
+        .then((agents) => {
+          send(ws, {
+            v: 1,
+            t: "subagent.list",
+            agents: agents.map((a) => ({
+              id: a.id,
+              name: a.name,
+              description: a.description,
+              scope: a.scope,
+              model: a.model,
+              tools: a.tools,
+            })),
+          });
+        })
+        .catch((err) => {
+          send(ws, { v: 1, t: "error", code: "subagent_list_failed", message: err?.message ?? String(err) });
+        });
+      return;
+    }
+    case "subagent.read.request": {
+      readSubagent(frame.id, DEFAULT_CWD)
+        .then((r) => {
+          if (!r) {
+            send(ws, { v: 1, t: "error", code: "subagent_not_found", message: frame.id });
+            return;
+          }
+          send(ws, {
+            v: 1,
+            t: "subagent.read",
+            id: r.id,
+            content: r.content,
+            meta: {
+              id: r.meta.id,
+              name: r.meta.name,
+              description: r.meta.description,
+              scope: r.meta.scope,
+              model: r.meta.model,
+              tools: r.meta.tools,
+            },
+          });
+        })
+        .catch((err) => {
+          send(ws, { v: 1, t: "error", code: "subagent_read_failed", message: err?.message ?? String(err) });
+        });
+      return;
+    }
+    case "subagent.save": {
+      saveSubagent(
+        {
+          scope: frame.scope,
+          name: frame.name,
+          description: frame.description,
+          model: frame.model,
+          tools: frame.tools,
+          body: frame.body,
+          originalId: frame.originalId,
+        },
+        DEFAULT_CWD,
+      )
+        .then((meta) => {
+          send(ws, {
+            v: 1,
+            t: "subagent.saved",
+            agent: {
+              id: meta.id,
+              name: meta.name,
+              description: meta.description,
+              scope: meta.scope,
+              model: meta.model,
+              tools: meta.tools,
+            },
+          });
+          broadcastSubagentList();
+        })
+        .catch((err) => {
+          send(ws, { v: 1, t: "error", code: "subagent_save_failed", message: err?.message ?? String(err) });
+        });
+      return;
+    }
+    case "subagent.delete": {
+      deleteSubagent(frame.id, DEFAULT_CWD)
+        .then((ok) => {
+          if (!ok) {
+            send(ws, { v: 1, t: "error", code: "subagent_not_found", message: frame.id });
+            return;
+          }
+          send(ws, { v: 1, t: "subagent.deleted", id: frame.id });
+          broadcastSubagentList();
+        })
+        .catch((err) => {
+          send(ws, { v: 1, t: "error", code: "subagent_delete_failed", message: err?.message ?? String(err) });
+        });
+      return;
+    }
     default:
       return;
+  }
+}
+
+function broadcastMcpList(servers: Parameters<typeof listMcp> extends any ? Awaited<ReturnType<typeof listMcp>> : never): void {
+  for (const client of wss.clients) {
+    if (client.readyState !== WebSocket.OPEN) continue;
+    try {
+      client.send(encode({ v: 1, t: "mcp.list", servers }));
+    } catch {
+      // ignore
+    }
+  }
+}
+
+function broadcastPinned(): void {
+  const frame: Frame = { v: 1, t: "cmd.pinned", ids: pinnedCommandsCache };
+  for (const client of wss.clients) {
+    if (client.readyState !== WebSocket.OPEN) continue;
+    try {
+      client.send(encode(frame));
+    } catch {
+      // ignore
+    }
+  }
+}
+
+function broadcastCmdList(): void {
+  listCommands(DEFAULT_CWD)
+    .then((commands) => {
+      const payload = commands.map((c) => ({
+        id: c.id,
+        name: c.name,
+        description: c.description,
+        scope: c.scope,
+        pinned: c.pinned,
+      }));
+      const frame: Frame = { v: 1, t: "cmd.list", commands: payload };
+      for (const client of wss.clients) {
+        if (client.readyState !== WebSocket.OPEN) continue;
+        try {
+          client.send(encode(frame));
+        } catch {
+          // ignore
+        }
+      }
+    })
+    .catch(() => {});
+}
+
+function broadcastSubagentList(): void {
+  listSubagents(DEFAULT_CWD)
+    .then((agents) => {
+      const payload = agents.map((a) => ({
+        id: a.id,
+        name: a.name,
+        description: a.description,
+        scope: a.scope,
+        model: a.model,
+        tools: a.tools,
+      }));
+      const frame: Frame = { v: 1, t: "subagent.list", agents: payload };
+      for (const client of wss.clients) {
+        if (client.readyState !== WebSocket.OPEN) continue;
+        try {
+          client.send(encode(frame));
+        } catch {
+          // ignore
+        }
+      }
+    })
+    .catch(() => {});
+}
+
+function broadcastMcp(server: Awaited<ReturnType<typeof listMcp>>[number], kind: "added"): void {
+  for (const client of wss.clients) {
+    if (client.readyState !== WebSocket.OPEN) continue;
+    try {
+      if (kind === "added") {
+        client.send(encode({ v: 1, t: "mcp.added", server }));
+      }
+    } catch {
+      // ignore
+    }
+  }
+}
+
+function broadcastMcpRemoved(name: string): void {
+  for (const client of wss.clients) {
+    if (client.readyState !== WebSocket.OPEN) continue;
+    try {
+      client.send(encode({ v: 1, t: "mcp.removed", name }));
+    } catch {
+      // ignore
+    }
   }
 }
 
@@ -473,6 +999,7 @@ wss.on("connection", (ws) => {
     sessions: registry.list().map((s) => s.meta()),
     tunnel: currentTunnelInfo(),
     device: device ? { id: device.id, name: device.name } : null,
+    pinnedCommands: pinnedCommandsCache,
   });
 
   ws.on("message", (raw) => {

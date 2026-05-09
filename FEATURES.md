@@ -55,9 +55,9 @@
 | Feature | Status | Since | Notes |
 |---|---|---|---|
 | ConfigView 骨架 (5 tabs) | 🟢 | 2026-05-09 | 侧栏 `⚙ Claude Code 配置` 打开；5 个 tab 占位，各 agent 填充；protocol 和 host switch 已预留 `[config-frames]` / `[config-handlers]` 插入点 |
-| Skills 管理 (user + project) | 🟡 | 2026-05-09 | M4A in-flight |
-| MCP Servers 管理 | 🟡 | 2026-05-09 | M4B in-flight |
-| Slash Commands + Subagents 管理 | 🟡 | 2026-05-09 | M4C in-flight |
+| Skills 管理 (user + project) | 🟢 | 2026-05-09 | 读取 `~/.claude/skills` 和 `<cwd>/.claude/skills`，卡片 grid + 启用/禁用 toggle（目录前缀 `_disabled_` 持久化）、⚙查看 SKILL.md、▶试运行（往活跃会话写 `请使用 skill: <name>`）、🗑删除、+ 新建（写到选定 scope）。Marketplace 入口占位。 |
+| MCP Servers 管理 | 🟢 | 2026-05-09 | `claude mcp list/add/remove/get` 包装（execFile，无 shell）；protocol 帧 `mcp.list/get/add/added/remove/removed/toggle`；Web 端表格 + 展开详情 + 启用/禁用开关 + 添加弹窗（stdio/http/sse + env/headers）；env 中 KEY/TOKEN/SECRET/PASSWORD/AUTH 在传输前打码为 `***` 并只暴露长度；claude CLI 无原生 disable，实现为 "snapshot 到 `~/.rcc/mcp-disabled.json` + claude mcp remove"，enable 时重新 add |
+| Slash Commands + Subagents 管理 | 🟢 | 2026-05-09 | commands/.md 读写 + pinned 存 ~/.rcc/pinned-commands.json；subagents/.md frontmatter 解析 (name/description/model/tools)；新建/编辑/删除 modal；pinned 实时广播到 desktop 快捷按钮条 |
 | CRDT 多端输入同步 (Yjs) | 🔴 | — | 两端同时输入不冲突 |
 | 文件树 + Monaco 预览 | 🔴 | — | 右栏，按 mockup/desktop.html |
 | Hooks 管理 UI | 🔴 | — | M4 batch 2 |
@@ -100,3 +100,4 @@
 - 2026-05-09  M2 启动：cloudflared 集成（`RCC_TUNNEL=1`），host 静态托管 web 构建产物（单一公网 URL），UI 顶栏 tunnel 状态 + 点击复制 URL。
 - 2026-05-09  M2 认证：token 信任存储（`~/.rcc/trust.json`）、`POST /pair/new`+`/pair/claim` 配对、ws/HTTP 全路径认证（loopback 默认放行）、Web 端配对页 + 设备管理弹窗、`rcc-admin` CLI（list/revoke/rename）、`fs.watchFile` 监控外部改动自动重载。
 - 2026-05-09  M4 骨架：ConfigView 5-tab 壳 + `[config-frames]` / `[config-handlers]` 插入点，3 个并行 agent 分别填充。
+- 2026-05-09  M4 batch 1：Skills / MCP Servers / Slash Commands / Subagents 四大管理 tab 全部落地。Skills 通过 `_disabled_` 目录前缀禁用；MCP 通过 `~/.rcc/mcp-disabled.json` 快照实现禁用（claude CLI 无原生 disable）；pinned slash commands 持久化到 `~/.rcc/pinned-commands.json` 并实时推送到桌面快捷按钮条；subagents 解析 frontmatter (name/description/model/tools)。Hooks + 权限策略 UI 留待 batch 2。

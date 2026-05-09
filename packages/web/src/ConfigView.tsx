@@ -1,5 +1,9 @@
 import { createSignal, Show, For, type JSX } from "solid-js";
 import type { RccClient } from "./client.ts";
+import { McpTab } from "./McpTab.tsx";
+import { SkillsTab } from "./SkillsTab.tsx";
+import { CommandsTab } from "./CommandsTab.tsx";
+import { SubagentsTab } from "./SubagentsTab.tsx";
 
 type TabKey = "skills" | "mcp" | "commands" | "subagents" | "hooks";
 
@@ -8,7 +12,7 @@ interface TabSpec {
   label: string;
   icon: string;
   accent: string;
-  render: (client: RccClient) => JSX.Element;
+  render: (client: RccClient, activeSid: string | null) => JSX.Element;
 }
 
 // Each batch (A/B/C) fills in its own tab component. Leaving empty stubs
@@ -20,28 +24,28 @@ const TABS: readonly TabSpec[] = [
     label: "Skills",
     icon: "✨",
     accent: "text-orange-400",
-    render: () => <PlaceholderTab name="Skills" reason="M4A" />,
+    render: (client, activeSid) => <SkillsTab client={client} activeSid={activeSid} />,
   },
   {
     key: "mcp",
     label: "MCP Servers",
     icon: "🔌",
     accent: "text-sky-400",
-    render: () => <PlaceholderTab name="MCP Servers" reason="M4B" />,
+    render: (client) => <McpTab client={client} />,
   },
   {
     key: "commands",
     label: "Slash Commands",
     icon: "/",
     accent: "text-violet-400",
-    render: () => <PlaceholderTab name="Slash Commands" reason="M4C" />,
+    render: (client) => <CommandsTab client={client} />,
   },
   {
     key: "subagents",
     label: "Subagents",
     icon: "🤖",
     accent: "text-emerald-400",
-    render: () => <PlaceholderTab name="Subagents" reason="M4C" />,
+    render: (client) => <SubagentsTab client={client} />,
   },
   {
     key: "hooks",
@@ -55,6 +59,7 @@ const TABS: readonly TabSpec[] = [
 interface Props {
   open: boolean;
   client: RccClient;
+  activeSid: string | null;
   onClose: () => void;
 }
 
@@ -123,7 +128,7 @@ export function ConfigView(props: Props) {
               <For each={TABS}>
                 {(t) => (
                   <Show when={active() === t.key}>
-                    <div class="max-w-5xl mx-auto px-8 py-8">{t.render(props.client)}</div>
+                    <div class="max-w-5xl mx-auto px-8 py-8">{t.render(props.client, props.activeSid)}</div>
                   </Show>
                 )}
               </For>

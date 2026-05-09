@@ -1,5 +1,5 @@
-import { createSignal, onCleanup, For, Show } from "solid-js";
-import type { PermissionMode, SessionMeta, TunnelInfo } from "@rcc/protocol";
+import { createSignal, createMemo, onCleanup, onMount, For, Show } from "solid-js";
+import type { CommandSummary, PermissionMode, SessionMeta, TunnelInfo } from "@rcc/protocol";
 import { RccClient, defaultWsUrl, type ConnStatus } from "./client.ts";
 import { TerminalView } from "./TerminalView.tsx";
 import { NewSessionModal, permissionChip } from "./NewSessionModal.tsx";
@@ -8,12 +8,18 @@ import { DevicesModal } from "./DevicesModal.tsx";
 import { ConfigView } from "./ConfigView.tsx";
 import { clearToken, loadToken } from "./auth.ts";
 
-const PINNED_COMMANDS = [
-  { cmd: "/review", dot: "bg-sky-400", kind: "builtin" },
-  { cmd: "/security-review", dot: "bg-emerald-400", kind: "builtin" },
-  { cmd: "/simplify", dot: "bg-violet-400", kind: "builtin" },
-  { cmd: "/clear", dot: "bg-zinc-400", kind: "builtin" },
-] as const;
+const FALLBACK_PINNED: readonly CommandSummary[] = [
+  { id: "builtin:review", name: "review", description: "完整 PR 代码审查", scope: "builtin", pinned: true },
+  { id: "builtin:security-review", name: "security-review", description: "安全审查", scope: "builtin", pinned: true },
+  { id: "builtin:simplify", name: "simplify", description: "重构", scope: "builtin", pinned: true },
+  { id: "builtin:clear", name: "clear", description: "清空", scope: "builtin", pinned: true },
+];
+
+function dotForScope(scope: "builtin" | "user" | "project"): string {
+  if (scope === "project") return "bg-orange-400";
+  if (scope === "user") return "bg-sky-400";
+  return "bg-violet-400";
+}
 
 export function App() {
   const client = new RccClient({ url: defaultWsUrl(), token: loadToken() });
@@ -27,6 +33,8 @@ export function App() {
   const [currentDevice, setCurrentDevice] = createSignal<{ id: string; name: string } | null>(null);
   const [devicesOpen, setDevicesOpen] = createSignal(false);
   const [configOpen, setConfigOpen] = createSignal(false);
+  const [pinnedIds, setPinnedIds] = createSignal<string[]>([]);
+  const [commandsById, setCommandsById] = createSignal<Record<string, CommandSummary>>({});
 
   const unsubStatus = client.onStatus(setStatus);
   const unsubFrame = client.on((frame) => {
@@ -39,6 +47,13 @@ export function App() {
     if (frame.t === "hello") {
       if (frame.tunnel) setTunnel(frame.tunnel);
       if (frame.device !== undefined) setCurrentDevice(frame.device ?? null);
+      if (frame.pinnedCommands) setPinnedIds(frame.pinnedCommands);
+    }
+    if (frame.t === "cmd.pinned") setPinnedIds(frame.ids);
+    if (frame.t === "cmd.list") {
+      const map: Record<string, CommandSummary> = {};
+      for (const c of frame.commands) map[c.id] = c;
+      setCommandsById(map);
     }
     if (frame.t === "tunnel.status") setTunnel(frame.tunnel);
     if (frame.t === "session.created") {
@@ -49,6 +64,34 @@ export function App() {
         s.map((x) => (x.id === frame.sid ? { ...x, status: "exited" } : x)),
       );
     }
+  });
+
+  onMount(() => {
+    client.send({ v: 1, t: "cmd.list.request" });
+  });
+
+  const pinnedCommands = createMemo<readonly CommandSummary[]>(() => {
+    const ids = pinnedIds();
+    const map = commandsById();
+    if (ids.length === 0) return FALLBACK_PINNED;
+    const out: CommandSummary[] = [];
+    for (const id of ids) {
+      const meta = map[id];
+      if (meta) {
+        out.push(meta);
+      } else {
+        // Not yet loaded — derive name from id (scope:name)
+        const [scope, ...rest] = id.split(":");
+        out.push({
+          id,
+          name: rest.join(":"),
+          description: "",
+          scope: (scope === "user" || scope === "project" || scope === "builtin" ? scope : "builtin") as CommandSummary["scope"],
+          pinned: true,
+        });
+      }
+    }
+    return out;
   });
 
   onCleanup(() => {
@@ -236,15 +279,19 @@ export function App() {
               {/* command bar */}
               <div class="border-t border-zinc-900 p-3 shrink-0">
                 <div class="flex items-center gap-1.5 overflow-x-auto scrollbar">
-                  <For each={PINNED_COMMANDS}>
+                  <For each={pinnedCommands()}>
                     {(c) => (
                       <button
-                        class="shrink-0 text-[11px] px-2.5 py-1.5 rounded-md bg-zinc-900 border border-zinc-800 text-zinc-300 hover:border-zinc-700 flex items-center gap-1.5 font-mono"
-                        onClick={() => sendCommand(c.cmd)}
-                        title={`发送 ${c.cmd}`}
+                        class={`shrink-0 text-[11px] px-2.5 py-1.5 rounded-md border flex items-center gap-1.5 font-mono ${
+                          c.scope === "project"
+                            ? "bg-orange-500/10 border-orange-500/30 text-orange-300 hover:bg-orange-500/20"
+                            : "bg-zinc-900 border-zinc-800 text-zinc-300 hover:border-zinc-700"
+                        }`}
+                        onClick={() => sendCommand(`/${c.name}`)}
+                        title={c.description || `发送 /${c.name}`}
                       >
-                        <span class={`w-1 h-1 rounded-full ${c.dot}`} />
-                        {c.cmd}
+                        <span class={`w-1 h-1 rounded-full ${dotForScope(c.scope)}`} />
+                        /{c.name}
                       </button>
                     )}
                   </For>
@@ -285,6 +332,7 @@ export function App() {
       <ConfigView
         open={configOpen()}
         client={client}
+        activeSid={activeSid()}
         onClose={() => setConfigOpen(false)}
       />
     </div>

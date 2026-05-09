@@ -93,6 +93,8 @@ export const Hello = z.object({
     })
     .nullable()
     .optional(),
+  /** Pinned slash command ids (scope:name) for the chat quick-button bar. */
+  pinnedCommands: z.array(z.string()).optional(),
 });
 
 export const SessionNew = z.object({
@@ -218,11 +220,315 @@ export const DeviceRename = z.object({
 
 // [skills] — filled by M4A
 
+export const SkillScope = z.enum(["user", "project"]);
+export type SkillScope = z.infer<typeof SkillScope>;
+
+export const SkillSummary = z.object({
+  id: z.string(),
+  name: z.string(),
+  scope: SkillScope,
+  dir: z.string(),
+  displayPath: z.string(),
+  description: z.string().default(""),
+  tags: z.array(z.string()).default([]),
+  enabled: z.boolean(),
+  version: z.string().optional(),
+});
+export type SkillSummary = z.infer<typeof SkillSummary>;
+
+export const SkillListRequest = z.object({
+  ...base,
+  t: z.literal("skill.list.request"),
+});
+
+export const SkillList = z.object({
+  ...base,
+  t: z.literal("skill.list"),
+  skills: z.array(SkillSummary),
+});
+
+export const SkillToggle = z.object({
+  ...base,
+  t: z.literal("skill.toggle"),
+  id: z.string(),
+  enabled: z.boolean(),
+});
+
+export const SkillReadRequest = z.object({
+  ...base,
+  t: z.literal("skill.read.request"),
+  id: z.string(),
+});
+
+export const SkillRead = z.object({
+  ...base,
+  t: z.literal("skill.read"),
+  id: z.string(),
+  content: z.string(),
+});
+
+export const SkillSave = z.object({
+  ...base,
+  t: z.literal("skill.save"),
+  scope: SkillScope,
+  name: z.string().min(1).max(128),
+  description: z.string().default(""),
+  body: z.string().default(""),
+  tags: z.array(z.string()).optional(),
+});
+
+export const SkillDelete = z.object({
+  ...base,
+  t: z.literal("skill.delete"),
+  id: z.string(),
+});
+
+export const SkillDeleted = z.object({
+  ...base,
+  t: z.literal("skill.deleted"),
+  id: z.string(),
+});
+
 // [mcp] — filled by M4B
 
+export const McpScope = z.enum(["local", "user", "project"]);
+export type McpScope = z.infer<typeof McpScope>;
+
+export const McpTransport = z.enum(["stdio", "sse", "http"]);
+export type McpTransport = z.infer<typeof McpTransport>;
+
+export const McpStatus = z.enum(["ready", "failed", "disabled", "unknown"]);
+export type McpStatus = z.infer<typeof McpStatus>;
+
+export const McpServerSummary = z.object({
+  name: z.string(),
+  transport: McpTransport,
+  scope: McpScope,
+  status: McpStatus,
+  commandOrUrl: z.string(),
+  disabled: z.boolean(),
+  statusMessage: z.string().optional(),
+  toolCount: z.number().int().nonnegative().optional(),
+});
+export type McpServerSummary = z.infer<typeof McpServerSummary>;
+
+export const McpEnvPair = z.object({
+  key: z.string(),
+  value: z.string(),
+  isSecret: z.boolean(),
+  length: z.number().int().nonnegative(),
+});
+export type McpEnvPair = z.infer<typeof McpEnvPair>;
+
+export const McpServerDetail = McpServerSummary.extend({
+  command: z.string().optional(),
+  args: z.array(z.string()).optional(),
+  url: z.string().optional(),
+  env: z.array(McpEnvPair),
+  rawStatus: z.string(),
+});
+export type McpServerDetail = z.infer<typeof McpServerDetail>;
+
+export const McpListRequest = z.object({
+  ...base,
+  t: z.literal("mcp.list.request"),
+});
+
+export const McpList = z.object({
+  ...base,
+  t: z.literal("mcp.list"),
+  servers: z.array(McpServerSummary),
+});
+
+export const McpGetRequest = z.object({
+  ...base,
+  t: z.literal("mcp.get.request"),
+  name: z.string(),
+});
+
+export const McpGet = z.object({
+  ...base,
+  t: z.literal("mcp.get"),
+  server: McpServerDetail.nullable(),
+});
+
+export const McpAdd = z.object({
+  ...base,
+  t: z.literal("mcp.add"),
+  name: z.string(),
+  transport: McpTransport,
+  scope: McpScope,
+  command: z.string().optional(),
+  args: z.array(z.string()).optional(),
+  env: z.record(z.string(), z.string()).optional(),
+  headers: z.record(z.string(), z.string()).optional(),
+  url: z.string().optional(),
+});
+
+export const McpAdded = z.object({
+  ...base,
+  t: z.literal("mcp.added"),
+  server: McpServerSummary,
+});
+
+export const McpRemove = z.object({
+  ...base,
+  t: z.literal("mcp.remove"),
+  name: z.string(),
+  scope: McpScope.optional(),
+});
+
+export const McpRemoved = z.object({
+  ...base,
+  t: z.literal("mcp.removed"),
+  name: z.string(),
+});
+
+export const McpToggle = z.object({
+  ...base,
+  t: z.literal("mcp.toggle"),
+  name: z.string(),
+  enabled: z.boolean(),
+});
+
+
 // [commands] — filled by M4C
+export const CommandScope = z.enum(["builtin", "user", "project"]);
+export type CommandScope = z.infer<typeof CommandScope>;
+
+export const CommandSummary = z.object({
+  id: z.string(),
+  name: z.string(),
+  description: z.string(),
+  scope: CommandScope,
+  pinned: z.boolean(),
+});
+export type CommandSummary = z.infer<typeof CommandSummary>;
+
+export const CmdListRequest = z.object({
+  ...base,
+  t: z.literal("cmd.list.request"),
+});
+export const CmdList = z.object({
+  ...base,
+  t: z.literal("cmd.list"),
+  commands: z.array(CommandSummary),
+});
+export const CmdReadRequest = z.object({
+  ...base,
+  t: z.literal("cmd.read.request"),
+  id: z.string(),
+});
+export const CmdRead = z.object({
+  ...base,
+  t: z.literal("cmd.read"),
+  id: z.string(),
+  content: z.string(),
+  description: z.string(),
+  scope: CommandScope,
+});
+export const CmdSave = z.object({
+  ...base,
+  t: z.literal("cmd.save"),
+  scope: z.enum(["user", "project"]),
+  name: z.string().min(1).max(64),
+  description: z.string().max(500).optional(),
+  body: z.string(),
+  originalId: z.string().optional(),
+});
+export const CmdSaved = z.object({
+  ...base,
+  t: z.literal("cmd.saved"),
+  command: CommandSummary,
+});
+export const CmdDelete = z.object({
+  ...base,
+  t: z.literal("cmd.delete"),
+  id: z.string(),
+});
+export const CmdDeleted = z.object({
+  ...base,
+  t: z.literal("cmd.deleted"),
+  id: z.string(),
+});
+export const CmdPin = z.object({
+  ...base,
+  t: z.literal("cmd.pin"),
+  id: z.string(),
+  pinned: z.boolean(),
+});
+export const CmdReorderPinned = z.object({
+  ...base,
+  t: z.literal("cmd.reorder-pinned"),
+  ids: z.array(z.string()),
+});
+export const CmdPinned = z.object({
+  ...base,
+  t: z.literal("cmd.pinned"),
+  ids: z.array(z.string()),
+});
 
 // [subagents] — filled by M4C
+export const SubagentScope = z.enum(["user", "project"]);
+export type SubagentScope = z.infer<typeof SubagentScope>;
+
+export const SubagentSummary = z.object({
+  id: z.string(),
+  name: z.string(),
+  description: z.string(),
+  scope: SubagentScope,
+  model: z.string().nullable(),
+  tools: z.string().nullable(),
+});
+export type SubagentSummary = z.infer<typeof SubagentSummary>;
+
+export const SubagentListRequest = z.object({
+  ...base,
+  t: z.literal("subagent.list.request"),
+});
+export const SubagentList = z.object({
+  ...base,
+  t: z.literal("subagent.list"),
+  agents: z.array(SubagentSummary),
+});
+export const SubagentReadRequest = z.object({
+  ...base,
+  t: z.literal("subagent.read.request"),
+  id: z.string(),
+});
+export const SubagentRead = z.object({
+  ...base,
+  t: z.literal("subagent.read"),
+  id: z.string(),
+  content: z.string(),
+  meta: SubagentSummary,
+});
+export const SubagentSave = z.object({
+  ...base,
+  t: z.literal("subagent.save"),
+  scope: SubagentScope,
+  name: z.string().min(1).max(64),
+  description: z.string().max(500).optional(),
+  model: z.string().max(64).optional(),
+  tools: z.string().max(500).optional(),
+  body: z.string(),
+  originalId: z.string().optional(),
+});
+export const SubagentSaved = z.object({
+  ...base,
+  t: z.literal("subagent.saved"),
+  agent: SubagentSummary,
+});
+export const SubagentDelete = z.object({
+  ...base,
+  t: z.literal("subagent.delete"),
+  id: z.string(),
+});
+export const SubagentDeleted = z.object({
+  ...base,
+  t: z.literal("subagent.deleted"),
+  id: z.string(),
+});
 
 // [hooks] — filled by M4 batch 2
 
@@ -248,6 +554,42 @@ export const Frame = z.discriminatedUnion("t", [
   DeviceRevoke,
   DeviceRename,
   // [config-frames] — each config agent adds its frames after this marker
+  SkillListRequest,
+  SkillList,
+  SkillToggle,
+  SkillReadRequest,
+  SkillRead,
+  SkillSave,
+  SkillDelete,
+  SkillDeleted,
+  McpListRequest,
+  McpList,
+  McpGetRequest,
+  McpGet,
+  McpAdd,
+  McpAdded,
+  McpRemove,
+  McpRemoved,
+  McpToggle,
+  CmdListRequest,
+  CmdList,
+  CmdReadRequest,
+  CmdRead,
+  CmdSave,
+  CmdSaved,
+  CmdDelete,
+  CmdDeleted,
+  CmdPin,
+  CmdReorderPinned,
+  CmdPinned,
+  SubagentListRequest,
+  SubagentList,
+  SubagentReadRequest,
+  SubagentRead,
+  SubagentSave,
+  SubagentSaved,
+  SubagentDelete,
+  SubagentDeleted,
 ]);
 export type Frame = z.infer<typeof Frame>;
 

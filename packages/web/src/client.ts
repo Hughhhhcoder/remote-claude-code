@@ -30,6 +30,7 @@ export class RccClient {
 
   sessions: SessionMeta[] = [];
   tunnel: TunnelInfo | null = null;
+  pinnedCommandIds: string[] = [];
 
   constructor(private readonly opts: RccClientOptions) {
     this.connect();
@@ -68,6 +69,12 @@ export class RccClient {
       }
       if (frame.t === "hello" && frame.tunnel) {
         this.tunnel = frame.tunnel;
+      }
+      if (frame.t === "hello" && frame.pinnedCommands) {
+        this.pinnedCommandIds = frame.pinnedCommands;
+      }
+      if (frame.t === "cmd.pinned") {
+        this.pinnedCommandIds = frame.ids;
       }
       if (frame.t === "tunnel.status") {
         this.tunnel = frame.tunnel;
