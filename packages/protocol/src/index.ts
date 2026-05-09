@@ -532,6 +532,281 @@ export const SubagentDeleted = z.object({
 
 // [hooks] — filled by M4 batch 2
 
+export const HookScope = z.enum(["user", "project"]);
+export type HookScope = z.infer<typeof HookScope>;
+
+export const HookEventName = z.enum([
+  "PreToolUse",
+  "PostToolUse",
+  "UserPromptSubmit",
+  "Notification",
+  "Stop",
+  "SubagentStop",
+  "SessionStart",
+  "SessionEnd",
+  "PreCompact",
+]);
+export type HookEventName = z.infer<typeof HookEventName>;
+
+export const HOOK_EVENT_NAMES: readonly HookEventName[] = [
+  "PreToolUse",
+  "PostToolUse",
+  "UserPromptSubmit",
+  "Notification",
+  "Stop",
+  "SubagentStop",
+  "SessionStart",
+  "SessionEnd",
+  "PreCompact",
+] as const;
+
+export const HookAction = z.object({
+  type: z.literal("command"),
+  command: z.string(),
+  timeout: z.number().int().positive().optional(),
+  truncated: z.boolean().optional(),
+});
+export type HookAction = z.infer<typeof HookAction>;
+
+export const HookMatcher = z.object({
+  matcher: z.string().optional(),
+  hooks: z.array(HookAction),
+});
+export type HookMatcher = z.infer<typeof HookMatcher>;
+
+export const HookConfig = z.object({
+  scope: HookScope,
+  event: HookEventName,
+  index: z.number().int().nonnegative(),
+  matcher: z.string().optional(),
+  hooks: z.array(HookAction),
+});
+export type HookConfig = z.infer<typeof HookConfig>;
+
+export const HookListRequest = z.object({
+  ...base,
+  t: z.literal("hook.list.request"),
+  scope: z.enum(["user", "project", "all"]).optional(),
+});
+
+export const HookList = z.object({
+  ...base,
+  t: z.literal("hook.list"),
+  configs: z.array(HookConfig),
+});
+
+export const HookWrite = z.object({
+  ...base,
+  t: z.literal("hook.write"),
+  scope: HookScope,
+  event: HookEventName,
+  index: z.number().int(),
+  matcher: z.string().optional(),
+  hooks: z.array(HookAction),
+});
+
+export const HookWritten = z.object({
+  ...base,
+  t: z.literal("hook.written"),
+  scope: HookScope,
+  event: HookEventName,
+});
+
+export const HookDelete = z.object({
+  ...base,
+  t: z.literal("hook.delete"),
+  scope: HookScope,
+  event: HookEventName,
+  index: z.number().int().nonnegative(),
+});
+
+export const HookDeleted = z.object({
+  ...base,
+  t: z.literal("hook.deleted"),
+  scope: HookScope,
+  event: HookEventName,
+  index: z.number().int().nonnegative(),
+});
+
+export const HookTest = z.object({
+  ...base,
+  t: z.literal("hook.test"),
+  scope: HookScope,
+  event: HookEventName,
+  index: z.number().int().nonnegative(),
+  hookIndex: z.number().int().nonnegative().optional(),
+});
+
+export const HookTested = z.object({
+  ...base,
+  t: z.literal("hook.tested"),
+  scope: HookScope,
+  event: HookEventName,
+  index: z.number().int().nonnegative(),
+  ok: z.boolean(),
+  stdout: z.string(),
+  stderr: z.string(),
+  exitCode: z.number().int().nullable(),
+  truncated: z.boolean().optional(),
+});
+
+// [permissions] — filled by M4 batch 2
+
+export const PermissionScope = z.enum(["user", "project", "local"]);
+export type PermissionScope = z.infer<typeof PermissionScope>;
+
+export const PermissionBucket = z.enum(["allow", "deny", "ask"]);
+export type PermissionBucket = z.infer<typeof PermissionBucket>;
+
+export const PermissionDefaultMode = z.enum([
+  "default",
+  "plan",
+  "acceptEdits",
+  "bypassPermissions",
+]);
+export type PermissionDefaultMode = z.infer<typeof PermissionDefaultMode>;
+
+export const PermissionsConfig = z.object({
+  scope: PermissionScope,
+  allow: z.array(z.string()).default([]),
+  deny: z.array(z.string()).default([]),
+  ask: z.array(z.string()).default([]),
+  defaultMode: PermissionDefaultMode.optional(),
+  additionalDirectories: z.array(z.string()).default([]),
+});
+export type PermissionsConfig = z.infer<typeof PermissionsConfig>;
+
+export const PermListRequest = z.object({
+  ...base,
+  t: z.literal("perm.list.request"),
+});
+
+export const PermList = z.object({
+  ...base,
+  t: z.literal("perm.list"),
+  configs: z.array(PermissionsConfig),
+});
+
+export const PermAdd = z.object({
+  ...base,
+  t: z.literal("perm.add"),
+  scope: PermissionScope,
+  bucket: PermissionBucket,
+  rule: z.string().min(1).max(1024),
+});
+
+export const PermAdded = z.object({
+  ...base,
+  t: z.literal("perm.added"),
+  scope: PermissionScope,
+  bucket: PermissionBucket,
+  rule: z.string(),
+});
+
+export const PermRemove = z.object({
+  ...base,
+  t: z.literal("perm.remove"),
+  scope: PermissionScope,
+  bucket: PermissionBucket,
+  rule: z.string(),
+});
+
+export const PermRemoved = z.object({
+  ...base,
+  t: z.literal("perm.removed"),
+  scope: PermissionScope,
+  bucket: PermissionBucket,
+  rule: z.string(),
+});
+
+export const PermSetDefault = z.object({
+  ...base,
+  t: z.literal("perm.set-default"),
+  scope: PermissionScope,
+  mode: PermissionDefaultMode.nullable(),
+});
+
+export const PermDefaultSet = z.object({
+  ...base,
+  t: z.literal("perm.default-set"),
+  scope: PermissionScope,
+  mode: PermissionDefaultMode.nullable(),
+});
+
+export const PermAddDir = z.object({
+  ...base,
+  t: z.literal("perm.add-dir"),
+  scope: PermissionScope,
+  path: z.string().min(1).max(1024),
+});
+
+export const PermRemoveDir = z.object({
+  ...base,
+  t: z.literal("perm.remove-dir"),
+  scope: PermissionScope,
+  path: z.string(),
+});
+
+export const PermDirAck = z.object({
+  ...base,
+  t: z.literal("perm.dir-ack"),
+  scope: PermissionScope,
+  path: z.string(),
+  action: z.enum(["added", "removed"]),
+});
+
+// [files] — filled by M4 batch 2
+
+export const FileEntry = z.object({
+  name: z.string(),
+  path: z.string(),
+  type: z.enum(["file", "dir"]),
+  size: z.number().int().nonnegative().optional(),
+  mtime: z.number().optional(),
+});
+export type FileEntry = z.infer<typeof FileEntry>;
+
+export const FsLsRequest = z.object({
+  ...base,
+  t: z.literal("fs.ls.request"),
+  path: z.string(),
+});
+
+export const FsLs = z.object({
+  ...base,
+  t: z.literal("fs.ls"),
+  path: z.string(),
+  entries: z.array(FileEntry),
+});
+
+export const FsReadRequest = z.object({
+  ...base,
+  t: z.literal("fs.read.request"),
+  path: z.string(),
+});
+
+export const FsRead = z.object({
+  ...base,
+  t: z.literal("fs.read"),
+  path: z.string(),
+  content: z.string(),
+  size: z.number().int().nonnegative(),
+  encoding: z.enum(["utf8", "base64"]),
+  truncated: z.boolean().optional(),
+});
+
+export const FsStatRequest = z.object({
+  ...base,
+  t: z.literal("fs.stat.request"),
+  path: z.string(),
+});
+
+export const FsStat = z.object({
+  ...base,
+  t: z.literal("fs.stat"),
+  entry: FileEntry,
+});
+
 // ──────────────────────────────────────────────────────────────────────────
 
 export const Frame = z.discriminatedUnion("t", [
@@ -590,6 +865,31 @@ export const Frame = z.discriminatedUnion("t", [
   SubagentSaved,
   SubagentDelete,
   SubagentDeleted,
+  HookListRequest,
+  HookList,
+  HookWrite,
+  HookWritten,
+  HookDelete,
+  HookDeleted,
+  HookTest,
+  HookTested,
+  PermListRequest,
+  PermList,
+  PermAdd,
+  PermAdded,
+  PermRemove,
+  PermRemoved,
+  PermSetDefault,
+  PermDefaultSet,
+  PermAddDir,
+  PermRemoveDir,
+  PermDirAck,
+  FsLsRequest,
+  FsLs,
+  FsReadRequest,
+  FsRead,
+  FsStatRequest,
+  FsStat,
 ]);
 export type Frame = z.infer<typeof Frame>;
 

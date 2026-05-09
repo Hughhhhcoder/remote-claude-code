@@ -4,8 +4,10 @@ import { McpTab } from "./McpTab.tsx";
 import { SkillsTab } from "./SkillsTab.tsx";
 import { CommandsTab } from "./CommandsTab.tsx";
 import { SubagentsTab } from "./SubagentsTab.tsx";
+import { HooksTab } from "./HooksTab.tsx";
+import { PermissionsTab } from "./PermissionsTab.tsx";
 
-type TabKey = "skills" | "mcp" | "commands" | "subagents" | "hooks";
+type TabKey = "skills" | "mcp" | "commands" | "subagents" | "hooks" | "permissions";
 
 interface TabSpec {
   key: TabKey;
@@ -52,7 +54,14 @@ const TABS: readonly TabSpec[] = [
     label: "Hooks",
     icon: "⚡",
     accent: "text-rose-400",
-    render: () => <PlaceholderTab name="Hooks" reason="M4 batch 2" />,
+    render: (client) => <HooksTab client={client} />,
+  },
+  {
+    key: "permissions",
+    label: "Permissions",
+    icon: "🛡",
+    accent: "text-amber-400",
+    render: (client) => <PermissionsTab client={client} />,
   },
 ] as const;
 

@@ -6,6 +6,7 @@ import { NewSessionModal, permissionChip } from "./NewSessionModal.tsx";
 import { PairingView } from "./PairingView.tsx";
 import { DevicesModal } from "./DevicesModal.tsx";
 import { ConfigView } from "./ConfigView.tsx";
+import { FileBrowser } from "./FileBrowser.tsx";
 import { clearToken, loadToken } from "./auth.ts";
 
 const FALLBACK_PINNED: readonly CommandSummary[] = [
@@ -33,6 +34,8 @@ export function App() {
   const [currentDevice, setCurrentDevice] = createSignal<{ id: string; name: string } | null>(null);
   const [devicesOpen, setDevicesOpen] = createSignal(false);
   const [configOpen, setConfigOpen] = createSignal(false);
+  const [fileBrowserOpen, setFileBrowserOpen] = createSignal(false);
+  const [fileBrowserRoot, setFileBrowserRoot] = createSignal<string>("~");
   const [pinnedIds, setPinnedIds] = createSignal<string[]>([]);
   const [commandsById, setCommandsById] = createSignal<Record<string, CommandSummary>>({});
 
@@ -42,6 +45,10 @@ export function App() {
       setSessions(frame.sessions);
       if (!activeSid() && frame.sessions.length > 0) {
         setActiveSid(frame.sessions[0]!.id);
+      }
+      // Seed file browser root from the first session cwd if still default.
+      if (fileBrowserRoot() === "~" && frame.sessions.length > 0) {
+        setFileBrowserRoot(frame.sessions[0]!.cwd);
       }
     }
     if (frame.t === "hello") {
@@ -190,8 +197,14 @@ export function App() {
         </div>
       </div>
 
-      {/* Main 2-col */}
-      <div class="flex-1 grid" style="grid-template-columns: 240px 1fr; min-height: 0;">
+      {/* Main grid */}
+      <div
+        class="flex-1 grid"
+        style={{
+          "grid-template-columns": fileBrowserOpen() ? "240px 1fr 360px" : "240px 1fr",
+          "min-height": "0",
+        }}
+      >
         {/* Sessions */}
         <aside class="bg-zinc-950 border-r border-zinc-900 flex flex-col overflow-hidden">
           <div class="p-3 border-b border-zinc-900">
@@ -231,6 +244,16 @@ export function App() {
             >
               <span>⚙</span>
               <span>Claude Code 配置</span>
+            </button>
+            <button
+              class={`w-full text-xs flex items-center gap-1.5 py-1.5 px-2 rounded hover:bg-zinc-900 ${
+                fileBrowserOpen() ? "text-orange-300" : "text-zinc-500 hover:text-zinc-200"
+              }`}
+              onClick={() => setFileBrowserOpen((v) => !v)}
+              title="切换文件浏览器"
+            >
+              <span>📁</span>
+              <span>文件浏览器</span>
             </button>
             <button
               class="w-full text-xs text-zinc-500 hover:text-zinc-200 flex items-center gap-1.5 py-1.5 px-2 rounded hover:bg-zinc-900"
@@ -315,6 +338,12 @@ export function App() {
             </>
           </Show>
         </main>
+
+        <Show when={fileBrowserOpen()}>
+          <aside class="bg-zinc-950 border-l border-zinc-900 overflow-hidden">
+            <FileBrowser client={client} rootCwd={fileBrowserRoot()} />
+          </aside>
+        </Show>
       </div>
 
       <NewSessionModal

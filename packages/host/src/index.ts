@@ -40,6 +40,16 @@ import {
   saveSubagent,
   deleteSubagent,
 } from "./subagents.ts";
+import {
+  listPermissions,
+  addRule as permAddRule,
+  removeRule as permRemoveRule,
+  setDefaultMode as permSetDefaultMode,
+  addDir as permAddDir,
+  removeDir as permRemoveDir,
+} from "./permissions.ts";
+import { listHooks, writeHook, deleteHook, testHook } from "./hooks.ts";
+import { ls as fsLs, read as fsRead, statEntry as fsStat } from "./fs.ts";
 
 interface WsState {
   attached: Set<string>;
@@ -735,6 +745,242 @@ function handle(ws: WebSocket, state: WsState, frame: Frame): void {
         });
       return;
     }
+    case "hook.list.request": {
+      listHooks(frame.scope ?? "all", DEFAULT_CWD)
+        .then((configs) => send(ws, { v: 1, t: "hook.list", configs }))
+        .catch((err) => {
+          send(ws, { v: 1, t: "error", code: "hook_list_failed", message: err?.message ?? String(err) });
+        });
+      return;
+    }
+    case "hook.write": {
+      writeHook(frame.scope, frame.event, frame.index, frame.matcher, frame.hooks, DEFAULT_CWD)
+        .then(() => {
+          send(ws, { v: 1, t: "hook.written", scope: frame.scope, event: frame.event });
+          broadcastHookList();
+        })
+        .catch((err) => {
+          send(ws, { v: 1, t: "error", code: "hook_write_failed", message: err?.message ?? String(err) });
+        });
+      return;
+    }
+    case "hook.delete": {
+      deleteHook(frame.scope, frame.event, frame.index, DEFAULT_CWD)
+        .then((ok) => {
+          if (!ok) {
+            send(ws, { v: 1, t: "error", code: "hook_not_found", message: `${frame.scope}:${frame.event}[${frame.index}]` });
+            return;
+          }
+          send(ws, {
+            v: 1,
+            t: "hook.deleted",
+            scope: frame.scope,
+            event: frame.event,
+            index: frame.index,
+          });
+          broadcastHookList();
+        })
+        .catch((err) => {
+          send(ws, { v: 1, t: "error", code: "hook_delete_failed", message: err?.message ?? String(err) });
+        });
+      return;
+    }
+    case "hook.test": {
+      testHook(
+        frame.scope,
+        frame.event,
+        frame.index,
+        frame.hookIndex ?? 0,
+        DEFAULT_CWD,
+      )
+        .then((res) => {
+          send(ws, {
+            v: 1,
+            t: "hook.tested",
+            scope: frame.scope,
+            event: frame.event,
+            index: frame.index,
+            ok: res.ok,
+            stdout: res.stdout,
+            stderr: res.stderr,
+            exitCode: res.exitCode,
+            truncated: res.truncated,
+          });
+        })
+        .catch((err) => {
+          send(ws, { v: 1, t: "error", code: "hook_test_failed", message: err?.message ?? String(err) });
+        });
+      return;
+    }
+    case "perm.list.request": {
+      listPermissions(DEFAULT_CWD)
+        .then((configs) => send(ws, { v: 1, t: "perm.list", configs }))
+        .catch((err) => {
+          send(ws, {
+            v: 1,
+            t: "error",
+            code: "perm_list_failed",
+            message: err?.message ?? String(err),
+          });
+        });
+      return;
+    }
+    case "perm.add": {
+      permAddRule(frame.scope, frame.bucket, frame.rule, DEFAULT_CWD)
+        .then((rule) => {
+          send(ws, {
+            v: 1,
+            t: "perm.added",
+            scope: frame.scope,
+            bucket: frame.bucket,
+            rule,
+          });
+          broadcastPermList();
+        })
+        .catch((err) => {
+          send(ws, {
+            v: 1,
+            t: "error",
+            code: "perm_add_failed",
+            message: err?.message ?? String(err),
+          });
+        });
+      return;
+    }
+    case "perm.remove": {
+      permRemoveRule(frame.scope, frame.bucket, frame.rule, DEFAULT_CWD)
+        .then(() => {
+          send(ws, {
+            v: 1,
+            t: "perm.removed",
+            scope: frame.scope,
+            bucket: frame.bucket,
+            rule: frame.rule,
+          });
+          broadcastPermList();
+        })
+        .catch((err) => {
+          send(ws, {
+            v: 1,
+            t: "error",
+            code: "perm_remove_failed",
+            message: err?.message ?? String(err),
+          });
+        });
+      return;
+    }
+    case "perm.set-default": {
+      permSetDefaultMode(frame.scope, frame.mode, DEFAULT_CWD)
+        .then(() => {
+          send(ws, {
+            v: 1,
+            t: "perm.default-set",
+            scope: frame.scope,
+            mode: frame.mode,
+          });
+          broadcastPermList();
+        })
+        .catch((err) => {
+          send(ws, {
+            v: 1,
+            t: "error",
+            code: "perm_default_failed",
+            message: err?.message ?? String(err),
+          });
+        });
+      return;
+    }
+    case "perm.add-dir": {
+      permAddDir(frame.scope, frame.path, DEFAULT_CWD)
+        .then((p) => {
+          send(ws, {
+            v: 1,
+            t: "perm.dir-ack",
+            scope: frame.scope,
+            path: p,
+            action: "added",
+          });
+          broadcastPermList();
+        })
+        .catch((err) => {
+          send(ws, {
+            v: 1,
+            t: "error",
+            code: "perm_add_dir_failed",
+            message: err?.message ?? String(err),
+          });
+        });
+      return;
+    }
+    case "perm.remove-dir": {
+      permRemoveDir(frame.scope, frame.path, DEFAULT_CWD)
+        .then(() => {
+          send(ws, {
+            v: 1,
+            t: "perm.dir-ack",
+            scope: frame.scope,
+            path: frame.path,
+            action: "removed",
+          });
+          broadcastPermList();
+        })
+        .catch((err) => {
+          send(ws, {
+            v: 1,
+            t: "error",
+            code: "perm_remove_dir_failed",
+            message: err?.message ?? String(err),
+          });
+        });
+      return;
+    }
+    case "fs.ls.request": {
+      fsLs(frame.path, DEFAULT_CWD)
+        .then((r) => send(ws, { v: 1, t: "fs.ls", path: r.path, entries: r.entries }))
+        .catch((err) => {
+          send(ws, {
+            v: 1,
+            t: "error",
+            code: "fs_ls_failed",
+            message: err?.message ?? String(err),
+          });
+        });
+      return;
+    }
+    case "fs.read.request": {
+      fsRead(frame.path, DEFAULT_CWD)
+        .then((r) => send(ws, {
+          v: 1,
+          t: "fs.read",
+          path: r.path,
+          content: r.content,
+          size: r.size,
+          encoding: r.encoding,
+          truncated: r.truncated,
+        }))
+        .catch((err) => {
+          send(ws, {
+            v: 1,
+            t: "error",
+            code: "fs_read_failed",
+            message: err?.message ?? String(err),
+          });
+        });
+      return;
+    }
+    case "fs.stat.request": {
+      fsStat(frame.path, DEFAULT_CWD)
+        .then((entry) => send(ws, { v: 1, t: "fs.stat", entry }))
+        .catch((err) => {
+          send(ws, {
+            v: 1,
+            t: "error",
+            code: "fs_stat_failed",
+            message: err?.message ?? String(err),
+          });
+        });
+      return;
+    }
     default:
       return;
   }
@@ -810,6 +1056,22 @@ function broadcastSubagentList(): void {
     .catch(() => {});
 }
 
+function broadcastHookList(): void {
+  listHooks("all", DEFAULT_CWD)
+    .then((configs) => {
+      const frame: Frame = { v: 1, t: "hook.list", configs };
+      for (const client of wss.clients) {
+        if (client.readyState !== WebSocket.OPEN) continue;
+        try {
+          client.send(encode(frame));
+        } catch {
+          // ignore
+        }
+      }
+    })
+    .catch(() => {});
+}
+
 function broadcastMcp(server: Awaited<ReturnType<typeof listMcp>>[number], kind: "added"): void {
   for (const client of wss.clients) {
     if (client.readyState !== WebSocket.OPEN) continue;
@@ -832,6 +1094,22 @@ function broadcastMcpRemoved(name: string): void {
       // ignore
     }
   }
+}
+
+function broadcastPermList(): void {
+  listPermissions(DEFAULT_CWD)
+    .then((configs) => {
+      const frame: Frame = { v: 1, t: "perm.list", configs };
+      for (const client of wss.clients) {
+        if (client.readyState !== WebSocket.OPEN) continue;
+        try {
+          client.send(encode(frame));
+        } catch {
+          // ignore
+        }
+      }
+    })
+    .catch(() => {});
 }
 
 function broadcastDeviceList(): void {
