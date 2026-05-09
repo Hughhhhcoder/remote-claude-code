@@ -1,0 +1,7 @@
+{
+  "id": "standup-note",
+  "name": "Standup Note",
+  "version": "1.0.0",
+  "entry": "index.ts",
+  "permissions": ["chat:read", "broadcast"]
+}

@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Scratchpad</title>
+    <style>
+      :root {
+        --bg: #fafafa;
+        --fg: #111;
+        --muted: #666;
+        --border: #d0d0d0;
+        --accent: #3b82f6;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #0f0f11;
+          --fg: #e5e5e5;
+          --muted: #888;
+          --border: #2a2a2e;
+          --accent: #60a5fa;
+        }
+      }
+      html, body {
+        margin: 0;
+        height: 100%;
+        background: var(--bg);
+        color: var(--fg);
+        font-family: system-ui, -apple-system, sans-serif;
+      }
+      body {
+        display: flex;
+        flex-direction: column;
+        padding: 16px;
+        box-sizing: border-box;
+        gap: 12px;
+      }
+      header { display: flex; align-items: baseline; gap: 8px; }
+      header h1 { font-size: 16px; margin: 0; }
+      header .sid {
+        font-size: 12px;
+        color: var(--muted);
+        font-family: ui-monospace, monospace;
+      }
+      header .saved {
+        margin-left: auto;
+        font-size: 12px;
+        color: var(--muted);
+      }
+      textarea {
+        flex: 1;
+        min-height: 240px;
+        padding: 12px;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        background: var(--bg);
+        color: var(--fg);
+        font-family: ui-monospace, monospace;
+        font-size: 13px;
+        line-height: 1.5;
+        resize: none;
+      }
+      textarea:focus {
+        outline: none;
+        border-color: var(--accent);
+      }
+      footer {
+        display: flex;
+        gap: 8px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+      button {
+        padding: 4px 10px;
+        border: 1px solid var(--border);
+        background: transparent;
+        color: var(--fg);
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 12px;
+      }
+      button:hover { border-color: var(--accent); color: var(--accent); }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Scratchpad</h1>
+      <span class="sid" id="sid">(no session)</span>
+      <span class="saved" id="saved"></span>
+    </header>
+    <textarea id="pad" placeholder="Jot notes, TODO lists, anything. Stored in localStorage, scoped per-session."></textarea>
+    <footer>
+      <button id="clear">Clear</button>
+      <span>Stored locally under <code id="key">—</code></span>
+    </footer>
+    <script>
+      (function () {
+        var params = new URLSearchParams(location.search);
+        var urlSid = params.get("sid") || "";
+        var currentSid = urlSid;
+        var sidEl = document.getElementById("sid");
+        var keyEl = document.getElementById("key");
+        var pad = document.getElementById("pad");
+        var saved = document.getElementById("saved");
+
+        function keyFor(sid) {
+          return "rcc.plugin.scratchpad." + (sid || "__global__");
+        }
+
+        function render() {
+          sidEl.textContent = currentSid ? "sid=" + currentSid : "(global)";
+          keyEl.textContent = keyFor(currentSid);
+          try {
+            pad.value = localStorage.getItem(keyFor(currentSid)) || "";
+          } catch (e) {
+            pad.value = "";
+          }
+        }
+
+        var saveTimer = null;
+        pad.addEventListener("input", function () {
+          if (saveTimer) clearTimeout(saveTimer);
+          saved.textContent = "saving…";
+          saveTimer = setTimeout(function () {
+            try {
+              localStorage.setItem(keyFor(currentSid), pad.value);
+              var d = new Date();
+              saved.textContent = "saved " + d.toLocaleTimeString();
+            } catch (e) {
+              saved.textContent = "save failed: " + (e && e.message);
+            }
+          }, 300);
+        });
+
+        document.getElementById("clear").addEventListener("click", function () {
+          if (!confirm("Clear scratchpad for " + (currentSid || "global") + "?")) return;
+          try {
+            localStorage.removeItem(keyFor(currentSid));
+          } catch (e) {}
+          pad.value = "";
+          saved.textContent = "cleared";
+        });
+
+        // Accept the active sid from the parent RCC window via postMessage.
+        // The parent should post { type: "rcc.session", sid: "..." } whenever
+        // the active session changes. We only trust messages with that shape.
+        window.addEventListener("message", function (ev) {
+          var d = ev && ev.data;
+          if (!d || typeof d !== "object") return;
+          if (d.type === "rcc.session" && typeof d.sid === "string") {
+            if (d.sid !== currentSid) {
+              currentSid = d.sid;
+              render();
+            }
+          }
+        });
+
+        // Let the parent know we're ready for session updates.
+        try {
+          window.parent.postMessage({ type: "rcc.plugin.ready", pluginId: "scratchpad" }, "*");
+        } catch (e) {}
+
+        render();
+      })();
+    </script>
+  </body>
+</html>

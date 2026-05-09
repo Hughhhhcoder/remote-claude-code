@@ -1,0 +1,7 @@
+{
+  "id": "git-status",
+  "name": "Git Status",
+  "version": "1.0.0",
+  "entry": "index.ts",
+  "permissions": ["session:read", "broadcast"]
+}

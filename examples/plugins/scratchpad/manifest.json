@@ -1,0 +1,8 @@
+{
+  "id": "scratchpad",
+  "name": "Scratchpad",
+  "version": "1.0.0",
+  "entry": "index.ts",
+  "ui": "public",
+  "permissions": []
+}
