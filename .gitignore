@@ -7,3 +7,4 @@ release
 .env.local
 .rcc-state/
 soak-logs/
+.agent-reports/
