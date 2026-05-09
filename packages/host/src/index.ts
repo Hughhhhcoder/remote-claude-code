@@ -14,7 +14,8 @@ import {
   PermissionMode as PermissionModeSchema,
 } from "@rcc/protocol";
 import { SessionRegistry, type Session } from "./session.ts";
-import { CloudflaredTunnel } from "./tunnel.ts";
+import { startTunnel, type Tunnel } from "./tunnel.ts";
+import { loadConfig, resolveTunnelConfig } from "./config.ts";
 import { TrustStore, PairingCodes, type PairedDevice } from "./trust.ts";
 import { handlePairRoute } from "./pair.ts";
 import { listMcp, getMcp, addMcp, removeMcp, setMcpEnabled } from "./mcp.ts";
@@ -51,6 +52,7 @@ import {
 import { listHooks, writeHook, deleteHook, testHook } from "./hooks.ts";
 import { ls as fsLs, read as fsRead, statEntry as fsStat } from "./fs.ts";
 import { ApprovalWatcher } from "./approvals.ts";
+import { PushService, type PushPayload } from "./push.ts";
 
 interface WsState {
   attached: Set<string>;
@@ -62,9 +64,8 @@ const CLAUDE_COMMAND = process.env.RCC_CLAUDE_CMD ?? "claude";
 const CLAUDE_ARGS = (process.env.RCC_CLAUDE_ARGS ?? "").split(" ").filter(Boolean);
 const PORT = Number(process.env.RCC_PORT ?? 7777);
 const DEFAULT_CWD = process.env.RCC_CWD ?? process.cwd();
-const TUNNEL_ENABLED =
-  (process.env.RCC_TUNNEL ?? "").toLowerCase() === "1" ||
-  (process.env.RCC_TUNNEL ?? "").toLowerCase() === "true";
+const RCC_CONFIG = await loadConfig();
+const TUNNEL_CONFIG = resolveTunnelConfig(RCC_CONFIG, process.env);
 
 // Auth: every non-loopback connection must present a device token obtained
 // via the pairing flow. Set RCC_TRUST_LOOPBACK=0 to also require auth on
@@ -137,6 +138,7 @@ const DEFAULT_PERMISSION_MODE: PermissionMode = (() => {
 
 const trust = await TrustStore.load();
 const codes = new PairingCodes();
+const push = await PushService.load();
 
 function isLoopback(req: { socket: { remoteAddress?: string | undefined } }): boolean {
   const addr = req.socket.remoteAddress ?? "";
@@ -204,16 +206,40 @@ function broadcastApproval(frame: Frame): void {
       // ignore
     }
   }
+  // Side-effect: kick a Web Push on high-risk approval requests so users get
+  // a lock-screen nudge. Low/medium pass silently to avoid notification
+  // fatigue — the in-app approval sheet handles those.
+  if (frame.t === "approval.request" && frame.risk === "high") {
+    const title = "⚠ 高风险审批";
+    const body = `${frame.tool} · ${frame.summary}`.slice(0, 240);
+    void push.broadcast("all", {
+      title,
+      body,
+      tag: `approval-${frame.id}`,
+      data: { sid: frame.sid, id: frame.id, kind: "approval" },
+      requireInteraction: true,
+    });
+  }
 }
 
 function attachApprovalWatcher(session: Session): void {
   const watcher = new ApprovalWatcher(session, broadcastApproval);
   approvalWatchers.set(session.id, watcher);
   const unsub = session.subscribe((chunk) => watcher.feed(chunk.data));
-  session.onExit(() => {
+  session.onExit((code) => {
     unsub();
     watcher.dispose();
     approvalWatchers.delete(session.id);
+    // Push a one-shot "session ended" notification. Tag by sid so repeat
+    // exits (shouldn't happen, but) would dedupe in the OS tray.
+    const short = session.id.slice(0, 8);
+    const codeStr = code === null ? "signal" : `exit ${code}`;
+    void push.broadcast("all", {
+      title: "✓ 会话已结束",
+      body: `session ${short} · ${codeStr}`,
+      tag: `session-exit-${session.id}`,
+      data: { sid: session.id, kind: "session.exited" },
+    });
   });
 }
 
@@ -307,6 +333,48 @@ function handle(ws: WebSocket, state: WsState, frame: Frame): void {
       if (w) w.resolve(frame.id, frame.approve);
       return;
     }
+    case "push.public-key.request": {
+      send(ws, { v: 1, t: "push.public-key", key: push.getPublicKey() });
+      return;
+    }
+    case "push.subscribe": {
+      push
+        .subscribe({
+          endpoint: frame.endpoint,
+          keys: frame.keys,
+          deviceId: frame.deviceId ?? state.device?.id ?? null,
+        })
+        .then(() => send(ws, { v: 1, t: "push.subscribed", ok: true }))
+        .catch((err) => {
+          console.warn("[rcc-host] push.subscribe failed:", err?.message ?? err);
+          send(ws, { v: 1, t: "push.subscribed", ok: false });
+        });
+      return;
+    }
+    case "push.unsubscribe": {
+      push
+        .unsubscribe(frame.endpoint)
+        .then(() => send(ws, { v: 1, t: "push.unsubscribed" }))
+        .catch(() => send(ws, { v: 1, t: "push.unsubscribed" }));
+      return;
+    }
+    case "push.test": {
+      // Send only to subs for the current device so devs don't spam everyone.
+      const deviceId = state.device?.id;
+      const payload: PushPayload = {
+        title: "🔔 RCC 通知测试",
+        body: "如果你在锁屏/桌面看到这条,推送通道已就绪。",
+        tag: "push-test",
+        data: { kind: "test" },
+      };
+      if (deviceId) {
+        void push.broadcast([deviceId], payload);
+      } else {
+        // Loopback / unauthenticated — push to all subs.
+        void push.broadcast("all", payload);
+      }
+      return;
+    }
     case "device.list.request": {
       send(ws, {
         v: 1,
@@ -355,6 +423,9 @@ function handle(ws: WebSocket, state: WsState, frame: Frame): void {
             }
           }
         }
+        // Clean up push subscriptions tied to this device so we stop ringing
+        // a device we've just locked out.
+        void push.revokeDevice(frame.deviceId);
         broadcastDeviceList();
       });
       return;
@@ -1260,9 +1331,7 @@ httpServer.on("upgrade", (req, socket, head) => {
   });
 });
 
-const tunnel: CloudflaredTunnel | null = TUNNEL_ENABLED
-  ? new CloudflaredTunnel({ port: PORT })
-  : null;
+const tunnel: Tunnel | null = startTunnel(TUNNEL_CONFIG, PORT);
 
 function currentTunnelInfo(): TunnelInfo | undefined {
   if (!tunnel) return undefined;
@@ -1344,7 +1413,15 @@ httpServer.listen(PORT, () => {
   console.log(`[rcc-host] claude cmd: ${CLAUDE_COMMAND} ${CLAUDE_ARGS.join(" ")}`);
   console.log(`[rcc-host] cwd: ${DEFAULT_CWD}`);
   console.log(`[rcc-host] default permission mode: ${DEFAULT_PERMISSION_MODE}`);
-  console.log(`[rcc-host] tunnel: ${TUNNEL_ENABLED ? "enabled (cloudflared)" : "disabled"}`);
+  console.log(
+    `[rcc-host] tunnel: ${
+      TUNNEL_CONFIG.mode === "named"
+        ? `named (${TUNNEL_CONFIG.name} → ${TUNNEL_CONFIG.hostname})`
+        : TUNNEL_CONFIG.mode === "try"
+          ? "enabled (trycloudflare)"
+          : "disabled"
+    }`,
+  );
   console.log(`[rcc-host] web bundle: ${SERVE_WEB ? WEB_DIST : "not built (run `pnpm -F @rcc/web build`)"}`);
   console.log(
     `[rcc-host] auth: ${trust.devices().length} paired device(s)${TRUST_LOOPBACK ? ", loopback trusted" : ""}`,

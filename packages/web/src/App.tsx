@@ -11,6 +11,7 @@ import { MobileKeyBar } from "./MobileKeyBar.tsx";
 import { useIsMobile } from "./useIsMobile.ts";
 import { InstallPrompt } from "./InstallPrompt.tsx";
 import { PermissionApproval } from "./PermissionApproval.tsx";
+import { PushPrompt } from "./PushPrompt.tsx";
 import { clearToken, loadToken } from "./auth.ts";
 
 const FALLBACK_PINNED: readonly CommandSummary[] = [
@@ -198,6 +199,7 @@ export function App() {
             </div>
           </Show>
           <TunnelBadge info={tunnel()} />
+          <PushPrompt client={client} />
           <InstallPrompt />
           <StatusBadge status={status()} />
         </div>
@@ -418,10 +420,22 @@ function TunnelBadge(props: { info: TunnelInfo | null }) {
         <div class="flex items-center gap-1.5 text-xs">
           <Show when={info().state === "ready" && info().url}>
             <span class="w-1.5 h-1.5 rounded-full bg-violet-400 pulse-soft" />
+            <Show when={info().mode === "named"}>
+              <span
+                class="text-violet-300 text-[10px] font-medium"
+                title={`命名隧道 (${info().name ?? "?"})`}
+              >
+                🔒
+              </span>
+            </Show>
             <button
               onClick={copyUrl}
               class="text-violet-300 hover:text-violet-200 font-mono text-[11px] underline decoration-dotted"
-              title="点击复制公网地址"
+              title={
+                info().mode === "named"
+                  ? `命名隧道 · ${info().hostname ?? info().url} · 点击复制`
+                  : "TryCloudflare · 点击复制公网地址"
+              }
             >
               {info().url!.replace("https://", "")}
             </button>

@@ -74,6 +74,10 @@ export const TunnelInfo = z.object({
   url: z.string().nullable(),
   error: z.string().nullable(),
   startedAt: z.number().nullable(),
+  // [tunnel-config] named-tunnel metadata — optional so old hosts still parse.
+  mode: z.enum(["try", "named"]).optional(),
+  hostname: z.string().nullable().optional(),
+  name: z.string().nullable().optional(),
 });
 export type TunnelInfo = z.infer<typeof TunnelInfo>;
 
@@ -792,6 +796,144 @@ export const ApprovalCleared = z.object({
   sid: z.string(),
 });
 
+// [push] — filled by M3 batch 2
+//
+// Web Push: host owns a VAPID keypair (generated on first boot, persisted in
+// ~/.rcc/config.json with 0600), clients subscribe through the service worker
+// pushManager and send the subscription up via `push.subscribe`. The host
+// stores subs in ~/.rcc/push-subs.json and uses `web-push` to notify the
+// browser (which then invokes the SW's `push` event → showNotification,
+// which can wake the lock screen). The private VAPID key never leaves host.
+
+export const PushPublicKeyRequest = z.object({
+  ...base,
+  t: z.literal("push.public-key.request"),
+});
+
+export const PushPublicKey = z.object({
+  ...base,
+  t: z.literal("push.public-key"),
+  key: z.string(),
+});
+
+export const PushSubscribe = z.object({
+  ...base,
+  t: z.literal("push.subscribe"),
+  endpoint: z.string(),
+  keys: z.object({
+    p256dh: z.string(),
+    auth: z.string(),
+  }),
+  deviceId: z.string().optional(),
+});
+
+export const PushSubscribed = z.object({
+  ...base,
+  t: z.literal("push.subscribed"),
+  ok: z.boolean(),
+});
+
+export const PushUnsubscribe = z.object({
+  ...base,
+  t: z.literal("push.unsubscribe"),
+  endpoint: z.string(),
+});
+
+export const PushUnsubscribed = z.object({
+  ...base,
+  t: z.literal("push.unsubscribed"),
+});
+
+export const PushTest = z.object({
+  ...base,
+  t: z.literal("push.test"),
+});
+
+// [messages] — filled by M3 batch 2
+//
+// Claude Code CLI emits a rendered terminal byte stream (ANSI colors, cursor
+// control codes), not a structured event stream. To surface a "semantic chat"
+// view without re-authoring the CLI, the host runs a heuristic parser over
+// pty.out (see packages/host/src/chat-parser.ts) that strips ANSI, splits the
+// tail of the recent output into paragraphs, and classifies each one into one
+// of the segment kinds below. This is inherently lossy — tool invocations can
+// be missed, diffs can be mistaken for code, and only the most recent ~256KB
+// of output per session is retained. Clients must offer a fall-back to the
+// raw xterm view. A structured stream via the Claude Agent SDK is a M5 goal.
+//
+// A ChatMessage is a coherent unit from one role (user / assistant / system).
+// `segments` are ordered; rendering glues them bottom-up in the message card.
+
+export const ChatSegmentText = z.object({
+  kind: z.literal("text"),
+  content: z.string(),
+});
+export const ChatSegmentCode = z.object({
+  kind: z.literal("code"),
+  lang: z.string().optional(),
+  content: z.string(),
+});
+export const ChatSegmentDiff = z.object({
+  kind: z.literal("diff"),
+  path: z.string().optional(),
+  content: z.string(),
+});
+export const ChatSegmentToolUse = z.object({
+  kind: z.literal("tool_use"),
+  tool: z.string(),
+  input: z.string(),
+  output: z.string().optional(),
+  collapsed: z.boolean().default(true),
+});
+export const ChatSegment = z.discriminatedUnion("kind", [
+  ChatSegmentText,
+  ChatSegmentCode,
+  ChatSegmentDiff,
+  ChatSegmentToolUse,
+]);
+export type ChatSegment = z.infer<typeof ChatSegment>;
+
+export const ChatMessage = z.object({
+  id: z.string(),
+  sid: z.string(),
+  role: z.enum(["user", "assistant", "system"]),
+  segments: z.array(ChatSegment),
+  timestamp: z.number(),
+});
+export type ChatMessage = z.infer<typeof ChatMessage>;
+
+export const ChatListRequest = z.object({
+  ...base,
+  t: z.literal("chat.list.request"),
+  sid: z.string(),
+});
+
+export const ChatList = z.object({
+  ...base,
+  t: z.literal("chat.list"),
+  sid: z.string(),
+  messages: z.array(ChatMessage),
+});
+
+export const ChatAppend = z.object({
+  ...base,
+  t: z.literal("chat.append"),
+  sid: z.string(),
+  message: ChatMessage,
+});
+
+export const ChatReset = z.object({
+  ...base,
+  t: z.literal("chat.reset"),
+  sid: z.string(),
+});
+
+export const ChatResetted = z.object({
+  ...base,
+  t: z.literal("chat.resetted"),
+  sid: z.string(),
+});
+
 // [files] — filled by M4 batch 2
 
 export const FileEntry = z.object({
@@ -930,6 +1072,18 @@ export const Frame = z.discriminatedUnion("t", [
   ApprovalRequest,
   ApprovalResponse,
   ApprovalCleared,
+  ChatListRequest,
+  ChatList,
+  ChatAppend,
+  ChatReset,
+  ChatResetted,
+  PushPublicKeyRequest,
+  PushPublicKey,
+  PushSubscribe,
+  PushSubscribed,
+  PushUnsubscribe,
+  PushUnsubscribed,
+  PushTest,
 ]);
 export type Frame = z.infer<typeof Frame>;
 

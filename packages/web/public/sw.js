@@ -170,3 +170,64 @@ async function networkFirstHtml(req) {
 self.addEventListener("message", (event) => {
   if (event.data === "SKIP_WAITING") self.skipWaiting();
 });
+
+// ── Web Push ────────────────────────────────────────────────────────────────
+// Host-generated VAPID keypair signs each push. The payload is the JSON a
+// PushPayload shape: { title, body, tag?, data?, requireInteraction? }.
+// We always resolve to a notification so browsers (esp. Chrome on Android)
+// don't grumble about "silent pushes". Clicking the notification focuses an
+// existing RCC tab if there is one, otherwise opens the app shell.
+
+self.addEventListener("push", (event) => {
+  let data = { title: "RCC", body: "新通知" };
+  try {
+    if (event.data) {
+      const j = event.data.json();
+      if (j && typeof j === "object") data = j;
+    }
+  } catch {
+    try {
+      const text = event.data?.text?.();
+      if (text) data = { title: "RCC", body: text };
+    } catch {
+      // ignore
+    }
+  }
+
+  const title = data.title || "RCC";
+  const options = {
+    body: data.body || "",
+    icon: "/icon-192.png",
+    badge: "/icon-192.png",
+    tag: data.tag,
+    data: data.data ?? null,
+    requireInteraction: data.requireInteraction === true,
+  };
+  event.waitUntil(self.registration.showNotification(title, options));
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  event.waitUntil(
+    (async () => {
+      const all = await self.clients.matchAll({
+        type: "window",
+        includeUncontrolled: true,
+      });
+      for (const c of all) {
+        // Prefer an existing tab on same origin — no point in opening 5.
+        if ("focus" in c) {
+          try {
+            await c.focus();
+            return;
+          } catch {
+            // fall through
+          }
+        }
+      }
+      if (self.clients.openWindow) {
+        await self.clients.openWindow("/");
+      }
+    })(),
+  );
+});

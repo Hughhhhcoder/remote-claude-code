@@ -36,7 +36,7 @@
 | WebSocket / HTTP 认证 | 🟢 | 2026-05-09 | 非 loopback 连接必须带 `?token=` 或 `Authorization: Bearer`；loopback 默认信任（`RCC_TRUST_LOOPBACK=0` 关闭）；GET `/ws` 也会 401，用于客户端 probe |
 | 配对 UI | 🟢 | 2026-05-09 | 客户端 status 变 `unauthorized` 时自动显示配对页；输入码 + 设备名 → token 存 localStorage → 自动重连 |
 | 设备管理 UI + CLI | 🟢 | 2026-05-09 | Web 端 `已配对设备` 弹窗（重命名 / 吊销 / 当前设备标记）；`pnpm -F @rcc/host admin devices|revoke|rename` CLI；吊销即时断开活跃连接（close code 4401） |
-| 固定子域（命名隧道） | 🔴 | — | 需 CF 账号；写入 `~/.rcc/config.json` |
+| 固定子域（命名隧道） | 🟢 | 2026-05-09 | `~/.rcc/config.json` 读 `tunnel.{mode,name,hostname,credentialsFile}`；`RCC_TUNNEL=named` 启用；复用 `cloudflared tunnel run`；UI TunnelBadge 区分 try/named（🔒 前缀 + tooltip） |
 | Passkey (WebAuthn) | 🔴 | — | 目前用 32 字节随机 token，足以 M2；WebAuthn 延到 M5 |
 
 ## M3 · Mobile polish  🔴 planned
@@ -46,7 +46,7 @@
 | PWA 外壳 (manifest + SW) | 🟢 | 2026-05-09 | manifest + 手写 SW（static cache-first，HTML network-first，排除 ws/pair/health/tunnel）+ 📲 安装按钮（iOS Safari 提示手动 Share → Add to Home Screen） |
 | 语义化对话视图 | 🔴 | — | tool_use 卡片、diff 折叠、图片内联（替代纯 xterm） |
 | 权限审批专用页 | 🟢 | 2026-05-09 | host ApprovalWatcher 启发式扫描 pty.out 中 Claude 的 y/n 提示，按工具名分 low/medium/high 三档，广播 approval.request 帧;web 端专用审批卡片（移动底部 / 桌面 modal）;高风险按钮 500ms 防误触。Face ID/Touch ID 留待 M5 WebAuthn |
-| Web Push | 🔴 | — | VAPID，推权限弹窗到锁屏 |
+| Web Push | 🟢 | 2026-05-09 | web-push + VAPID 自动生成到 ~/.rcc/config.json;push-subs.json 订阅存储;SW push event → showNotification;高风险审批 + session.exited 触发推送;🔔 通知按钮一键开关 |
 | 虚拟键盘快捷键条（移动优化版） | 🟢 | 2026-05-09 | 移动端 sticky 底部键条,pinned commands + Esc/Tab/方向键/^C/Enter/斜杠,visualViewport 跟随键盘,safe-area-inset 适配刘海屏 |
 | 语音输入 | 🔴 | — | Web Speech API 优先，失败回退 Whisper API |
 
@@ -107,3 +107,5 @@
 - 2026-05-09  M3 batch 1 · MobileKeyBar: 移动端（≤767px）底部固定快捷键条,两行布局（pinned commands + Esc/Tab/↑↓/Enter/slash/^C/Shift+Tab）,visualViewport 跟随软键盘,safe-area-inset-bottom 适配,桌面 command bar 在移动端隐藏。
 - 2026-05-09  M3 batch 1 · 审批页: host ApprovalWatcher 启发式扫描 pty.out 捕获 Claude y/n 提示,按工具名三档分级(low/medium/high),新增 approval.{request,response,cleared} 帧,web 端底部滑出卡片(mobile)/居中 modal(desktop),高风险 500ms 防误触,30s 超时自动清除。
 - 2026-05-09  M3 batch 1 · PWA: manifest.webmanifest + 手写 sw.js（static cache-first，HTML network-first + offline shell，严格排除 /ws、/pair/*、/health、/tunnel 实时路径），gen-icons.mjs 纯 Node 生成 192/512/maskable PNG，顶栏 📲 安装按钮（beforeinstallprompt 捕获 → prompt；iOS Safari 展开 Share → Add to Home Screen 提示）。
+- 2026-05-09  M3 batch 2 · 命名隧道: 新增 `~/.rcc/config.json` (`loadConfig`/`resolveTunnelConfig`) 读 `tunnel.{mode,name,hostname,credentialsFile}`；`RCC_TUNNEL=named` 启用；`NamedCloudflaredTunnel` spawn `cloudflared tunnel --credentials-file ... --url http://localhost:<port> run <name>`,缺 credentials/cert.pem 打印友好 error 并回退到 TryCloudflare；protocol `TunnelInfo` 加 `mode/hostname/name`；UI TunnelBadge 在 named 模式显示 🔒 前缀与命名隧道 tooltip。
+- 2026-05-09  M3 batch 2 · Push: VAPID 首次启动生成存 `~/.rcc/config.json` (0600);`~/.rcc/push-subs.json` 订阅持久化;protocol `[push]` 六帧 (public-key(.request) / subscribe(d) / unsubscribe(d) / test);host 在 approvals 广播 + session.exited 时 push.broadcast("all",...) (仅高风险审批),device.revoke 同步清理订阅;sw.js 追加 push + notificationclick;App 顶栏 🔔 PushPrompt 一键开启/测试/关闭。
