@@ -1612,6 +1612,120 @@ export const GitExecResult = z.object({
 });
 
 
+// [activity] — M6 batch 10
+//
+// Host-side rolling feed of cross-session events (approvals / commits /
+// crashes / update.available / session_exit). Populated by the existing emit
+// sites (ApprovalWatcher, crash.ts, GitWatcher, version.ts, session.onExit)
+// with a single `activity.append` call; not persisted across host restarts.
+// Capped at 200 items, LRU shift on overflow. Clients pull the backlog once
+// via `activity.list.request` and then consume `activity.append` live.
+
+export const ActivityApproval = z.object({
+  kind: z.literal("approval"),
+  id: z.string(),
+  sid: z.string(),
+  risk: ApprovalRisk,
+  tool: z.string(),
+  summary: z.string(),
+  timestamp: z.number(),
+  status: z.enum(["pending", "resolved"]),
+});
+export const ActivityCommits = z.object({
+  kind: z.literal("commits"),
+  id: z.string(),
+  sid: z.string(),
+  count: z.number().int().nonnegative(),
+  subjects: z.array(z.string()),
+  timestamp: z.number(),
+});
+export const ActivityCrash = z.object({
+  kind: z.literal("crash"),
+  id: z.string(),
+  at: z.number(),
+  message: z.string(),
+  type: z.string().optional(),
+});
+export const ActivityUpdate = z.object({
+  kind: z.literal("update"),
+  id: z.string(),
+  latest: z.string(),
+  notes: z.string().optional(),
+  timestamp: z.number(),
+});
+export const ActivitySessionExit = z.object({
+  kind: z.literal("session_exit"),
+  id: z.string(),
+  sid: z.string(),
+  title: z.string(),
+  timestamp: z.number(),
+});
+export const ActivityItem = z.discriminatedUnion("kind", [
+  ActivityApproval,
+  ActivityCommits,
+  ActivityCrash,
+  ActivityUpdate,
+  ActivitySessionExit,
+]);
+export type ActivityItem = z.infer<typeof ActivityItem>;
+
+export const ActivityListRequest = z.object({
+  ...base,
+  t: z.literal("activity.list.request"),
+});
+export const ActivityList = z.object({
+  ...base,
+  t: z.literal("activity.list"),
+  items: z.array(ActivityItem),
+});
+export const ActivityAppend = z.object({
+  ...base,
+  t: z.literal("activity.append"),
+  item: ActivityItem,
+});
+
+// [recording] — M6 batch 10: asciinema-format session recording + playback.
+//
+// A Recorder owns an append-only `~/.rcc/recordings/<sid>.cast` file in
+// asciinema v2 format (header JSON line + `[t, "o", data]` JSONL). Start is
+// per-session opt-in from the client; the host also auto-stops on 50MB cap or
+// pty exit. The cast file itself is fetched over HTTP (authenticated) rather
+// than streamed through ws — keeps ws small and lets the browser cache.
+
+export const RecordingStatusData = z.object({
+  sid: z.string(),
+  recording: z.boolean(),
+  size: z.number().int().nonnegative(),
+  startedAt: z.number().nullable(),
+  hasFile: z.boolean(),
+  capped: z.boolean(),
+});
+export type RecordingStatusData = z.infer<typeof RecordingStatusData>;
+
+export const RecordStart = z.object({
+  ...base,
+  t: z.literal("record.start"),
+  sid: z.string(),
+});
+
+export const RecordStop = z.object({
+  ...base,
+  t: z.literal("record.stop"),
+  sid: z.string(),
+});
+
+export const RecordStatusRequest = z.object({
+  ...base,
+  t: z.literal("record.status.request"),
+  sid: z.string(),
+});
+
+export const RecordStatus = z.object({
+  ...base,
+  t: z.literal("record.status"),
+  status: RecordingStatusData,
+});
+
 // ──────────────────────────────────────────────────────────────────────────
 
 export const Frame = z.discriminatedUnion("t", [
@@ -1752,6 +1866,13 @@ export const Frame = z.discriminatedUnion("t", [
   GitCommitsFrame,
   GitExecRequest,
   GitExecResult,
+  ActivityListRequest,
+  ActivityList,
+  ActivityAppend,
+  RecordStart,
+  RecordStop,
+  RecordStatusRequest,
+  RecordStatus,
 ]);
 export type Frame = z.infer<typeof Frame>;
 

@@ -6,6 +6,7 @@ import type { PermissionMode, SessionMeta, SessionSummary } from "@rcc/protocol"
 import { RingBuffer } from "./ring-buffer.ts";
 import { ChatParser } from "./chat-parser.ts";
 import { SdkSession } from "./sdk-session.ts";
+import { Recorder } from "./recording.ts";
 
 const RING_TAIL_BYTES = 32 * 1024;
 
@@ -51,6 +52,11 @@ export class Session {
   private readonly listeners = new Set<SessionListener>();
   private readonly exitListeners = new Set<ExitListener>();
   private nextSeq = 0;
+  // [recording] Optional asciinema cast v2 writer. When non-null, every pty
+  // chunk is appended as a `[t, "o", data]` JSONL line. Opened by
+  // startRecording(); sealed on stopRecording(), session.exit, or hitting the
+  // 50MB cap (auto-stop).
+  private recorder: Recorder | null = null;
   // [messages] — heuristic semantic-chat parser. Feeds off pty output;
   // assistant messages surface via chat.append broadcasts in host/index.ts.
   readonly chat: ChatParser;
@@ -127,11 +133,20 @@ export class Session {
       for (const l of this.listeners) l(chunk);
       // [messages] keep the chat parser fed alongside the raw stream.
       this.chat.feedOutput(data);
+      // [recording] fan pty.out into the asciinema writer if active. We pass
+      // raw data (ANSI and all) — the whole point of a cast is byte fidelity.
+      if (this.recorder) this.recorder.write(data);
     });
 
     this.pty.onExit(({ exitCode }) => {
       this.status = "exited";
       this.exitCode = exitCode;
+      // Seal any open recording on process exit so the file is playable.
+      if (this.recorder) {
+        const r = this.recorder;
+        this.recorder = null;
+        void r.stop("exit");
+      }
       for (const l of this.exitListeners) l(exitCode);
     });
   }
@@ -183,6 +198,38 @@ export class Session {
    * can restore recent terminal state after a host restart. */
   ringTail(): string {
     return this.tailAccumulator.slice(-RING_TAIL_BYTES);
+  }
+
+  // [recording] start/stop asciinema cast writer for this session. start()
+  // rejects if already running; stop() is idempotent. The recorder instance
+  // is owned by the session and sealed automatically on pty exit.
+
+  async startRecording(title?: string): Promise<void> {
+    if (this.recorder) return;
+    const r = new Recorder(this.id, () => {
+      // Auto-stop on 50MB cap — drop reference so isRecording() returns false.
+      if (this.recorder === r) this.recorder = null;
+    });
+    await r.start({ cols: this.cols, rows: this.rows, title: title ?? displayCwd(this.cwd) });
+    this.recorder = r;
+  }
+
+  async stopRecording(): Promise<void> {
+    const r = this.recorder;
+    if (!r) return;
+    this.recorder = null;
+    await r.stop("user");
+  }
+
+  recordingStatus(): { recording: boolean; size: number; startedAt: number | null; capped: boolean } {
+    const r = this.recorder;
+    if (!r) return { recording: false, size: 0, startedAt: null, capped: false };
+    return {
+      recording: r.isRecording(),
+      size: r.getSize(),
+      startedAt: r.getStartedAt(),
+      capped: r.isCapped(),
+    };
   }
 
   meta(): SessionMeta {

@@ -32,6 +32,9 @@ import { SettingsModal } from "./SettingsModal.tsx";
 import { createPrefsStore, DEFAULT_CUSTOM_KEYS } from "./prefs.ts";
 import { ShareModal } from "./ShareModal.tsx";
 import { SharedReadonlyView } from "./SharedReadonlyView.tsx";
+import { RecordingPanel } from "./RecordingPanel.tsx";
+import { CommandPalette, type PaletteAction } from "./CommandPalette.tsx";
+import { InboxView, createInboxStore } from "./InboxView.tsx";
 
 function readShareTokenFromLocation(): string | null {
   try {
@@ -85,9 +88,11 @@ export function App() {
   const client = new RccClient({ url: defaultWsUrl(), token: loadToken() });
   const isMobile = useIsMobile();
   const prefsStore = createPrefsStore(client);
+  const inboxStore = createInboxStore(client);
   const [settingsOpen, setSettingsOpen] = createSignal(false);
   const [shareOpen, setShareOpen] = createSignal(false);
   const [shareSid, setShareSid] = createSignal<string | null>(null);
+  const [inboxOpen, setInboxOpen] = createSignal(false);
 
   const [sessions, setSessions] = createSignal<SessionMeta[]>([]);
   const [activeSid, setActiveSid] = createSignal<string | null>(null);
@@ -216,10 +221,22 @@ export function App() {
     return k.length > 0 ? k : [...DEFAULT_CUSTOM_KEYS];
   });
 
+  const paletteActions = createMemo<PaletteAction[]>(() => [
+    { id: "new-session", label: "新建会话", icon: "➕", hint: "New session", run: () => onNewSession() },
+    { id: "new-project", label: "新建项目", icon: "📂", hint: "New project", run: () => setNewProjectOpen(true) },
+    { id: "config", label: "打开 Claude Code 配置", icon: "⚙", hint: "Skills / MCP / Commands / Subagents / Hooks", run: () => setConfigOpen(true) },
+    { id: "market", label: "打开 Marketplace", icon: "🛍", hint: "Install skills & MCPs", run: () => setMarketOpen(true) },
+    { id: "settings", label: "打开外观设置", icon: "🎨", hint: "主题 / 键位 / 字体", run: () => setSettingsOpen(true) },
+    { id: "files", label: "切换文件浏览器", icon: "📁", hint: "Toggle file browser", run: () => setFileBrowserOpen((v) => !v) },
+    { id: "devices", label: "打开已配对设备", icon: "🔑", hint: "Devices", run: () => setDevicesOpen(true) },
+    { id: "projects", label: "管理项目", icon: "🗂", hint: "Projects", run: () => setProjectsModalOpen(true) },
+  ]);
+
   onCleanup(() => {
     unsubStatus();
     unsubFrame();
     prefsStore.dispose();
+    inboxStore.dispose();
     client.dispose();
   });
 
@@ -397,6 +414,18 @@ export function App() {
           </Show>
           <TunnelBadge info={tunnel()} />
           <PushPrompt client={client} />
+          <button
+            onClick={() => setInboxOpen(true)}
+            class="relative text-xs px-2 py-1 rounded-md border border-zinc-800 bg-zinc-900/60 hover:bg-zinc-800/80 hover:border-accent-500/50 text-zinc-300 hover:text-accent-300 transition"
+            title="Inbox 活动流"
+          >
+            📥
+            <Show when={inboxStore.unread() > 0}>
+              <span class="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full bg-accent-500 text-[9px] font-bold leading-4 text-white text-center">
+                {inboxStore.unread() > 99 ? "99+" : inboxStore.unread()}
+              </span>
+            </Show>
+          </button>
           <VersionBadge client={client} />
           <MetricsPanel client={client} />
           <InstallPrompt />
@@ -657,8 +686,9 @@ export function App() {
                         : "▶ 终端"}
                   </button>
                 </div>
-                <div class="text-[11px] text-zinc-500 shrink-0">
-                  {activeSession()?.cols}×{activeSession()?.rows}
+                <div class="flex items-center gap-2 text-[11px] text-zinc-500 shrink-0">
+                  <RecordingPanel client={client} sid={activeSid()} />
+                  <span class="text-zinc-700">{activeSession()?.cols}×{activeSession()?.rows}</span>
                 </div>
               </div>
 
@@ -777,6 +807,22 @@ export function App() {
         onClose={() => setShareOpen(false)}
       />
       <PermissionApproval client={client} device={currentDevice()} />
+      <InboxView
+        store={inboxStore}
+        open={inboxOpen()}
+        onClose={() => setInboxOpen(false)}
+        handlers={{
+          jumpToSid: (sid) => setActiveSid(sid),
+          jumpToSidWithApproval: (sid) => setActiveSid(sid),
+        }}
+      />
+      <CommandPalette
+        client={client}
+        sessions={sessions()}
+        activeSid={activeSid()}
+        actions={paletteActions()}
+        onActivateSession={(sid) => setActiveSid(sid)}
+      />
       <Show when={isMobile() && activeSid()}>
         <MobileKeyBar
           client={client}

@@ -1,6 +1,6 @@
 import { createServer } from "node:http";
 import { readFile, stat } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { existsSync, createReadStream } from "node:fs";
 import { extname, join, normalize, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { WebSocketServer, WebSocket } from "ws";
@@ -95,6 +95,14 @@ import { metrics } from "./metrics.ts";
 import { ShareStore } from "./shares.ts";
 import { GitWatcher } from "./git-watcher.ts";
 import { runGit, isReadOnlyGitArgs, getStatus as getGitStatus } from "./git.ts";
+import { ActivityFeed } from "./activity.ts";
+import {
+  recordingPathFor,
+  recordingFileExists,
+  recordingFileSize,
+  deleteRecording,
+} from "./recording.ts";
+import { randomUUID } from "node:crypto";
 
 interface WsState {
   attached: Set<string>;
@@ -311,6 +319,12 @@ metrics.start();
 // before the ws server exists.
 const approvalWatchers = new Map<string, ApprovalWatcher>();
 
+// [activity] cross-session rolling event feed. Capped at 200, not persisted.
+// Populated by approvals / crash / git.commits / version.check / session.exit
+// emit sites via a single `activity.append` call. Clients pull the backlog
+// with `activity.list.request` and then consume live `activity.append`.
+const activity = new ActivityFeed((frame) => broadcast(frame));
+
 function broadcastApproval(frame: Frame): void {
   for (const client of wss.clients) {
     if (client.readyState !== WebSocket.OPEN) continue;
@@ -321,6 +335,22 @@ function broadcastApproval(frame: Frame): void {
     } catch {
       // ignore
     }
+  }
+  // [activity] Mirror approval lifecycle into the inbox feed so Inbox 📥 sees
+  // pending / resolved items without subscribing to approval.* directly.
+  if (frame.t === "approval.request") {
+    activity.append({
+      kind: "approval",
+      id: frame.id,
+      sid: frame.sid,
+      risk: frame.risk,
+      tool: frame.tool,
+      summary: frame.summary,
+      timestamp: frame.timestamp,
+      status: "pending",
+    });
+  } else if (frame.t === "approval.cleared") {
+    activity.resolveApproval(frame.id);
   }
   // Side-effect: kick a Web Push on high-risk approval requests so users get
   // a lock-screen nudge. Low/medium pass silently to avoid notification
@@ -347,6 +377,13 @@ function attachApprovalWatcher(session: AnySession): void {
     session.onExit((code) => {
       const short = session.id.slice(0, 8);
       const codeStr = code === null ? "signal" : `exit ${code}`;
+      activity.append({
+        kind: "session_exit",
+        id: randomUUID(),
+        sid: session.id,
+        title: session.meta().title ?? short,
+        timestamp: Date.now(),
+      });
       void push.broadcast("all", {
         title: "✓ 会话已结束",
         body: `session ${short} · ${codeStr}`,
@@ -381,6 +418,13 @@ function attachApprovalWatcher(session: AnySession): void {
     // exits (shouldn't happen, but) would dedupe in the OS tray.
     const short = session.id.slice(0, 8);
     const codeStr = code === null ? "signal" : `exit ${code}`;
+    activity.append({
+      kind: "session_exit",
+      id: randomUUID(),
+      sid: session.id,
+      title: session.meta().title ?? short,
+      timestamp: Date.now(),
+    });
     void push.broadcast("all", {
       title: "✓ 会话已结束",
       body: `session ${short} · ${codeStr}`,
@@ -486,6 +530,14 @@ function attachGitWatcher(session: AnySession): void {
     },
     onCommits: (commits) => {
       broadcast({ v: 1, t: "git.commits", sid: session.id, commits });
+      activity.append({
+        kind: "commits",
+        id: `commits-${session.id}-${commits[0]!.hash}`,
+        sid: session.id,
+        count: commits.length,
+        subjects: commits.slice(0, 10).map((c) => c.subject),
+        timestamp: Date.now(),
+      });
       const lines = commits
         .slice(0, 20)
         .map((c) => `${c.hash}  ${c.subject}`)
@@ -2006,6 +2058,59 @@ function handle(ws: WebSocket, state: WsState, frame: Frame): void {
         });
       return;
     }
+    case "activity.list.request": {
+      send(ws, { v: 1, t: "activity.list", items: activity.list() });
+      return;
+    }
+    case "record.start": {
+      const s = registry.get(frame.sid);
+      if (!(s instanceof Session)) {
+        send(ws, {
+          v: 1,
+          t: "error",
+          code: "record_unsupported",
+          message: "only CLI (pty) sessions are recordable",
+          sid: frame.sid,
+        });
+        return;
+      }
+      s.startRecording(s.meta().title)
+        .then(() => broadcastRecordingStatus(frame.sid))
+        .catch((err) => {
+          send(ws, {
+            v: 1,
+            t: "error",
+            code: "record_start_failed",
+            message: err?.message ?? String(err),
+            sid: frame.sid,
+          });
+        });
+      return;
+    }
+    case "record.stop": {
+      const s = registry.get(frame.sid);
+      if (!(s instanceof Session)) {
+        // still honour the request — send a status frame so the UI settles.
+        void sendRecordingStatus(ws, frame.sid);
+        return;
+      }
+      s.stopRecording()
+        .then(() => broadcastRecordingStatus(frame.sid))
+        .catch((err) => {
+          send(ws, {
+            v: 1,
+            t: "error",
+            code: "record_stop_failed",
+            message: err?.message ?? String(err),
+            sid: frame.sid,
+          });
+        });
+      return;
+    }
+    case "record.status.request": {
+      void sendRecordingStatus(ws, frame.sid);
+      return;
+    }
     default:
       return;
   }
@@ -2013,6 +2118,33 @@ function handle(ws: WebSocket, state: WsState, frame: Frame): void {
 
 function broadcastMcpList(servers: Parameters<typeof listMcp> extends any ? Awaited<ReturnType<typeof listMcp>> : never): void {
   broadcastFiltered({ v: 1, t: "mcp.list", servers });
+}
+
+async function buildRecordingStatus(sid: string): Promise<import("@rcc/protocol").RecordingStatusData> {
+  const s = registry.get(sid);
+  const live = s instanceof Session ? s.recordingStatus() : null;
+  const hasFile = await recordingFileExists(sid);
+  const fileSize = hasFile ? await recordingFileSize(sid) : 0;
+  return {
+    sid,
+    recording: !!live?.recording,
+    // Prefer live in-memory byte count while recording (file is buffered by the
+    // OS write stream) — falls back to on-disk size once sealed.
+    size: live?.recording ? live.size : fileSize,
+    startedAt: live?.startedAt ?? null,
+    hasFile,
+    capped: !!live?.capped,
+  };
+}
+
+async function sendRecordingStatus(ws: WebSocket, sid: string): Promise<void> {
+  const status = await buildRecordingStatus(sid);
+  send(ws, { v: 1, t: "record.status", status });
+}
+
+async function broadcastRecordingStatus(sid: string): Promise<void> {
+  const status = await buildRecordingStatus(sid);
+  broadcastFiltered({ v: 1, t: "record.status", status });
 }
 
 function broadcastPinned(): void {
@@ -2413,6 +2545,63 @@ const httpServer = createServer(async (req, res) => {
     return;
   }
 
+  // [recording] GET /recording/<sid>.cast streams the asciinema v2 file for
+  // playback, DELETE /recording/<sid> removes it. Both require a valid device
+  // token; loopback is trusted the same as every other endpoint. The sid is
+  // sanitised against traversal before it ever touches the filesystem.
+  {
+    const recUrl = req.url ?? "";
+    const mGet = /^\/recording\/([A-Za-z0-9_-]+)\.cast(?:\?.*)?$/.exec(recUrl);
+    const mDel = /^\/recording\/([A-Za-z0-9_-]+)(?:\?.*)?$/.exec(recUrl);
+    if (mGet && req.method === "GET") {
+      const auth = authenticate(req);
+      if (!auth.ok) {
+        res.writeHead(401, {
+          "content-type": "application/json",
+          "x-rcc-auth-reason": auth.reason,
+        });
+        res.end(JSON.stringify({ error: auth.reason }));
+        return;
+      }
+      const sid = mGet[1]!;
+      const path = recordingPathFor(sid);
+      try {
+        const st = await stat(path);
+        res.writeHead(200, {
+          "content-type": "application/x-asciicast; charset=utf-8",
+          "content-length": String(st.size),
+          "cache-control": "no-store",
+        });
+        const stream = createReadStream(path);
+        stream.pipe(res);
+        stream.on("error", () => {
+          if (!res.writableEnded) res.end();
+        });
+      } catch {
+        res.writeHead(404, { "content-type": "application/json" });
+        res.end(JSON.stringify({ error: "recording not found" }));
+      }
+      return;
+    }
+    if (mDel && req.method === "DELETE" && !recUrl.endsWith(".cast")) {
+      const auth = authenticate(req);
+      if (!auth.ok) {
+        res.writeHead(401, {
+          "content-type": "application/json",
+          "x-rcc-auth-reason": auth.reason,
+        });
+        res.end(JSON.stringify({ error: auth.reason }));
+        return;
+      }
+      const sid = mDel[1]!;
+      const ok = await deleteRecording(sid);
+      res.writeHead(ok ? 200 : 404, { "content-type": "application/json" });
+      res.end(JSON.stringify(ok ? { ok: true } : { error: "not found" }));
+      if (ok) void broadcastRecordingStatus(sid);
+      return;
+    }
+  }
+
   // WebAuthn: passkey registration + high-risk approval assertion. Both
   // require a valid device token; the RP ID is derived from the Host header
   // so the host works on both `localhost` and a cloudflared hostname.
@@ -2643,8 +2832,44 @@ if (typeof metricsTickTimer === "object" && metricsTickTimer && "unref" in metri
 
 installCrashHandler((frame) => {
   metrics.incr("crashes");
+  activity.append({
+    kind: "crash",
+    id: `crash-${frame.at}`,
+    at: frame.at,
+    message: frame.message,
+    type: frame.type,
+  });
   broadcast(frame);
 });
+
+// [activity] Periodic update probe — once at boot + every 6h. Only emits an
+// item when the latest version differs from the last one we announced, so
+// the inbox doesn't fill with repeats.
+let lastAnnouncedUpdate: string | null = null;
+async function probeUpdate(): Promise<void> {
+  try {
+    const r = await checkForUpdates(false);
+    if (r.configured && "available" in r && r.available && r.latest !== lastAnnouncedUpdate) {
+      lastAnnouncedUpdate = r.latest;
+      activity.append({
+        kind: "update",
+        id: `update-${r.latest}`,
+        latest: r.latest,
+        notes: r.notes,
+        timestamp: Date.now(),
+      });
+    }
+  } catch {
+    // ignore — best-effort
+  }
+}
+void probeUpdate();
+const updateProbeTimer = setInterval(() => {
+  void probeUpdate();
+}, 6 * 60 * 60 * 1000);
+if (typeof updateProbeTimer === "object" && updateProbeTimer && "unref" in updateProbeTimer) {
+  (updateProbeTimer as { unref: () => void }).unref();
+}
 
 // [shares] Sweep expired / revoked share ws every 30s. The host also
 // re-verifies against the ShareStore so an external revoke (file edit or
