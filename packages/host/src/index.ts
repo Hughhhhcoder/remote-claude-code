@@ -93,6 +93,7 @@ import {
 import { PrefsStore } from "./prefs.ts";
 import { metrics } from "./metrics.ts";
 import { ShareStore } from "./shares.ts";
+import { WorkflowStore } from "./workflows.ts";
 import { GitWatcher } from "./git-watcher.ts";
 import { runGit, isReadOnlyGitArgs, getStatus as getGitStatus } from "./git.ts";
 import { ActivityFeed } from "./activity.ts";
@@ -197,6 +198,7 @@ const codes = new PairingCodes();
 const push = await PushService.load();
 const prefs = await PrefsStore.load();
 const shares = await ShareStore.load();
+const workflows = await WorkflowStore.load();
 await ensureSodiumReady();
 const hostKeys = await loadOrCreateHostKeys();
 const webauthn = new WebAuthnService(trust);
@@ -2109,6 +2111,58 @@ function handle(ws: WebSocket, state: WsState, frame: Frame): void {
     }
     case "record.status.request": {
       void sendRecordingStatus(ws, frame.sid);
+      return;
+    }
+    case "workflow.list.request": {
+      send(ws, { v: 1, t: "workflow.list", workflows: workflows.list() });
+      return;
+    }
+    case "workflow.save": {
+      workflows
+        .save({
+          id: frame.id,
+          name: frame.name,
+          description: frame.description,
+          steps: frame.steps,
+        })
+        .then((wf) => {
+          send(ws, { v: 1, t: "workflow.saved", workflow: wf });
+          broadcastFiltered({ v: 1, t: "workflow.list", workflows: workflows.list() });
+        })
+        .catch((err) => {
+          send(ws, {
+            v: 1,
+            t: "error",
+            code: "workflow_save_failed",
+            message: err?.message ?? String(err),
+          });
+        });
+      return;
+    }
+    case "workflow.remove": {
+      workflows
+        .remove(frame.id)
+        .then((ok) => {
+          if (ok) {
+            send(ws, { v: 1, t: "workflow.removed", id: frame.id });
+            broadcastFiltered({ v: 1, t: "workflow.list", workflows: workflows.list() });
+          } else {
+            send(ws, {
+              v: 1,
+              t: "error",
+              code: "workflow_not_found",
+              message: `no workflow with id ${frame.id}`,
+            });
+          }
+        })
+        .catch((err) => {
+          send(ws, {
+            v: 1,
+            t: "error",
+            code: "workflow_remove_failed",
+            message: err?.message ?? String(err),
+          });
+        });
       return;
     }
     default:

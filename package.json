@@ -3,17 +3,23 @@
   "version": "0.1.0",
   "private": true,
   "description": "Remote Claude Code — 在任何网络下通过 Web 端稳定控制本地 Claude Code",
-  "workspaces": ["packages/*"],
+  "workspaces": [
+    "packages/*"
+  ],
   "scripts": {
     "postinstall": "node scripts/fix-node-pty.mjs",
     "dev": "pnpm --parallel -r dev",
     "dev:host": "pnpm --filter @rcc/host dev",
     "dev:web": "pnpm --filter @rcc/web dev",
     "build": "pnpm -r build",
-    "typecheck": "pnpm -r typecheck"
+    "typecheck": "pnpm -r typecheck",
+    "test:e2e": "pnpm -F @rcc/web build && playwright test --config tests/e2e/playwright.config.ts"
   },
   "packageManager": "pnpm@9.4.0",
   "engines": {
     "node": ">=20"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.59.1"
   }
 }

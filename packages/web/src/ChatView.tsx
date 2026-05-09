@@ -1,7 +1,8 @@
 import { createSignal, createEffect, onCleanup, For, Show } from "solid-js";
 import type { RccClient } from "./client.ts";
-import type { ChatMessage, ChatSegment } from "@rcc/protocol";
+import type { ChatMessage, ChatSegment, SessionMeta } from "@rcc/protocol";
 import { createSharedText, type SharedText } from "./crdt.ts";
+import { ContextInjector } from "./ContextInjector.tsx";
 import {
   startDictation,
   isSpeechSupported,
@@ -15,7 +16,7 @@ import {
 // diffs line-coloured, tool_use collapsed by default. See host/chat-parser.ts
 // for the (lossy) classification rules — clients should offer a terminal
 // fallback toggle, which App.tsx does.
-export function ChatView(props: { client: RccClient; sid: string }) {
+export function ChatView(props: { client: RccClient; sid: string; sessions?: SessionMeta[] }) {
   const [messages, setMessages] = createSignal<ChatMessage[]>([]);
   // [crdt] The input draft is a Y.Text synced across every client attached
   // to this sid (docId "input-draft"). Local edits propagate via onInput;
@@ -25,6 +26,7 @@ export function ChatView(props: { client: RccClient; sid: string }) {
   const [recording, setRecording] = createSignal(false);
   const [voiceMode, setVoiceMode] = createSignal<"speech" | "recorder" | null>(null);
   const [voiceError, setVoiceError] = createSignal<string | null>(null);
+  const [injectOpen, setInjectOpen] = createSignal(false);
   let voiceHandle: DictationHandle | null = null;
   let draftAtStart = "";
   let shared: SharedText | null = null;
@@ -202,6 +204,15 @@ export function ChatView(props: { client: RccClient; sid: string }) {
         <div class="flex flex-col gap-2 shrink-0">
           <button
             type="button"
+            class="px-3 py-2 rounded-lg text-base leading-none border bg-zinc-900 border-zinc-800 text-zinc-400 hover:text-zinc-200 hover:border-zinc-700 transition"
+            onClick={() => setInjectOpen(true)}
+            title="复用其他会话上下文"
+            aria-label="复用上下文"
+          >
+            📋
+          </button>
+          <button
+            type="button"
             class={`px-3 py-2 rounded-lg text-base leading-none border transition ${
               recording()
                 ? "bg-rose-600/90 border-rose-500 text-white animate-pulse"
@@ -229,6 +240,14 @@ export function ChatView(props: { client: RccClient; sid: string }) {
       </div>
       <Show when={voiceError()}>
         <div class="px-3 pb-2 text-[11px] text-rose-400">{voiceError()}</div>
+      </Show>
+      <Show when={injectOpen()}>
+        <ContextInjector
+          client={props.client}
+          activeSid={props.sid}
+          sessions={props.sessions ?? []}
+          onClose={() => setInjectOpen(false)}
+        />
       </Show>
     </div>
   );

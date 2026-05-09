@@ -6,62 +6,78 @@ import { CommandsTab } from "./CommandsTab.tsx";
 import { SubagentsTab } from "./SubagentsTab.tsx";
 import { HooksTab } from "./HooksTab.tsx";
 import { PermissionsTab } from "./PermissionsTab.tsx";
+import { WorkflowsTab } from "./WorkflowsTab.tsx";
+import type { WorkflowRunRequest } from "./workflow-runner.ts";
 
-type TabKey = "skills" | "mcp" | "commands" | "subagents" | "hooks" | "permissions";
+type TabKey = "skills" | "mcp" | "commands" | "subagents" | "hooks" | "permissions" | "workflows";
 
 interface TabSpec {
   key: TabKey;
   label: string;
   icon: string;
   accent: string;
-  render: (client: RccClient, activeSid: string | null) => JSX.Element;
+  render: (ctx: {
+    client: RccClient;
+    activeSid: string | null;
+    onRunWorkflow: (req: WorkflowRunRequest) => void;
+  }) => JSX.Element;
 }
 
-// Each batch (A/B/C) fills in its own tab component. Leaving empty stubs
-// here so the shell lands first without any feature work, and agents only
-// need to touch one file each.
 const TABS: readonly TabSpec[] = [
   {
     key: "skills",
     label: "Skills",
     icon: "✨",
     accent: "text-orange-400",
-    render: (client, activeSid) => <SkillsTab client={client} activeSid={activeSid} />,
+    render: (ctx) => <SkillsTab client={ctx.client} activeSid={ctx.activeSid} />,
   },
   {
     key: "mcp",
     label: "MCP Servers",
     icon: "🔌",
     accent: "text-sky-400",
-    render: (client) => <McpTab client={client} />,
+    render: (ctx) => <McpTab client={ctx.client} />,
   },
   {
     key: "commands",
     label: "Slash Commands",
     icon: "/",
     accent: "text-violet-400",
-    render: (client) => <CommandsTab client={client} />,
+    render: (ctx) => <CommandsTab client={ctx.client} />,
   },
   {
     key: "subagents",
     label: "Subagents",
     icon: "🤖",
     accent: "text-emerald-400",
-    render: (client) => <SubagentsTab client={client} />,
+    render: (ctx) => <SubagentsTab client={ctx.client} />,
   },
   {
     key: "hooks",
     label: "Hooks",
     icon: "⚡",
     accent: "text-rose-400",
-    render: (client) => <HooksTab client={client} />,
+    render: (ctx) => <HooksTab client={ctx.client} />,
   },
   {
     key: "permissions",
     label: "Permissions",
     icon: "🛡",
     accent: "text-amber-400",
-    render: (client) => <PermissionsTab client={client} />,
+    render: (ctx) => <PermissionsTab client={ctx.client} />,
+  },
+  {
+    key: "workflows",
+    label: "Workflows",
+    icon: "⚙",
+    accent: "text-teal-300",
+    render: (ctx) => (
+      <WorkflowsTab
+        client={ctx.client}
+        activeSid={ctx.activeSid}
+        onRun={ctx.onRunWorkflow}
+      />
+    ),
   },
 ] as const;
 
@@ -70,6 +86,7 @@ interface Props {
   client: RccClient;
   activeSid: string | null;
   onClose: () => void;
+  onRunWorkflow: (req: WorkflowRunRequest) => void;
 }
 
 /**
@@ -137,7 +154,13 @@ export function ConfigView(props: Props) {
               <For each={TABS}>
                 {(t) => (
                   <Show when={active() === t.key}>
-                    <div class="max-w-5xl mx-auto px-8 py-8">{t.render(props.client, props.activeSid)}</div>
+                    <div class="max-w-5xl mx-auto px-8 py-8">
+                      {t.render({
+                        client: props.client,
+                        activeSid: props.activeSid,
+                        onRunWorkflow: props.onRunWorkflow,
+                      })}
+                    </div>
                   </Show>
                 )}
               </For>
@@ -146,17 +169,5 @@ export function ConfigView(props: Props) {
         </div>
       </div>
     </Show>
-  );
-}
-
-function PlaceholderTab(props: { name: string; reason: string }) {
-  return (
-    <div>
-      <h1 class="text-2xl font-semibold mb-2">{props.name}</h1>
-      <div class="rounded-xl border border-dashed border-zinc-800 bg-zinc-900/40 p-10 text-center">
-        <div class="text-sm text-zinc-400">功能开发中 ({props.reason})</div>
-        <div class="text-xs text-zinc-600 mt-1">占位页，等待对应 agent 交付</div>
-      </div>
-    </div>
   );
 }

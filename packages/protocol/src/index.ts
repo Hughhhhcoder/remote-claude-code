@@ -1726,6 +1726,86 @@ export const RecordStatus = z.object({
   status: RecordingStatusData,
 });
 
+// [workflows] — M6 batch 11
+//
+// Users can save a named sequence of steps (prompts / slash commands / git /
+// wait) and trigger them as a single "workflow". Host just does CRUD on
+// ~/.rcc/workflows.json (0600) — execution lives entirely client-side so the
+// runner has access to the active session context (activeSid is a client
+// concept). Simplification: steps are fired back-to-back with a fixed delay;
+// the runner does NOT wait for Claude to finish responding between steps.
+
+export const WorkflowStepPrompt = z.object({
+  kind: z.literal("prompt"),
+  text: z.string().min(1).max(8000),
+});
+export const WorkflowStepSlash = z.object({
+  kind: z.literal("slash"),
+  name: z.string().min(1).max(128),
+});
+export const WorkflowStepGit = z.object({
+  kind: z.literal("git"),
+  args: z.array(z.string().max(512)).min(1).max(16),
+});
+export const WorkflowStepWait = z.object({
+  kind: z.literal("wait"),
+  seconds: z.number().min(0).max(600),
+});
+export const WorkflowStep = z.discriminatedUnion("kind", [
+  WorkflowStepPrompt,
+  WorkflowStepSlash,
+  WorkflowStepGit,
+  WorkflowStepWait,
+]);
+export type WorkflowStep = z.infer<typeof WorkflowStep>;
+
+export const Workflow = z.object({
+  id: z.string(),
+  name: z.string().min(1).max(64),
+  description: z.string().max(500).optional(),
+  steps: z.array(WorkflowStep).min(1).max(50),
+  createdAt: z.number(),
+});
+export type Workflow = z.infer<typeof Workflow>;
+
+export const WorkflowListRequest = z.object({
+  ...base,
+  t: z.literal("workflow.list.request"),
+});
+
+export const WorkflowList = z.object({
+  ...base,
+  t: z.literal("workflow.list"),
+  workflows: z.array(Workflow),
+});
+
+export const WorkflowSave = z.object({
+  ...base,
+  t: z.literal("workflow.save"),
+  id: z.string().optional(),
+  name: z.string().min(1).max(64),
+  description: z.string().max(500).optional(),
+  steps: z.array(WorkflowStep).min(1).max(50),
+});
+
+export const WorkflowSaved = z.object({
+  ...base,
+  t: z.literal("workflow.saved"),
+  workflow: Workflow,
+});
+
+export const WorkflowRemove = z.object({
+  ...base,
+  t: z.literal("workflow.remove"),
+  id: z.string(),
+});
+
+export const WorkflowRemoved = z.object({
+  ...base,
+  t: z.literal("workflow.removed"),
+  id: z.string(),
+});
+
 // ──────────────────────────────────────────────────────────────────────────
 
 export const Frame = z.discriminatedUnion("t", [
@@ -1873,6 +1953,12 @@ export const Frame = z.discriminatedUnion("t", [
   RecordStop,
   RecordStatusRequest,
   RecordStatus,
+  WorkflowListRequest,
+  WorkflowList,
+  WorkflowSave,
+  WorkflowSaved,
+  WorkflowRemove,
+  WorkflowRemoved,
 ]);
 export type Frame = z.infer<typeof Frame>;
 

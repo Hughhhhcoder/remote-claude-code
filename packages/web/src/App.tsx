@@ -35,6 +35,7 @@ import { SharedReadonlyView } from "./SharedReadonlyView.tsx";
 import { RecordingPanel } from "./RecordingPanel.tsx";
 import { CommandPalette, type PaletteAction } from "./CommandPalette.tsx";
 import { InboxView, createInboxStore } from "./InboxView.tsx";
+import { createWorkflowRunner, type WorkflowRunRequest } from "./workflow-runner.ts";
 
 function readShareTokenFromLocation(): string | null {
   try {
@@ -89,6 +90,7 @@ export function App() {
   const isMobile = useIsMobile();
   const prefsStore = createPrefsStore(client);
   const inboxStore = createInboxStore(client);
+  const workflowRunner = createWorkflowRunner(client);
   const [settingsOpen, setSettingsOpen] = createSignal(false);
   const [shareOpen, setShareOpen] = createSignal(false);
   const [shareSid, setShareSid] = createSignal<string | null>(null);
@@ -440,6 +442,11 @@ export function App() {
         </div>
       </div>
 
+      <WorkflowRunBar
+        state={workflowRunner.state()}
+        onStop={() => workflowRunner.stop()}
+      />
+
       {/* Main grid */}
       <div
         class="flex-1 grid"
@@ -696,7 +703,7 @@ export function App() {
               <div class="flex-1 min-h-0 relative">
                 <Show
                   when={viewMode() === "terminal" && activeSession()?.driver !== "sdk"}
-                  fallback={<ChatView client={client} sid={activeSid()!} />}
+                  fallback={<ChatView client={client} sid={activeSid()!} sessions={sessions()} />}
                 >
                   <TerminalView client={client} sid={activeSid()!} />
                 </Show>
@@ -789,6 +796,10 @@ export function App() {
         client={client}
         activeSid={activeSid()}
         onClose={() => setConfigOpen(false)}
+        onRunWorkflow={(req: WorkflowRunRequest) => {
+          workflowRunner.start(req);
+          setConfigOpen(false);
+        }}
       />
       <MarketplaceView
         open={marketOpen()}
@@ -1079,5 +1090,38 @@ function BranchChip(props: { status: GitStatusData }) {
         <span class="text-rose-400">↓{props.status.behind}</span>
       </Show>
     </span>
+  );
+}
+
+function WorkflowRunBar(props: {
+  state: import("./workflow-runner.ts").RunState | null;
+  onStop: () => void;
+}) {
+  return (
+    <Show when={props.state}>
+      {(s) => (
+        <div class="h-7 shrink-0 flex items-center gap-3 px-4 border-b border-teal-500/30 bg-gradient-to-r from-teal-500/10 via-teal-500/5 to-transparent text-[11px]">
+          <span class="text-teal-300">⏵</span>
+          <span class="text-zinc-300">
+            正在运行 workflow <span class="font-mono text-teal-200">{s().workflow.name}</span>
+          </span>
+          <span class="text-zinc-500 font-mono">
+            {s().index + 1}/{s().total}
+          </span>
+          <div class="flex-1 h-1 rounded bg-zinc-800 overflow-hidden max-w-48">
+            <div
+              class="h-full bg-teal-400 transition-[width]"
+              style={{ width: `${Math.round(((s().index + 1) / s().total) * 100)}%` }}
+            />
+          </div>
+          <button
+            onClick={props.onStop}
+            class="px-2 py-0.5 rounded border border-rose-500/40 text-rose-300 hover:bg-rose-500/10 text-[10px]"
+          >
+            中止
+          </button>
+        </div>
+      )}
+    </Show>
   );
 }
