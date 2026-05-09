@@ -22,4 +22,19 @@ export default defineConfig({
       },
     },
   },
+  build: {
+    sourcemap: false,
+    rollupOptions: {
+      output: {
+        manualChunks: (id) => {
+          if (id.includes("node_modules/monaco-editor")) return "monaco";
+          if (id.includes("node_modules/@xterm")) return "xterm";
+          if (id.includes("node_modules/yjs")) return "yjs";
+          if (id.includes("node_modules/libsodium-wrappers")) return "sodium";
+          if (id.includes("node_modules/@simplewebauthn")) return "webauthn";
+          return undefined;
+        },
+      },
+    },
+  },
 });

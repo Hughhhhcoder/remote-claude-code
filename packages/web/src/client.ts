@@ -5,7 +5,7 @@ import { loadE2EKey } from "./auth.ts";
 export type Listener = (frame: Frame) => void;
 export type StatusListener = (status: ConnStatus) => void;
 
-export type ConnStatus = "connecting" | "connected" | "closed" | "unauthorized" | "readonly";
+export type ConnStatus = "connecting" | "connected" | "closed" | "unauthorized" | "readonly" | "slow";
 
 export interface RccClientOptions {
   url: string;
@@ -236,6 +236,10 @@ export class RccClient {
       if (frame.t === "hello" || frame.t === "session.list") {
         this.sessions = frame.sessions;
       }
+      if (frame.t === "error" && frame.code === "backpressure") {
+        console.warn("[rcc] host signalled backpressure; non-critical frames being dropped");
+        if (this.status === "connected") this.setStatus("slow");
+      }
       if (frame.t === "hello") {
         if (frame.sharedReadonly) {
           this.sharedReadonly = true;
@@ -277,6 +281,24 @@ export class RccClient {
         // seq stream on both sides, so transient clock glitches self-heal.
         console.error("[rcc] e2e replay/skew rejected by host, reconnecting");
         this.setStatus("closed");
+        this.scheduleReconnect();
+        return;
+      }
+      if (ev.code === 1013) {
+        // Host closed us for backpressure; fast reconnect — the ring buffer
+        // on the host will replay anything we missed once we re-attach.
+        console.warn("[rcc] host closed for backpressure, fast reconnecting");
+        this.setStatus("closed");
+        this.reconnectAttempts = 0;
+        this.scheduleReconnect();
+        return;
+      }
+      if (ev.code === 1008) {
+        // Host closed us for rate limiting. Fast reconnect — not an auth
+        // problem, and the client is expected to back off naturally.
+        console.warn("[rcc] host closed for rate limit, fast reconnecting");
+        this.setStatus("closed");
+        this.reconnectAttempts = 0;
         this.scheduleReconnect();
         return;
       }

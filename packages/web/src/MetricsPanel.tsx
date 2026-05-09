@@ -170,6 +170,26 @@ function PanelBody(props: {
         <Counter label="replay rej" v={s().counters.replayRejects} warn={s().counters.replayRejects > 0} />
         <Counter label="decrypt fail" v={s().counters.decryptFails} warn={s().counters.decryptFails > 0} />
         <Counter label="auth fail" v={s().counters.authFails} warn={s().counters.authFails > 0} />
+        <Counter
+          label="bp drops"
+          v={s().counters.wsDropsBackpressure}
+          warn={s().counters.wsDropsBackpressure > 0}
+        />
+        <Counter
+          label="ratelimit drops"
+          v={s().counters.wsDropsRateLimit}
+          warn={s().counters.wsDropsRateLimit > 0}
+        />
+        <Counter
+          label="bp closes"
+          v={s().counters.wsClosesBackpressure}
+          warn={s().counters.wsClosesBackpressure > 0}
+        />
+        <Counter
+          label="ratelimit closes"
+          v={s().counters.wsClosesRateLimit}
+          warn={s().counters.wsClosesRateLimit > 0}
+        />
       </div>
     </>
   );

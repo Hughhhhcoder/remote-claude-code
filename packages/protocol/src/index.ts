@@ -1533,6 +1533,18 @@ export const HealthCrash = z.object({
   type: z.string().optional(),
 });
 
+// Watchdog soft-warning: host saw an anomalous metric (high RSS, too many
+// active handles, runaway session count, …) but is still alive. Clients
+// surface as a non-modal warning badge; kinds are free-form so new
+// categories can be added host-side without a protocol bump.
+export const HealthWarn = z.object({
+  ...base,
+  t: z.literal("health.warn"),
+  at: z.number(),
+  kind: z.string(),
+  details: z.record(z.string(), z.unknown()).optional(),
+});
+
 // [metrics] — observability panel
 //
 // MetricsCollector on host keeps a 60-sample rolling window (1s resolution)
@@ -1582,6 +1594,10 @@ export const MetricsSnapshot = z.object({
     replayRejects: z.number(),
     decryptFails: z.number(),
     authFails: z.number(),
+    wsDropsBackpressure: z.number(),
+    wsDropsRateLimit: z.number(),
+    wsClosesBackpressure: z.number(),
+    wsClosesRateLimit: z.number(),
   }),
 });
 export type MetricsSnapshot = z.infer<typeof MetricsSnapshot>;
@@ -2468,6 +2484,7 @@ export const Frame = z.discriminatedUnion("t", [
   MarketInstallPlugin,
   MarketPluginInstalled,
   HealthCrash,
+  HealthWarn,
   PrefsRequest,
   Prefs,
   PrefsUpdate,

@@ -206,6 +206,10 @@ export class SdkSession {
     for (const pending of this.inbox.splice(0)) {
       pending.reject(new Error("session closed"));
     }
+    this.pendingInputs.length = 0;
+    this.toolIndex.clear();
+    this.activeDeltas.clear();
+    this.inputBuffer = "";
     this.markExited(null);
   }
 

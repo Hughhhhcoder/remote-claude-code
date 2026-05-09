@@ -1,4 +1,4 @@
-import { createSignal, createMemo, onCleanup, onMount, For, Show } from "solid-js";
+import { createSignal, createMemo, lazy, onCleanup, onMount, For, Show } from "solid-js";
 import type {
   CommandSummary,
   GitStatusData,
@@ -23,7 +23,9 @@ import { PairingView } from "./PairingView.tsx";
 import { DevicesModal } from "./DevicesModal.tsx";
 import { ConfigView } from "./ConfigView.tsx";
 import { MarketplaceView } from "./MarketplaceView.tsx";
-import { FileBrowser } from "./FileBrowser.tsx";
+const FileBrowser = lazy(() =>
+  import("./FileBrowser.tsx").then((m) => ({ default: m.FileBrowser })),
+);
 import { NotebookView } from "./NotebookView.tsx";
 import { MobileKeyBar } from "./MobileKeyBar.tsx";
 import { useIsMobile } from "./useIsMobile.ts";
@@ -1205,6 +1207,10 @@ function StatusBadge(props: { status: ConnStatus }) {
       <Show when={props.status === "connected"}>
         <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 pulse-soft" />
         <span class="text-emerald-400">{t("status.connected")}</span>
+      </Show>
+      <Show when={props.status === "slow"}>
+        <span class="w-1.5 h-1.5 rounded-full bg-amber-400 pulse-soft" />
+        <span class="text-amber-400" title="host is applying backpressure — dropping non-critical frames">slow</span>
       </Show>
       <Show when={props.status === "connecting"}>
         <span class="w-1.5 h-1.5 rounded-full bg-amber-400 pulse-soft" />

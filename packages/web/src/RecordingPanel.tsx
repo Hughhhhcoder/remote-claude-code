@@ -1,8 +1,11 @@
-import { createSignal, createEffect, onCleanup, Show } from "solid-js";
+import { createSignal, createEffect, onCleanup, lazy, Show } from "solid-js";
 import type { RccClient } from "./client.ts";
 import type { RecordingStatusData } from "@rcc/protocol";
 import { loadToken } from "./auth.ts";
-import { RecordingPlayback } from "./RecordingPlayback.tsx";
+
+const RecordingPlayback = lazy(() =>
+  import("./RecordingPlayback.tsx").then((m) => ({ default: m.RecordingPlayback })),
+);
 
 interface Props {
   client: RccClient;

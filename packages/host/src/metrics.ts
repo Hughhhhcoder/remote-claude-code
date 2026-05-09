@@ -54,6 +54,10 @@ export interface MetricsSnapshot {
     replayRejects: number;
     decryptFails: number;
     authFails: number;
+    wsDropsBackpressure: number;
+    wsDropsRateLimit: number;
+    wsClosesBackpressure: number;
+    wsClosesRateLimit: number;
   };
 }
 
@@ -68,7 +72,11 @@ type CounterName =
   | "crashes"
   | "replay.rejects"
   | "decrypt.fails"
-  | "auth.fails";
+  | "auth.fails"
+  | "ws.drops.backpressure"
+  | "ws.drops.rate_limit"
+  | "ws.closes.backpressure"
+  | "ws.closes.rate_limit";
 
 class Series {
   private readonly buf: number[] = new Array(WINDOW).fill(0);
@@ -156,7 +164,16 @@ export class MetricsCollector {
       "chat.msgs",
     ];
     for (const n of names) this.series.set(n, new Series());
-    const ctrs = ["crashes", "replay.rejects", "decrypt.fails", "auth.fails"];
+    const ctrs = [
+      "crashes",
+      "replay.rejects",
+      "decrypt.fails",
+      "auth.fails",
+      "ws.drops.backpressure",
+      "ws.drops.rate_limit",
+      "ws.closes.backpressure",
+      "ws.closes.rate_limit",
+    ];
     for (const n of ctrs) this.counters.set(n, 0);
   }
 
@@ -168,7 +185,19 @@ export class MetricsCollector {
     this.wsStats = fn;
   }
 
-  incr(name: CounterName | "crashes" | "replay.rejects" | "decrypt.fails" | "auth.fails", n = 1): void {
+  incr(
+    name:
+      | CounterName
+      | "crashes"
+      | "replay.rejects"
+      | "decrypt.fails"
+      | "auth.fails"
+      | "ws.drops.backpressure"
+      | "ws.drops.rate_limit"
+      | "ws.closes.backpressure"
+      | "ws.closes.rate_limit",
+    n = 1,
+  ): void {
     const s = this.series.get(name as CounterName);
     if (s) {
       s.add(n);
@@ -245,6 +274,10 @@ export class MetricsCollector {
         replayRejects: this.counters.get("replay.rejects") ?? 0,
         decryptFails: this.counters.get("decrypt.fails") ?? 0,
         authFails: this.counters.get("auth.fails") ?? 0,
+        wsDropsBackpressure: this.counters.get("ws.drops.backpressure") ?? 0,
+        wsDropsRateLimit: this.counters.get("ws.drops.rate_limit") ?? 0,
+        wsClosesBackpressure: this.counters.get("ws.closes.backpressure") ?? 0,
+        wsClosesRateLimit: this.counters.get("ws.closes.rate_limit") ?? 0,
       },
     };
   }

@@ -84,6 +84,7 @@ import { PushService, type PushPayload } from "./push.ts";
 import { CrdtRelay, isUpdateTooLarge } from "./crdt.ts";
 import { WebAuthnService, rpIdFromHost, originFromReq } from "./webauthn.ts";
 import { installCrashHandler } from "./crash.ts";
+import { Watchdog } from "./watchdog.ts";
 import { checkForUpdates, versionSummary } from "./version.ts";
 import { Updater } from "./updater.ts";
 import {
@@ -119,16 +120,32 @@ import {
 } from "./federation.ts";
 import { PluginHost, PluginEventBus } from "./plugins.ts";
 import { handleRestRoute } from "./rest.ts";
+import {
+  BACKPRESSURE_DROP_THRESHOLD,
+  BACKPRESSURE_CLOSE_THRESHOLD,
+  WS_CLOSE_BACKPRESSURE,
+  WS_CLOSE_RATE_LIMIT,
+  createWsLimiters,
+  isCriticalFrame,
+  type WsLimiters,
+} from "./backpressure.ts";
 import { randomUUID } from "node:crypto";
 
 interface WsState {
   attached: Set<string>;
   unsubs: Map<string, () => void>;
+  /** Per-session exit-listener disposers so ws close doesn't leak session refs. */
+  exitUnsubs: Map<string, () => void>;
   device: PairedDevice | null;
   metricsSubscribed: boolean;
   /** When set, this connection is a share-token guest: read-only, pinned to
    * a single sid, no E2E, all mutation frames rejected. */
   share: { id: string; sid: string; expiresAt: number } | null;
+  /** Per-connection backpressure + rate-limiting state. */
+  limiters: WsLimiters;
+  /** Set true after we've emitted an error frame for current slow window;
+   * reset once bufferedAmount drops back under the drop threshold. */
+  bpNotified: boolean;
 }
 
 const CLAUDE_COMMAND = process.env.RCC_CLAUDE_CMD ?? "claude";
@@ -475,11 +492,7 @@ function broadcastApproval(frame: Frame): void {
     if (client.readyState !== WebSocket.OPEN) continue;
     const share = (client as E2EWebSocket).rccShare;
     if (share && !isFrameAllowedForShare(frame, share.sid)) continue;
-    try {
-      client.send(frameForClient(client as E2EWebSocket, frame));
-    } catch {
-      // ignore
-    }
+    sendToClient(client, frame);
   }
   // [activity] Mirror approval lifecycle into the inbox feed so Inbox 📥 sees
   // pending / resolved items without subscribing to approval.* directly.
@@ -906,26 +919,75 @@ function broadcastFiltered(frame: Frame): void {
     if (client.readyState !== WebSocket.OPEN) continue;
     const share = (client as E2EWebSocket).rccShare;
     if (share && !isFrameAllowedForShare(frame, share.sid)) continue;
-    try {
-      const payload = frameForClient(client as E2EWebSocket, frame);
-      client.send(payload);
-      metrics.incr("ws.bytes.out", Buffer.byteLength(payload, "utf8"));
-      metrics.incr("ws.msgs.out");
-    } catch {
-      // ignore
-    }
+    sendToClient(client, frame);
   }
 }
 
 function send(ws: WebSocket, frame: Frame): void {
   if (ws.readyState !== WebSocket.OPEN) return;
-  // Share guests only receive frames scoped to their sid. Drop anything else.
   const share = (ws as E2EWebSocket).rccShare;
   if (share && !isFrameAllowedForShare(frame, share.sid)) return;
+  sendToClient(ws, frame);
+}
+
+/**
+ * Core outbound send with per-connection backpressure + rate limiting.
+ *
+ * - If `bufferedAmount` > 10MB, close(1013) and drop; ring buffer will
+ *   replay lost pty.out on reconnect.
+ * - If `bufferedAmount` > 1MB OR outbound byte budget exhausted, drop
+ *   non-critical frames and emit a one-shot backpressure error so the UI
+ *   can badge "slow". Critical frames (hello/error/approval.request/
+ *   approval.cleared/update.ready) always go through.
+ */
+function sendToClient(ws: WebSocket, frame: Frame): void {
+  const state = wsStates.get(ws);
+  const critical = isCriticalFrame(frame.t);
   try {
+    const buffered = (ws as WebSocket & { bufferedAmount?: number }).bufferedAmount ?? 0;
+    if (buffered > BACKPRESSURE_CLOSE_THRESHOLD) {
+      metrics.incr("ws.closes.backpressure");
+      try {
+        ws.close(WS_CLOSE_BACKPRESSURE, "backpressure");
+      } catch {
+        // ignore
+      }
+      return;
+    }
+    if (!critical && buffered > BACKPRESSURE_DROP_THRESHOLD) {
+      metrics.incr("ws.drops.backpressure");
+      if (state && !state.bpNotified) {
+        state.bpNotified = true;
+        try {
+          const payload = frameForClient(ws as E2EWebSocket, {
+            v: 1,
+            t: "error",
+            code: "backpressure",
+            message: "client is slow; dropping non-critical frames",
+          });
+          ws.send(payload);
+          metrics.incr("ws.bytes.out", Buffer.byteLength(payload, "utf8"));
+          metrics.incr("ws.msgs.out");
+        } catch {
+          // ignore
+        }
+      }
+      return;
+    }
+    if (state && buffered <= BACKPRESSURE_DROP_THRESHOLD && state.bpNotified) {
+      state.bpNotified = false;
+    }
     const payload = frameForClient(ws as E2EWebSocket, frame);
+    const size = Buffer.byteLength(payload, "utf8");
+    if (!critical && state && !state.limiters.outboundBytes.tryConsume(size)) {
+      metrics.incr("ws.drops.rate_limit");
+      return;
+    }
+    if (critical && state) {
+      state.limiters.outboundBytes.tryConsume(size);
+    }
     ws.send(payload);
-    metrics.incr("ws.bytes.out", Buffer.byteLength(payload, "utf8"));
+    metrics.incr("ws.bytes.out", size);
     metrics.incr("ws.msgs.out");
   } catch (err) {
     console.error("[rcc-host] send error", err);
@@ -969,9 +1031,10 @@ function attach(ws: WebSocket, state: WsState, session: AnySession, since: numbe
   });
   state.unsubs.set(session.id, unsub);
 
-  session.onExit((code) => {
+  const unsubExit = session.onExit((code) => {
     send(ws, { v: 1, t: "session.exited", sid: session.id, code });
   });
+  state.exitUnsubs.set(session.id, unsubExit);
 }
 
 function auditCtx(_ws: WebSocket, state: WsState): { deviceId?: string; ip?: string } {
@@ -1251,6 +1314,12 @@ function handle(ws: WebSocket, state: WsState, frame: Frame): void {
         saver.cancel();
         saveDebouncers.delete(frame.sid);
       }
+      // Per-session in-memory state: drop so long-lived hosts don't accumulate
+      // unbounded entries across many create/close cycles.
+      chatBySid.delete(frame.sid);
+      sessionSummaries.delete(frame.sid);
+      usage.reset(frame.sid);
+      searchIndex.remove(frame.sid);
       void deleteSnapshot(frame.sid).catch(() => {});
       send(ws, { v: 1, t: "session.list", sessions: mergedSessionList() });
       audit.write({ kind: "session.close", ...auditCtx(ws, state), details: { sid: frame.sid } });
@@ -2301,11 +2370,7 @@ function handle(ws: WebSocket, state: WsState, frame: Frame): void {
         if (client === ws) continue;
         if (client.readyState !== WebSocket.OPEN) continue;
         if ((client as E2EWebSocket).rccShare) continue;
-        try {
-          client.send(frameForClient(client as E2EWebSocket, frame));
-        } catch {
-          // ignore
-        }
+        sendToClient(client, frame);
       }
       return;
     }
@@ -3024,24 +3089,18 @@ function broadcastDeviceList(): void {
     if (client.readyState !== WebSocket.OPEN) continue;
     if ((client as E2EWebSocket).rccShare) continue;
     const d = (client as E2EWebSocket).rccDevice;
-    try {
-      client.send(
-        frameForClient(client as E2EWebSocket, {
-          v: 1,
-          t: "device.list",
-          devices: trust.devices().map((x) => ({
-            id: x.id,
-            name: x.name,
-            createdAt: x.createdAt,
-            lastSeenAt: x.lastSeenAt,
-            userAgent: x.userAgent,
-            current: d?.id === x.id,
-          })),
-        }),
-      );
-    } catch {
-      // ignore
-    }
+    sendToClient(client, {
+      v: 1,
+      t: "device.list",
+      devices: trust.devices().map((x) => ({
+        id: x.id,
+        name: x.name,
+        createdAt: x.createdAt,
+        lastSeenAt: x.lastSeenAt,
+        userAgent: x.userAgent,
+        current: d?.id === x.id,
+      })),
+    });
   }
 }
 
@@ -3711,14 +3770,7 @@ function broadcast(frame: Frame): void {
     if (client.readyState !== WebSocket.OPEN) continue;
     const share = (client as E2EWebSocket).rccShare;
     if (share && !isFrameAllowedForShare(frame, share.sid)) continue;
-    try {
-      const payload = frameForClient(client as E2EWebSocket, frame);
-      client.send(payload);
-      metrics.incr("ws.bytes.out", Buffer.byteLength(payload, "utf8"));
-      metrics.incr("ws.msgs.out");
-    } catch {
-      // socket going away; ignore
-    }
+    sendToClient(client, frame);
   }
 }
 
@@ -3753,14 +3805,7 @@ const metricsTickTimer = setInterval(() => {
     if (client.readyState !== WebSocket.OPEN) continue;
     const st = wsStates.get(client);
     if (!st?.metricsSubscribed) continue;
-    try {
-      const payload = frameForClient(client as E2EWebSocket, frame);
-      client.send(payload);
-      metrics.incr("ws.bytes.out", Buffer.byteLength(payload, "utf8"));
-      metrics.incr("ws.msgs.out");
-    } catch {
-      // ignore
-    }
+    sendToClient(client, frame);
   }
 }, 2000);
 if (typeof metricsTickTimer === "object" && metricsTickTimer && "unref" in metricsTickTimer) {
@@ -3783,6 +3828,15 @@ installCrashHandler((frame) => {
     details: { message: frame.message, type: frame.type },
   });
 });
+
+// [watchdog] Sample RSS / active-handle count / session count every 60s and
+// broadcast `health.warn` when any exceeds its threshold. Non-fatal — the
+// host stays up; clients render a toast + badge so operators can intervene.
+const watchdog = new Watchdog({
+  sessionCount: () => registry.list().length,
+  broadcast: (frame) => broadcast(frame),
+});
+watchdog.start();
 
 // [activity] Periodic update probe — once at boot + every 6h. Only emits an
 // item when the latest version differs from the last one we announced, so
@@ -3908,9 +3962,12 @@ wss.on("connection", (ws) => {
   const state: WsState = {
     attached: new Set(),
     unsubs: new Map(),
+    exitUnsubs: new Map(),
     device,
     metricsSubscribed: false,
     share,
+    limiters: createWsLimiters(),
+    bpNotified: false,
   };
   wsStates.set(ws, state);
   if (device && !eWs.rccSharedKey) {
@@ -3966,6 +4023,16 @@ wss.on("connection", (ws) => {
 
     metrics.incr("ws.bytes.in", Buffer.byteLength(text, "utf8"));
     metrics.incr("ws.msgs.in");
+
+    if (!state.limiters.inboundFrames.tryConsume(1)) {
+      metrics.incr("ws.closes.rate_limit");
+      try {
+        ws.close(WS_CLOSE_RATE_LIMIT, "rate_limit");
+      } catch {
+        // ignore
+      }
+      return;
+    }
 
     // E2E: the outer message may be a secretbox envelope. Try to unwrap it
     // first. We still accept plaintext in two cases: (a) loopback/legacy
@@ -4049,6 +4116,8 @@ wss.on("connection", (ws) => {
   ws.on("close", () => {
     for (const unsub of state.unsubs.values()) unsub();
     state.unsubs.clear();
+    for (const unsub of state.exitUnsubs.values()) unsub();
+    state.exitUnsubs.clear();
     state.attached.clear();
     state.metricsSubscribed = false;
     wsStates.delete(ws);
@@ -4087,6 +4156,7 @@ process.on("SIGINT", () => {
   void Promise.allSettled(pending).then(() => {
     registry.closeAll();
     metrics.dispose();
+    watchdog.dispose();
     clearInterval(metricsTickTimer);
     process.exit(0);
   });
