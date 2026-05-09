@@ -1,7 +1,7 @@
 import { chmod, mkdir, readFile, readdir, rename, unlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import type { ChatMessage, SessionMeta, SessionSummary } from "@rcc/protocol";
+import type { ChatMessage, SessionMeta, SessionSummary, SessionUsage } from "@rcc/protocol";
 
 export interface SessionSnapshot {
   meta: SessionMeta & { lastActiveAt: number };
@@ -14,6 +14,12 @@ export interface SessionSnapshot {
    * single source of truth for clients.
    */
   summary?: SessionSummary;
+  /**
+   * Added in M6 batch 13: per-session usage accumulator. Only present for
+   * SDK-driver sessions; older snapshots / CLI sessions simply omit it.
+   * Mirrored onto `meta.usage` on load so the SessionMeta shape is uniform.
+   */
+  usage?: SessionUsage;
 }
 
 export const SESSIONS_DIR = join(homedir(), ".rcc", "sessions");
@@ -37,6 +43,19 @@ function isSummary(v: unknown): v is SessionSummary {
   );
 }
 
+function isUsage(v: unknown): v is SessionUsage {
+  if (!v || typeof v !== "object") return false;
+  const u = v as Partial<SessionUsage>;
+  return (
+    typeof u.inputTokens === "number" &&
+    typeof u.outputTokens === "number" &&
+    typeof u.cacheCreateTokens === "number" &&
+    typeof u.cacheReadTokens === "number" &&
+    typeof u.costUsd === "number" &&
+    typeof u.turns === "number"
+  );
+}
+
 async function ensureDir(): Promise<void> {
   await mkdir(SESSIONS_DIR, { recursive: true, mode: 0o700 });
 }
@@ -45,7 +64,13 @@ function trimSnapshot(snap: SessionSnapshot): SessionSnapshot {
   const chat = snap.chat.slice(-MAX_CHAT);
   let ringTail = snap.ringTail;
   if (ringTail.length > MAX_RING_TAIL) ringTail = ringTail.slice(-MAX_RING_TAIL);
-  let out: SessionSnapshot = { meta: snap.meta, chat, ringTail, summary: snap.summary };
+  let out: SessionSnapshot = {
+    meta: snap.meta,
+    chat,
+    ringTail,
+    summary: snap.summary,
+    usage: snap.usage,
+  };
   let buf = Buffer.byteLength(JSON.stringify(out), "utf8");
   // Fallback: drop older chat in chunks if a huge message still blows the cap.
   while (buf > MAX_FILE_BYTES && out.chat.length > 0) {
@@ -113,16 +138,23 @@ export async function loadAllSnapshots(): Promise<SessionSnapshot[]> {
         : isSummary((meta as SessionMeta).summary)
           ? ((meta as SessionMeta).summary as SessionSummary)
           : undefined;
+      const usage = isUsage(parsed.usage)
+        ? (parsed.usage as SessionUsage)
+        : isUsage((meta as SessionMeta).usage)
+          ? ((meta as SessionMeta).usage as SessionUsage)
+          : undefined;
       out.push({
         meta: {
           ...meta,
           lastActiveAt,
           status: "exited",
           ...(summary ? { summary } : {}),
+          ...(usage ? { usage } : {}),
         },
         chat,
         ringTail,
         ...(summary ? { summary } : {}),
+        ...(usage ? { usage } : {}),
       });
     } catch {
       // corrupt or unreadable — skip

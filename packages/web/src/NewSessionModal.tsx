@@ -5,6 +5,7 @@ import {
   type PermissionMode,
   type ProjectMeta,
   type SessionDriver,
+  type Starter,
 } from "@rcc/protocol";
 
 interface Props {
@@ -13,12 +14,14 @@ interface Props {
   defaultMode: PermissionMode;
   projects: ProjectMeta[];
   defaultProjectId: string | null;
+  starters: Starter[];
   onCancel: () => void;
   onConfirm: (opts: {
     cwd: string;
     permissionMode: PermissionMode;
     projectId: string | null;
     driver: SessionDriver;
+    starterId: string | null;
   }) => void;
 }
 
@@ -41,6 +44,7 @@ export function NewSessionModal(props: Props) {
   const [mode, setMode] = createSignal<PermissionMode>(props.defaultMode);
   const [projectId, setProjectId] = createSignal<string | null>(props.defaultProjectId);
   const [driver, setDriver] = createSignal<SessionDriver>("cli");
+  const [starterId, setStarterId] = createSignal<string | null>(null);
   // Track whether the user manually edited cwd, so switching projects doesn't
   // clobber an intentional override.
   const [cwdDirty, setCwdDirty] = createSignal(false);
@@ -51,6 +55,8 @@ export function NewSessionModal(props: Props) {
       setCwdDirty(false);
       setCwd("");
       setDriver("cli");
+      setStarterId(null);
+      setMode(props.defaultMode);
     }
   });
 
@@ -60,7 +66,17 @@ export function NewSessionModal(props: Props) {
     setCwd("");
   }
 
+  function pickStarter(id: string) {
+    setStarterId(id || null);
+    if (!id) return;
+    const s = props.starters.find((x) => x.id === id);
+    // Starter.permissionMode flips the mode picker so the user sees what's
+    // about to happen; they can still override.
+    if (s?.permissionMode) setMode(s.permissionMode);
+  }
+
   const activeProject = () => props.projects.find((p) => p.id === projectId()) ?? null;
+  const activeStarter = () => props.starters.find((s) => s.id === starterId()) ?? null;
 
   return (
     <Show when={props.open}>
@@ -75,6 +91,59 @@ export function NewSessionModal(props: Props) {
           </div>
 
           <div class="p-5 space-y-4">
+            <Show when={props.starters.length > 0}>
+              <div>
+                <label class="block text-[11px] uppercase tracking-widest text-zinc-500 mb-1.5">
+                  Starter (可选)
+                </label>
+                <select
+                  value={starterId() ?? ""}
+                  onChange={(e) => pickStarter(e.currentTarget.value)}
+                  class="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-100 outline-none focus:border-zinc-700"
+                >
+                  <option value="">(无 starter · 从头开始)</option>
+                  <For each={props.starters}>
+                    {(s) => (
+                      <option value={s.id}>
+                        {s.icon ? `${s.icon} ` : ""}
+                        {s.name}
+                        {s.builtin ? " · 内置" : ""}
+                      </option>
+                    )}
+                  </For>
+                </select>
+                <Show when={activeStarter()}>
+                  <div class="mt-1.5 px-3 py-2 rounded-lg border border-indigo-500/30 bg-indigo-500/5 text-[11px] text-indigo-200/80 leading-relaxed">
+                    <Show when={activeStarter()!.description}>
+                      <div class="mb-1">{activeStarter()!.description}</div>
+                    </Show>
+                    <div class="flex flex-wrap gap-1.5 text-[10px]">
+                      <Show when={activeStarter()!.systemPrompt}>
+                        <span class="px-1.5 py-0.5 rounded bg-indigo-500/20 border border-indigo-500/30">
+                          system prompt
+                        </span>
+                      </Show>
+                      <Show when={activeStarter()!.enableSkills?.length}>
+                        <span class="px-1.5 py-0.5 rounded bg-orange-500/20 border border-orange-500/30 text-orange-200">
+                          {activeStarter()!.enableSkills!.length} skills
+                        </span>
+                      </Show>
+                      <Show when={activeStarter()!.firstSteps?.length}>
+                        <span class="px-1.5 py-0.5 rounded bg-teal-500/20 border border-teal-500/30 text-teal-200">
+                          {activeStarter()!.firstSteps!.length} first steps
+                        </span>
+                      </Show>
+                      <Show when={activeStarter()!.permissionMode}>
+                        <span class="px-1.5 py-0.5 rounded bg-amber-500/20 border border-amber-500/30 text-amber-200">
+                          → {activeStarter()!.permissionMode}
+                        </span>
+                      </Show>
+                    </div>
+                  </div>
+                </Show>
+              </div>
+            </Show>
+
             <Show when={props.projects.length > 0}>
               <div>
                 <label class="block text-[11px] uppercase tracking-widest text-zinc-500 mb-1.5">
@@ -231,6 +300,7 @@ export function NewSessionModal(props: Props) {
                   permissionMode: mode(),
                   projectId: projectId(),
                   driver: driver(),
+                  starterId: starterId(),
                 })
               }
               class="px-4 py-1.5 rounded-lg bg-gradient-to-r from-orange-500 to-rose-500 text-white text-xs font-medium"

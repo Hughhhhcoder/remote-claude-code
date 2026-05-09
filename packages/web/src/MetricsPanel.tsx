@@ -1,5 +1,5 @@
 import { createSignal, createMemo, For, Show, onCleanup } from "solid-js";
-import type { MetricsSnapshot } from "@rcc/protocol";
+import type { MetricsSnapshot, SessionMeta } from "@rcc/protocol";
 import type { RccClient } from "./client.ts";
 
 /**
@@ -8,7 +8,7 @@ import type { RccClient } from "./client.ts";
  * numeric counters. No chart lib — sparklines are hand-rolled. Closing the
  * popover sends `metrics.unsubscribe` so the host stops ticking to this peer.
  */
-export function MetricsPanel(props: { client: RccClient }) {
+export function MetricsPanel(props: { client: RccClient; sessions?: SessionMeta[] }) {
   const [open, setOpen] = createSignal(false);
   const [snap, setSnap] = createSignal<MetricsSnapshot | null>(null);
 
@@ -30,6 +30,28 @@ export function MetricsPanel(props: { client: RccClient }) {
     }
   }
 
+  const usageTotals = createMemo(() => {
+    const list = props.sessions ?? [];
+    let input = 0;
+    let output = 0;
+    let cacheCreate = 0;
+    let cacheRead = 0;
+    let cost = 0;
+    let turns = 0;
+    let n = 0;
+    for (const s of list) {
+      if (!s.usage) continue;
+      n++;
+      input += s.usage.inputTokens;
+      output += s.usage.outputTokens;
+      cacheCreate += s.usage.cacheCreateTokens;
+      cacheRead += s.usage.cacheReadTokens;
+      cost += s.usage.costUsd;
+      turns += s.usage.turns;
+    }
+    return { input, output, cacheCreate, cacheRead, cost, turns, n };
+  });
+
   return (
     <div class="relative">
       <button
@@ -49,7 +71,7 @@ export function MetricsPanel(props: { client: RccClient }) {
             when={snap()}
             fallback={<div class="text-xs text-zinc-500">等待数据…</div>}
           >
-            <PanelBody snap={snap()!} />
+            <PanelBody snap={snap()!} usage={usageTotals()} />
           </Show>
         </div>
       </Show>
@@ -57,8 +79,20 @@ export function MetricsPanel(props: { client: RccClient }) {
   );
 }
 
-function PanelBody(props: { snap: MetricsSnapshot }) {
+function PanelBody(props: {
+  snap: MetricsSnapshot;
+  usage: {
+    input: number;
+    output: number;
+    cacheCreate: number;
+    cacheRead: number;
+    cost: number;
+    turns: number;
+    n: number;
+  };
+}) {
   const s = () => props.snap;
+  const u = () => props.usage;
   return (
     <>
       <SectionHeader label="Process" />
@@ -116,6 +150,18 @@ function PanelBody(props: { snap: MetricsSnapshot }) {
         <KV k="msgs out/s" v={String(s().ws.msgsOutPerSec)} />
         <KV k="subs" v={`${s().ws.subscribers}/${s().ws.connections}`} />
       </div>
+
+      <Show when={u().n > 0}>
+        <SectionHeader label="Usage (SDK sessions)" />
+        <div class="grid grid-cols-2 gap-x-3 gap-y-1 text-[11px]">
+          <KV k="↑ input" v={formatTokens(u().input)} />
+          <KV k="↓ output" v={formatTokens(u().output)} />
+          <KV k="cache create" v={formatTokens(u().cacheCreate)} />
+          <KV k="cache read" v={formatTokens(u().cacheRead)} />
+          <KV k="cost" v={`$${u().cost.toFixed(4)}`} />
+          <KV k="turns" v={`${u().turns} · ${u().n} sess`} />
+        </div>
+      </Show>
 
       <SectionHeader label="Counters" />
       <div class="grid grid-cols-2 gap-x-3 gap-y-1 text-[11px]">
@@ -221,6 +267,12 @@ function formatBytes(n: number): string {
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
   if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`;
   return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`;
+}
+
+function formatTokens(n: number): string {
+  if (n < 1000) return String(n);
+  if (n < 1_000_000) return `${(n / 1000).toFixed(n < 10_000 ? 1 : 0)}k`;
+  return `${(n / 1_000_000).toFixed(2)}M`;
 }
 
 function formatUptime(sec: number): string {

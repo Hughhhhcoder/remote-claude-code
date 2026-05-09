@@ -78,6 +78,21 @@ export const SessionSummary = z.object({
 });
 export type SessionSummary = z.infer<typeof SessionSummary>;
 
+// [usage] M6 batch 13: per-session token + cost accounting. Only populated
+// for SDK-driver sessions (the CLI driver doesn't surface structured usage).
+// Accumulated over every SDKResultMessage; persisted on the snapshot and
+// surfaced on SessionMeta so the sidebar can render ↑ / ↓ / $ without a
+// round-trip. cost is USD with 4-decimal precision.
+export const SessionUsage = z.object({
+  inputTokens: z.number().int().nonnegative(),
+  outputTokens: z.number().int().nonnegative(),
+  cacheCreateTokens: z.number().int().nonnegative(),
+  cacheReadTokens: z.number().int().nonnegative(),
+  costUsd: z.number().nonnegative(),
+  turns: z.number().int().nonnegative(),
+});
+export type SessionUsage = z.infer<typeof SessionUsage>;
+
 export const SessionMeta = z.object({
   id: z.string(),
   cwd: z.string(),
@@ -102,8 +117,78 @@ export const SessionMeta = z.object({
    * on session.exit or explicit summary.refresh.
    */
   summary: SessionSummary.optional(),
+  /**
+   * Added in M6 batch 13: per-session token + cost accumulator. Populated only
+   * for SDK-driver sessions; absent (undefined) for CLI-driver so clients know
+   * to skip the row rather than render zeros.
+   */
+  usage: SessionUsage.optional(),
+  /**
+   * Added in M8 federation: when present, this session belongs to a remote
+   * host peer. The local host prefixes remote sids with `<peerId>:` so they're
+   * globally unique. `peerLabel` + `peerColor` mirror the PeerInfo for UI
+   * grouping. Absent on native (local) sessions.
+   */
+  peerId: z.string().optional(),
+  peerLabel: z.string().optional(),
+  peerColor: z.string().optional(),
 });
 export type SessionMeta = z.infer<typeof SessionMeta>;
+
+// [federation] — M8
+//
+// A "peer" is another RCC host the local host connects to as a web client,
+// using a device token. Remote sessions are surfaced in the local sidebar
+// with their sids prefixed `<peerId>:`; pty.in to those sids is transparently
+// forwarded to the remote host's ws. Tokens grant full control of the remote
+// host — users must trust the network between peers.
+
+export const PeerInfo = z.object({
+  id: z.string().min(1).max(64),
+  url: z.string().min(1).max(512),
+  label: z.string().min(1).max(64),
+  color: z.string().max(32).optional(),
+  connected: z.boolean().default(false),
+  error: z.string().nullable().optional(),
+  sessionCount: z.number().int().nonnegative().optional(),
+});
+export type PeerInfo = z.infer<typeof PeerInfo>;
+
+export const PeerListRequest = z.object({
+  ...base,
+  t: z.literal("peer.list.request"),
+});
+
+export const PeerList = z.object({
+  ...base,
+  t: z.literal("peer.list"),
+  peers: z.array(PeerInfo),
+});
+
+export const PeerAdd = z.object({
+  ...base,
+  t: z.literal("peer.add"),
+  id: z.string().min(1).max(64),
+  url: z.string().min(1).max(512),
+  token: z.string().min(1).max(1024),
+  label: z.string().min(1).max(64),
+  color: z.string().max(32).optional(),
+});
+
+export const PeerRemove = z.object({
+  ...base,
+  t: z.literal("peer.remove"),
+  id: z.string(),
+});
+
+export const PeerStatus = z.object({
+  ...base,
+  t: z.literal("peer.status"),
+  peerId: z.string(),
+  connected: z.boolean(),
+  error: z.string().nullable().optional(),
+  sessionCount: z.number().int().nonnegative().optional(),
+});
 
 // [projects] — M4 batch 3
 //
@@ -252,6 +337,12 @@ export const SessionNew = z.object({
    * legacy clients keep spawning pty-backed sessions.
    */
   driver: SessionDriver.optional(),
+  /**
+   * Added in M6 batch 13: Starter kit id to apply to this session. Host
+   * stamps session.meta.starterId so the client knows to run bootstrap
+   * (skills enable + systemPrompt inject + firstSteps) on first attach.
+   */
+  starterId: z.string().optional(),
 });
 
 export const SessionCreated = z.object({
@@ -1495,6 +1586,17 @@ export const SummaryFrame = z.object({
   summary: SessionSummary.nullable(),
 });
 
+// [usage] M6 batch 13: broadcast on every SDK result_message as the running
+// counters update. SessionMeta.usage carries the same value (embedded for new
+// clients); this frame lets existing clients patch state without re-ingesting
+// the whole session.list.
+export const UsageSession = z.object({
+  ...base,
+  t: z.literal("usage.session"),
+  sid: z.string(),
+  usage: SessionUsage,
+});
+
 export const SearchRequest = z.object({
   ...base,
   t: z.literal("search.request"),
@@ -1938,6 +2040,77 @@ export const NotebookDeleted = z.object({
   sid: z.string(),
 });
 
+// [starters] — M6 batch 13
+//
+// "Session Starter Kit": a packaged systemPrompt + skills to enable + first
+// steps to run. Selected at NewSessionModal. Stored at `~/.rcc/starters.json`
+// (0600). Host only does CRUD; enabling skills, injecting the systemPrompt
+// and running firstSteps happens client-side (reusing workflow-runner) once
+// the session is created and attached. Host does stamp session.meta so
+// reconnects remember which starter was picked.
+//
+// `id` prefixes distinguish provenance: "builtin:*" seeds are hardcoded and
+// cannot be deleted but can be copied into a user starter. "user:*" entries
+// are user-owned and fully mutable.
+
+export const Starter = z.object({
+  id: z.string(),
+  name: z.string().min(1).max(64),
+  description: z.string().max(500).optional(),
+  systemPrompt: z.string().max(8000).optional(),
+  enableSkills: z.array(z.string()).max(32).optional(),
+  firstSteps: z.array(WorkflowStep).max(50).optional(),
+  permissionMode: PermissionMode.optional(),
+  icon: z.string().max(8).optional(),
+  color: z.string().max(32).optional(),
+  createdAt: z.number(),
+  builtin: z.boolean().optional(),
+});
+export type Starter = z.infer<typeof Starter>;
+
+export const StarterListRequest = z.object({
+  ...base,
+  t: z.literal("starter.list.request"),
+});
+
+export const StarterList = z.object({
+  ...base,
+  t: z.literal("starter.list"),
+  starters: z.array(Starter),
+});
+
+export const StarterSave = z.object({
+  ...base,
+  t: z.literal("starter.save"),
+  id: z.string().optional(),
+  name: z.string().min(1).max(64),
+  description: z.string().max(500).optional(),
+  systemPrompt: z.string().max(8000).optional(),
+  enableSkills: z.array(z.string()).max(32).optional(),
+  firstSteps: z.array(WorkflowStep).max(50).optional(),
+  permissionMode: PermissionMode.optional(),
+  icon: z.string().max(8).optional(),
+  color: z.string().max(32).optional(),
+});
+
+export const StarterSaved = z.object({
+  ...base,
+  t: z.literal("starter.saved"),
+  starter: Starter,
+});
+
+export const StarterRemove = z.object({
+  ...base,
+  t: z.literal("starter.remove"),
+  id: z.string(),
+});
+
+export const StarterRemoved = z.object({
+  ...base,
+  t: z.literal("starter.removed"),
+  id: z.string(),
+});
+
 // ──────────────────────────────────────────────────────────────────────────
 
 export const Frame = z.discriminatedUnion("t", [
@@ -2069,6 +2242,7 @@ export const Frame = z.discriminatedUnion("t", [
   SummaryRequest,
   SummaryRefresh,
   SummaryFrame,
+  UsageSession,
   SearchRequest,
   SearchResult,
   ShareListRequest,
@@ -2104,6 +2278,17 @@ export const Frame = z.discriminatedUnion("t", [
   NotebookAppend,
   NotebookDelete,
   NotebookDeleted,
+  PeerListRequest,
+  PeerList,
+  PeerAdd,
+  PeerRemove,
+  PeerStatus,
+  StarterListRequest,
+  StarterList,
+  StarterSave,
+  StarterSaved,
+  StarterRemove,
+  StarterRemoved,
 ]);
 export type Frame = z.infer<typeof Frame>;
 

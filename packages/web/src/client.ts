@@ -397,7 +397,7 @@ export class RccClient {
     this.send({ v: 1, t: "pty.resize", sid, cols, rows });
   }
 
-  newSession(opts: { cwd?: string; cols?: number; rows?: number; permissionMode?: PermissionMode; projectId?: string; driver?: SessionDriver } = {}): void {
+  newSession(opts: { cwd?: string; cols?: number; rows?: number; permissionMode?: PermissionMode; projectId?: string; driver?: SessionDriver; starterId?: string } = {}): void {
     this.send({
       v: 1,
       t: "session.new",
@@ -407,6 +407,7 @@ export class RccClient {
       permissionMode: opts.permissionMode,
       projectId: opts.projectId,
       driver: opts.driver,
+      starterId: opts.starterId,
     });
   }
 

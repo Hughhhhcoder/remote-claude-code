@@ -92,10 +92,12 @@ import {
 } from "./marketplace.ts";
 import { PrefsStore } from "./prefs.ts";
 import { metrics } from "./metrics.ts";
+import { usage } from "./usage.ts";
 import { ShareStore } from "./shares.ts";
 import { WorkflowStore } from "./workflows.ts";
 import { NotebookStore } from "./notebooks.ts";
 import { PromptStore } from "./prompts.ts";
+import { StarterStore } from "./starters.ts";
 import { GitWatcher } from "./git-watcher.ts";
 import { runGit, isReadOnlyGitArgs, getStatus as getGitStatus } from "./git.ts";
 import { ActivityFeed } from "./activity.ts";
@@ -105,6 +107,13 @@ import {
   recordingFileSize,
   deleteRecording,
 } from "./recording.ts";
+import {
+  PeerStore,
+  FederatedClient,
+  parseSid,
+  rewriteLocalToRemote,
+  type PeerConfig,
+} from "./federation.ts";
 import { randomUUID } from "node:crypto";
 
 interface WsState {
@@ -203,6 +212,7 @@ const shares = await ShareStore.load();
 const workflows = await WorkflowStore.load();
 const notebooks = await NotebookStore.load();
 const prompts = await PromptStore.load();
+const starters = await StarterStore.load();
 await ensureSodiumReady();
 const hostKeys = await loadOrCreateHostKeys();
 const webauthn = new WebAuthnService(trust);
@@ -268,10 +278,12 @@ const saveDebouncers = new Map<string, Debouncer>();
 
 function snapshotFor(session: AnySession): SessionSnapshot {
   const meta = session.meta();
+  const u = usage.get(session.id);
   return {
     meta: { ...meta, status: session.status, lastActiveAt: session.lastActiveAt },
     chat: session.chat.list(),
     ringTail: session.ringTail(),
+    ...(u ? { usage: u } : {}),
   };
 }
 
@@ -317,6 +329,83 @@ function wirePersistence(session: AnySession): void {
 
 metrics.bindRegistry(registry);
 metrics.start();
+
+// [usage] Wire the per-session usage accumulator to broadcast every SDK
+// result_message through to every connected client + re-render the session
+// list so meta.usage propagates without an explicit refresh.
+usage.setBroadcast((sid, u) => {
+  broadcast({ v: 1, t: "usage.session", sid, usage: u });
+  broadcast({ v: 1, t: "session.list", sessions: registry.list().map(sessionMetaWithSummary) });
+});
+
+// [federation] Remote host peers. Loaded from ~/.rcc/peers.json (0600). Each
+// peer is a long-lived ws client against another RCC host; remote sessions
+// are surfaced in the local sidebar with their sids prefixed `<peerId>:`
+// and pty.in/session.attach/chat.* frames are transparently forwarded.
+const peerStore = await PeerStore.load();
+const peerClients = new Map<string, FederatedClient>();
+
+function peersInfoList(): import("@rcc/protocol").PeerInfo[] {
+  return [...peerClients.values()].map((c) => c.info());
+}
+
+function mergedSessionList(): import("@rcc/protocol").SessionMeta[] {
+  const local = registry.list().map(sessionMetaWithSummary);
+  const remote: import("@rcc/protocol").SessionMeta[] = [];
+  for (const c of peerClients.values()) remote.push(...c.sessions());
+  return [...local, ...remote];
+}
+
+function startPeer(cfg: PeerConfig): FederatedClient {
+  const existing = peerClients.get(cfg.id);
+  if (existing) existing.dispose();
+  const client = new FederatedClient(
+    cfg,
+    (_peerId, frame) => {
+      // Remote frame with sids already prefixed; relay to every local client.
+      // We deliberately skip `hello` — the local hello is already sent with
+      // its own session list, and re-broadcasting a remote hello would
+      // confuse clients about tunnel / device / protocol metadata.
+      if (frame.t === "hello") {
+        // Use this as a signal the peer just (re)connected — refresh the
+        // merged session list everyone sees.
+        broadcast({ v: 1, t: "session.list", sessions: mergedSessionList() });
+        return;
+      }
+      if (frame.t === "session.list") {
+        // Re-merge: peer's list already stamped, but we want a unified list.
+        broadcast({ v: 1, t: "session.list", sessions: mergedSessionList() });
+        return;
+      }
+      if (frame.t === "session.created" || frame.t === "session.exited" || frame.t === "session.resumed") {
+        broadcast(frame);
+        broadcast({ v: 1, t: "session.list", sessions: mergedSessionList() });
+        return;
+      }
+      broadcast(frame);
+    },
+    (info) => {
+      broadcastFiltered({
+        v: 1,
+        t: "peer.status",
+        peerId: info.id,
+        connected: info.connected,
+        error: info.error ?? null,
+        sessionCount: info.sessionCount ?? 0,
+      });
+      // Session list may have changed (peer went from N → 0 sessions).
+      broadcast({ v: 1, t: "session.list", sessions: mergedSessionList() });
+    },
+  );
+  peerClients.set(cfg.id, client);
+  client.start();
+  return client;
+}
+
+for (const cfg of peerStore.list()) startPeer(cfg);
+if (peerStore.list().length > 0) {
+  console.log(`[rcc-host] federated peers: ${peerStore.list().map((p) => `${p.id}→${p.url}`).join(", ")}`);
+}
 
 // Approval watchers: one per session. Scan pty.out for Claude CLI y/n prompts
 // and surface structured `approval.request` frames to all clients. The actual
@@ -502,7 +591,11 @@ function indexChatAppend(session: AnySession, message: import("@rcc/protocol").C
 function sessionMetaWithSummary(session: AnySession): import("@rcc/protocol").SessionMeta {
   const base = session.meta();
   const summary = sessionSummaries.get(session.id);
-  return summary ? { ...base, summary } : base;
+  const u = usage.get(session.id);
+  let out = base;
+  if (summary) out = { ...out, summary };
+  if (u) out = { ...out, usage: u };
+  return out;
 }
 
 async function generateAndBroadcastSummary(sid: string): Promise<void> {
@@ -516,7 +609,7 @@ async function generateAndBroadcastSummary(sid: string): Promise<void> {
       searchIndex.setMeta(sid, { id: sid, title: session.meta().title, summaryTitle: summary.title });
     }
     broadcast({ v: 1, t: "summary", sid, summary });
-    broadcast({ v: 1, t: "session.list", sessions: registry.list().map(sessionMetaWithSummary) });
+    broadcast({ v: 1, t: "session.list", sessions: mergedSessionList() });
   } catch (err) {
     console.warn(`[rcc-host] summarize failed for ${sid}:`, err);
   }
@@ -601,6 +694,8 @@ for (const snap of snapshots) {
     registry.add(dead);
     chatBySid.set(snap.meta.id, [...snap.chat]);
     if (snap.meta.summary) sessionSummaries.set(snap.meta.id, snap.meta.summary);
+    if (snap.usage) usage.hydrate(snap.meta.id, snap.usage);
+    else if (snap.meta.usage) usage.hydrate(snap.meta.id, snap.meta.usage);
   } catch (err) {
     console.warn(`[rcc-host] failed to hydrate snapshot ${snap.meta.id}:`, err);
   }
@@ -786,6 +881,74 @@ function handle(ws: WebSocket, state: WsState, frame: Frame): void {
         return;
     }
   }
+  // [federation] If the frame carries a prefixed sid, route it to the owning
+  // peer instead of the local registry. The peer will handle pty.in / attach
+  // / etc. transparently and the response flows back via the peer frame
+  // relay (which re-prefixes sids before forwarding to local clients).
+  const sidBearing = (frame as Frame & { sid?: string }).sid;
+  if (typeof sidBearing === "string") {
+    const parsed = parseSid(sidBearing);
+    if (parsed) {
+      const peer = peerClients.get(parsed.peerId);
+      if (peer) {
+        const rewritten = rewriteLocalToRemote(frame, parsed.peerId);
+        if (rewritten) peer.forward(rewritten);
+        return;
+      }
+    }
+  }
+  switch (frame.t) {
+    case "peer.list.request": {
+      send(ws, { v: 1, t: "peer.list", peers: peersInfoList() });
+      return;
+    }
+    case "peer.add": {
+      const cfg: PeerConfig = {
+        id: frame.id,
+        url: frame.url,
+        token: frame.token,
+        label: frame.label,
+        color: frame.color,
+      };
+      peerStore
+        .add(cfg)
+        .then(() => {
+          startPeer(cfg);
+          broadcastFiltered({ v: 1, t: "peer.list", peers: peersInfoList() });
+        })
+        .catch((err) => {
+          send(ws, {
+            v: 1,
+            t: "error",
+            code: "peer_add_failed",
+            message: (err as Error).message,
+          });
+        });
+      return;
+    }
+    case "peer.remove": {
+      const existing = peerClients.get(frame.id);
+      if (existing) {
+        existing.dispose();
+        peerClients.delete(frame.id);
+      }
+      peerStore
+        .remove(frame.id)
+        .then(() => {
+          broadcastFiltered({ v: 1, t: "peer.list", peers: peersInfoList() });
+          broadcast({ v: 1, t: "session.list", sessions: mergedSessionList() });
+        })
+        .catch((err) => {
+          send(ws, {
+            v: 1,
+            t: "error",
+            code: "peer_remove_failed",
+            message: (err as Error).message,
+          });
+        });
+      return;
+    }
+  }
   switch (frame.t) {
     case "session.new": {
       // Project binding rules:
@@ -816,7 +979,7 @@ function handle(ws: WebSocket, state: WsState, frame: Frame): void {
       attachSummaryOnExit(s);
       wirePersistence(s);
       send(ws, { v: 1, t: "session.created", session: s.meta() });
-      send(ws, { v: 1, t: "session.list", sessions: registry.list().map((x) => x.meta()) });
+      send(ws, { v: 1, t: "session.list", sessions: mergedSessionList() });
       attach(ws, state, s, null);
       // SDK sessions need an explicit `start()` to open the query stream.
       // Failures surface as system chat messages (and close the session); we
@@ -909,7 +1072,7 @@ function handle(ws: WebSocket, state: WsState, frame: Frame): void {
       wirePersistence(live);
       // Notify every client so their sidebars flip running/dot colour.
       broadcast({ v: 1, t: "session.resumed", session: live.meta() });
-      broadcast({ v: 1, t: "session.list", sessions: registry.list().map((x) => x.meta()) });
+      broadcast({ v: 1, t: "session.list", sessions: mergedSessionList() });
       // Caller attaches to the resumed session so pty output starts flowing.
       attach(ws, state, live, null);
       if (live instanceof SdkSession) {
@@ -934,7 +1097,7 @@ function handle(ws: WebSocket, state: WsState, frame: Frame): void {
         saveDebouncers.delete(frame.sid);
       }
       void deleteSnapshot(frame.sid).catch(() => {});
-      send(ws, { v: 1, t: "session.list", sessions: registry.list().map((x) => x.meta()) });
+      send(ws, { v: 1, t: "session.list", sessions: mergedSessionList() });
       return;
     }
     case "pty.in": {
@@ -2221,6 +2384,63 @@ function handle(ws: WebSocket, state: WsState, frame: Frame): void {
         });
       return;
     }
+    case "starter.list.request": {
+      send(ws, { v: 1, t: "starter.list", starters: starters.list() });
+      return;
+    }
+    case "starter.save": {
+      starters
+        .save({
+          id: frame.id,
+          name: frame.name,
+          description: frame.description,
+          systemPrompt: frame.systemPrompt,
+          enableSkills: frame.enableSkills,
+          firstSteps: frame.firstSteps,
+          permissionMode: frame.permissionMode,
+          icon: frame.icon,
+          color: frame.color,
+        })
+        .then((starter) => {
+          send(ws, { v: 1, t: "starter.saved", starter });
+          broadcastFiltered({ v: 1, t: "starter.list", starters: starters.list() });
+        })
+        .catch((err) => {
+          send(ws, {
+            v: 1,
+            t: "error",
+            code: "starter_save_failed",
+            message: err?.message ?? String(err),
+          });
+        });
+      return;
+    }
+    case "starter.remove": {
+      starters
+        .remove(frame.id)
+        .then((ok) => {
+          if (ok) {
+            send(ws, { v: 1, t: "starter.removed", id: frame.id });
+            broadcastFiltered({ v: 1, t: "starter.list", starters: starters.list() });
+          } else {
+            send(ws, {
+              v: 1,
+              t: "error",
+              code: "starter_not_found",
+              message: `no starter with id ${frame.id}`,
+            });
+          }
+        })
+        .catch((err) => {
+          send(ws, {
+            v: 1,
+            t: "error",
+            code: "starter_remove_failed",
+            message: err?.message ?? String(err),
+          });
+        });
+      return;
+    }
     case "notebook.request": {
       notebooks
         .get(frame.sid)
@@ -3158,7 +3378,7 @@ wss.on("connection", (ws) => {
       v: 1,
       t: "hello",
       protocol: PROTOCOL_VERSION,
-      sessions: registry.list().map((s) => s.meta()),
+      sessions: mergedSessionList(),
       tunnel: currentTunnelInfo(),
       device: device ? { id: device.id, name: device.name, hasPasskey: !!device.passkey } : null,
       pinnedCommands: pinnedCommandsCache,
@@ -3166,6 +3386,9 @@ wss.on("connection", (ws) => {
     });
     // Deliver current prefs so new clients can apply them immediately.
     send(ws, { v: 1, t: "prefs", prefs: prefs.get() });
+    // [federation] Seed the new client with the current peer set so the
+    // PeersModal / badge renders immediately without a round-trip.
+    send(ws, { v: 1, t: "peer.list", peers: peersInfoList() });
   }
 
   ws.on("message", (raw) => {

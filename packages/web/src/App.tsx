@@ -2,11 +2,14 @@ import { createSignal, createMemo, onCleanup, onMount, For, Show } from "solid-j
 import type {
   CommandSummary,
   GitStatusData,
+  PeerInfo,
   PermissionMode,
   ProjectColor,
   ProjectMeta,
   SessionDriver,
   SessionMeta,
+  SessionUsage,
+  Starter,
   TunnelInfo,
 } from "@rcc/protocol";
 import { RccClient, defaultWsUrl, type ConnStatus } from "./client.ts";
@@ -15,6 +18,7 @@ import { ChatView } from "./ChatView.tsx";
 import { NewSessionModal, permissionChip } from "./NewSessionModal.tsx";
 import { NewProjectModal, PROJECT_DOT_CLS } from "./NewProjectModal.tsx";
 import { ProjectsModal } from "./ProjectsModal.tsx";
+import { PeersModal, peerDotCls } from "./PeersModal.tsx";
 import { PairingView } from "./PairingView.tsx";
 import { DevicesModal } from "./DevicesModal.tsx";
 import { ConfigView } from "./ConfigView.tsx";
@@ -114,9 +118,15 @@ export function App() {
   const [commandsById, setCommandsById] = createSignal<Record<string, CommandSummary>>({});
   const [projects, setProjects] = createSignal<ProjectMeta[]>([]);
   const [projectsModalOpen, setProjectsModalOpen] = createSignal(false);
+  const [peers, setPeers] = createSignal<PeerInfo[]>([]);
+  const [peersModalOpen, setPeersModalOpen] = createSignal(false);
   const [newProjectOpen, setNewProjectOpen] = createSignal(false);
   const [newSessionProjectId, setNewSessionProjectId] = createSignal<string | null>(null);
   const [collapsedProjects, setCollapsedProjects] = createSignal<Set<string>>(new Set());
+  const [starters, setStarters] = createSignal<Starter[]>([]);
+  // Starter id the user picked in NewSessionModal, cached so the session.created
+  // handler can match the next spawned session to its starter and run bootstrap.
+  const [pendingStarterId, setPendingStarterId] = createSignal<string | null>(null);
   const [searchQuery, setSearchQuery] = createSignal("");
   const [searchResults, setSearchResults] = createSignal<
     { sid: string; title: string; score: number; excerpts: string[] }[] | null
@@ -158,6 +168,21 @@ export function App() {
       if (frame.projects) setProjects(frame.projects);
     }
     if (frame.t === "project.list") setProjects(frame.projects);
+    if (frame.t === "peer.list") setPeers(frame.peers);
+    if (frame.t === "peer.status") {
+      setPeers((ps) => {
+        const idx = ps.findIndex((p) => p.id === frame.peerId);
+        if (idx < 0) return ps;
+        const next = ps.slice();
+        next[idx] = {
+          ...next[idx]!,
+          connected: frame.connected,
+          error: frame.error ?? null,
+          sessionCount: frame.sessionCount ?? next[idx]!.sessionCount,
+        };
+        return next;
+      });
+    }
     if (frame.t === "cmd.pinned") setPinnedIds(frame.ids);
     if (frame.t === "search.result") {
       if (frame.query === searchQuery()) setSearchResults(frame.matches);
@@ -167,16 +192,28 @@ export function App() {
         s.map((x) => (x.id === frame.sid ? { ...x, summary: frame.summary ?? undefined } : x)),
       );
     }
+    if (frame.t === "usage.session") {
+      setSessions((s) =>
+        s.map((x) => (x.id === frame.sid ? { ...x, usage: frame.usage } : x)),
+      );
+    }
     if (frame.t === "cmd.list") {
       const map: Record<string, CommandSummary> = {};
       for (const c of frame.commands) map[c.id] = c;
       setCommandsById(map);
     }
     if (frame.t === "tunnel.status") setTunnel(frame.tunnel);
+    if (frame.t === "starter.list") setStarters(frame.starters);
     if (frame.t === "session.created") {
       setSessions((s) => [...s, frame.session]);
       setActiveSid(frame.session.id);
       client.send({ v: 1, t: "git.status.request", sid: frame.session.id });
+      const psid = pendingStarterId();
+      if (psid) {
+        setPendingStarterId(null);
+        const starter = starters().find((x) => x.id === psid);
+        if (starter) runStarterBootstrap(frame.session.id, starter);
+      }
     } else if (frame.t === "session.resumed") {
       setSessions((s) =>
         s.map((x) => (x.id === frame.session.id ? { ...x, ...frame.session } : x)),
@@ -194,7 +231,40 @@ export function App() {
 
   onMount(() => {
     client.send({ v: 1, t: "cmd.list.request" });
+    client.send({ v: 1, t: "starter.list.request" });
   });
+
+  /**
+   * Run a starter's bootstrap client-side after the session is attached:
+   *   1. toggle each enableSkills id to enabled=true
+   *   2. inject systemPrompt as the first user message
+   *   3. fire firstSteps through the existing workflow-runner
+   * We wait 300ms for session.attach to settle before dispatching so the
+   * systemPrompt lands in a live pty / SDK session instead of being dropped.
+   */
+  function runStarterBootstrap(sid: string, starter: Starter) {
+    setTimeout(() => {
+      if (starter.enableSkills && starter.enableSkills.length > 0) {
+        for (const id of starter.enableSkills) {
+          client.send({ v: 1, t: "skill.toggle", id, enabled: true });
+        }
+      }
+      if (starter.systemPrompt && starter.systemPrompt.trim()) {
+        client.write(sid, starter.systemPrompt + "\r");
+      }
+      if (starter.firstSteps && starter.firstSteps.length > 0) {
+        workflowRunner.start({
+          workflow: {
+            id: `starter:${starter.id}`,
+            name: starter.name,
+            steps: starter.firstSteps,
+            createdAt: Date.now(),
+          },
+          sid,
+        });
+      }
+    }, 300);
+  }
 
   const pinnedCommands = createMemo<readonly CommandSummary[]>(() => {
     const ids = pinnedIds();
@@ -235,6 +305,7 @@ export function App() {
     { id: "notebook", label: "切换协作笔记本", icon: "📓", hint: "Toggle notebook", run: () => setNotebookOpen((v) => !v) },
     { id: "devices", label: "打开已配对设备", icon: "🔑", hint: "Devices", run: () => setDevicesOpen(true) },
     { id: "projects", label: "管理项目", icon: "🗂", hint: "Projects", run: () => setProjectsModalOpen(true) },
+    { id: "peers", label: "管理 peers (远程 host 联邦)", icon: "🌐", hint: "Hosts federation", run: () => setPeersModalOpen(true) },
   ]);
 
   onCleanup(() => {
@@ -255,6 +326,9 @@ export function App() {
     for (const p of ps) groups.set(p.id, []);
     if (fallback && !groups.has(fallback)) groups.set(fallback, []);
     for (const s of sessions()) {
+      // [federation] Remote sessions land in their peer group, never in a
+      // local project bucket.
+      if (s.peerId) continue;
       const key = s.projectId && groups.has(s.projectId) ? s.projectId : fallback;
       if (!key) continue;
       const arr = groups.get(key) ?? [];
@@ -263,6 +337,19 @@ export function App() {
     }
     return groups;
   });
+
+  const sessionsByPeer = createMemo(() => {
+    const groups = new Map<string, SessionMeta[]>();
+    for (const s of sessions()) {
+      if (!s.peerId) continue;
+      const arr = groups.get(s.peerId) ?? [];
+      arr.push(s);
+      groups.set(s.peerId, arr);
+    }
+    return groups;
+  });
+
+  const connectedPeerCount = createMemo(() => peers().filter((p) => p.connected).length);
 
   function defaultProjectId(): string | null {
     const ps = projects();
@@ -280,17 +367,22 @@ export function App() {
     permissionMode: PermissionMode;
     projectId: string | null;
     driver: SessionDriver;
+    starterId: string | null;
   }) {
     setModalOpen(false);
     setLastMode(opts.permissionMode);
     // SDK-driver sessions have no xterm, so force the chat view for them and
     // leave the toggle disabled in the session header.
     if (opts.driver === "sdk") setViewMode("chat");
+    // Stash the starter id so the session.created handler knows which starter
+    // to bootstrap once the host echoes the new session back.
+    setPendingStarterId(opts.starterId);
     client.newSession({
       cwd: opts.cwd || undefined,
       permissionMode: opts.permissionMode,
       projectId: opts.projectId ?? undefined,
       driver: opts.driver,
+      starterId: opts.starterId ?? undefined,
     });
   }
 
@@ -418,6 +510,18 @@ export function App() {
             </div>
           </Show>
           <TunnelBadge info={tunnel()} />
+          <Show when={peers().length > 0}>
+            <button
+              onClick={() => setPeersModalOpen(true)}
+              class="text-[11px] px-2 py-1 rounded-md border border-zinc-800 bg-zinc-900/60 hover:bg-zinc-800/80 hover:border-violet-500/50 text-zinc-300 hover:text-violet-300 transition flex items-center gap-1"
+              title={`Host federation · ${connectedPeerCount()}/${peers().length} peers 已连接`}
+            >
+              <span>🌐</span>
+              <span class="font-mono">
+                {connectedPeerCount()}/{peers().length}
+              </span>
+            </button>
+          </Show>
           <PushPrompt client={client} />
           <button
             onClick={() => setInboxOpen(true)}
@@ -432,7 +536,7 @@ export function App() {
             </Show>
           </button>
           <VersionBadge client={client} />
-          <MetricsPanel client={client} />
+          <MetricsPanel client={client} sessions={sessions()} />
           <InstallPrompt />
           <button
             onClick={() => setSettingsOpen(true)}
@@ -610,6 +714,73 @@ export function App() {
                 }}
               </For>
             </Show>
+            <Show when={peers().length > 0}>
+              <div class="flex items-center justify-between px-2 py-2 mt-2 border-t border-zinc-900">
+                <div class="text-[10px] uppercase tracking-widest text-zinc-600">
+                  Remote peers
+                </div>
+                <button
+                  onClick={() => setPeersModalOpen(true)}
+                  class="text-[10px] text-zinc-500 hover:text-zinc-200"
+                  title="管理远程 host"
+                >
+                  管理
+                </button>
+              </div>
+              <For each={peers()}>
+                {(pr) => {
+                  const sess = () => sessionsByPeer().get(pr.id) ?? [];
+                  return (
+                    <div class="mb-2">
+                      <div class="flex items-center gap-1.5 px-2 py-1.5 rounded hover:bg-zinc-900">
+                        <span class={`w-1.5 h-1.5 rounded-full shrink-0 ${peerDotCls(pr.color)}`} />
+                        <span class="text-xs font-medium text-zinc-200 truncate flex-1">
+                          {pr.label}
+                        </span>
+                        <span
+                          class={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                            pr.connected ? "bg-emerald-400" : "bg-zinc-700"
+                          }`}
+                          title={pr.connected ? "已连接" : pr.error ?? "离线"}
+                        />
+                        <span class="text-[10px] text-zinc-600 shrink-0">
+                          {sess().length}
+                        </span>
+                      </div>
+                      <Show when={!pr.connected && pr.error}>
+                        <div class="pl-4 text-[10px] text-rose-400 px-2 mb-1 truncate">
+                          {pr.error}
+                        </div>
+                      </Show>
+                      <Show
+                        when={sess().length > 0}
+                        fallback={
+                          <Show when={pr.connected}>
+                            <div class="pl-4 px-2 py-1 text-[11px] text-zinc-600 italic">
+                              无会话
+                            </div>
+                          </Show>
+                        }
+                      >
+                        <For each={sess()}>
+                          {(s) => (
+                            <SessionRow
+                              meta={s}
+                              active={activeSid() === s.id}
+                              git={gitBySid()[s.id]}
+                              onActivate={() => setActiveSid(s.id)}
+                              onClose={() => onCloseSession(s.id)}
+                              onResume={() => onResumeSession(s.id)}
+                              onShare={() => onShareSession(s.id)}
+                            />
+                          )}
+                        </For>
+                      </Show>
+                    </div>
+                  );
+                }}
+              </For>
+            </Show>
             </Show>
           </div>
 
@@ -673,6 +844,9 @@ export function App() {
                   <Show when={activeSession()}>
                     <PermissionChip mode={activeSession()!.permissionMode} />
                     <DriverChip driver={activeSession()!.driver ?? "cli"} />
+                    <Show when={activeSession()!.usage}>
+                      <UsageChip usage={activeSession()!.usage!} />
+                    </Show>
                     <Show when={gitBySid()[activeSid()!]}>
                       <BranchChip status={gitBySid()[activeSid()!]!} />
                     </Show>
@@ -812,6 +986,7 @@ export function App() {
         defaultMode={lastMode()}
         projects={projects()}
         defaultProjectId={newSessionProjectId() ?? defaultProjectId()}
+        starters={starters()}
         onCancel={() => setModalOpen(false)}
         onConfirm={onCreateSession}
       />
@@ -825,6 +1000,12 @@ export function App() {
         client={client}
         projects={projects()}
         onClose={() => setProjectsModalOpen(false)}
+      />
+      <PeersModal
+        open={peersModalOpen()}
+        client={client}
+        peers={peers()}
+        onClose={() => setPeersModalOpen(false)}
       />
       <DevicesModal
         open={devicesOpen()}
@@ -927,6 +1108,41 @@ function DriverChip(props: { driver: SessionDriver }) {
       {isSdk() ? "🧠 SDK" : "⌨ CLI"}
     </span>
   );
+}
+
+// [usage] Compact ↑N ↓N · $C chip. Tooltip shows the full breakdown including
+// cache-create / cache-read tokens + turn count. Only rendered when the host
+// has supplied usage data (SDK-driver sessions only).
+function UsageChip(props: { usage: SessionUsage }) {
+  const u = () => props.usage;
+  const tip = () =>
+    [
+      `input: ${u().inputTokens.toLocaleString()}`,
+      `output: ${u().outputTokens.toLocaleString()}`,
+      `cache create: ${u().cacheCreateTokens.toLocaleString()}`,
+      `cache read: ${u().cacheReadTokens.toLocaleString()}`,
+      `cost: $${u().costUsd.toFixed(4)}`,
+      `turns: ${u().turns}`,
+    ].join("\n");
+  return (
+    <span
+      class="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded border border-amber-500/30 bg-amber-500/5 text-amber-300 font-mono"
+      title={tip()}
+    >
+      <span>↑{formatTokensShort(u().inputTokens)}</span>
+      <span class="text-zinc-600">·</span>
+      <span>↓{formatTokensShort(u().outputTokens)}</span>
+      <span class="text-zinc-600">·</span>
+      <span>${u().costUsd.toFixed(u().costUsd >= 1 ? 2 : 4)}</span>
+    </span>
+  );
+}
+
+function formatTokensShort(n: number): string {
+  if (n < 1000) return String(n);
+  if (n < 10_000) return `${(n / 1000).toFixed(1)}k`;
+  if (n < 1_000_000) return `${Math.round(n / 1000)}k`;
+  return `${(n / 1_000_000).toFixed(1)}M`;
 }
 
 function TunnelBadge(props: { info: TunnelInfo | null }) {
@@ -1041,6 +1257,9 @@ function SessionRow(props: {
             <span class="text-xs text-zinc-500 font-mono truncate">{props.meta.id}</span>
             <PermissionChip mode={props.meta.permissionMode} />
             <DriverChip driver={props.meta.driver ?? "cli"} />
+            <Show when={props.meta.usage}>
+              <UsageChip usage={props.meta.usage!} />
+            </Show>
             <Show when={props.git}>
               <BranchChip status={props.git!} />
             </Show>

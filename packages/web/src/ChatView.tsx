@@ -224,8 +224,26 @@ export function ChatView(props: {
     voiceHandle = null;
   });
 
+  // [usage] SDK sessions surface live usage on SessionMeta. Derive the
+  // current session's usage from the sessions prop; absent = no chip.
+  const sessionUsage = () => props.sessions?.find((s) => s.id === props.sid)?.usage ?? null;
+  const sessionDriver = () => props.sessions?.find((s) => s.id === props.sid)?.driver ?? "cli";
+
   return (
-    <div class="flex flex-col h-full bg-zinc-950">
+    <div class="flex flex-col h-full bg-zinc-950 relative">
+      <Show when={sessionDriver() === "sdk" && sessionUsage()}>
+        <div
+          class="absolute top-2 right-3 z-10 text-[10px] font-mono px-2 py-0.5 rounded border border-amber-500/40 bg-zinc-950/80 text-amber-300 backdrop-blur-sm pointer-events-auto"
+          title={[
+            `input: ${sessionUsage()!.inputTokens.toLocaleString()}`,
+            `output: ${sessionUsage()!.outputTokens.toLocaleString()}`,
+            `cache create: ${sessionUsage()!.cacheCreateTokens.toLocaleString()}`,
+            `cache read: ${sessionUsage()!.cacheReadTokens.toLocaleString()}`,
+          ].join("\n")}
+        >
+          {sessionUsage()!.turns} turn{sessionUsage()!.turns === 1 ? "" : "s"} · ${sessionUsage()!.costUsd.toFixed(4)}
+        </div>
+      </Show>
       <div ref={scrollRef} class="flex-1 overflow-y-auto scrollbar p-4 space-y-3">
         <Show
           when={messages().length > 0}

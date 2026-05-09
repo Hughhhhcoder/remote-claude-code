@@ -21,6 +21,7 @@ import {
 import { ChatParser } from "./chat-parser.ts";
 import { RingBuffer } from "./ring-buffer.ts";
 import type { BufferedChunk, ExitListener, SessionListener } from "./session.ts";
+import { usage } from "./usage.ts";
 
 /**
  * SDK-driver session: parallel to the pty-backed {@link Session} but wired
@@ -215,6 +216,7 @@ export class SdkSession {
   }
 
   meta(): SessionMeta {
+    const u = usage.get(this.id);
     return {
       id: this.id,
       cwd: this.cwd,
@@ -226,6 +228,7 @@ export class SdkSession {
       permissionMode: this.permissionMode,
       driver: "sdk",
       projectId: this.projectId ?? undefined,
+      ...(u ? { usage: u } : {}),
     };
   }
 
@@ -483,6 +486,18 @@ export class SdkSession {
   }
 
   private onResultMessage(msg: SDKResultMessage): void {
+    // [usage] Every SDKResultMessage carries the running usage snapshot for
+    // the turn. Fold it into per-session totals; UsageTracker broadcasts the
+    // update frame if the host has wired a callback.
+    const u = (msg as { usage?: Record<string, unknown> }).usage ?? {};
+    const cost = (msg as { total_cost_usd?: number }).total_cost_usd;
+    usage.record(this.id, {
+      inputTokens: numField(u, "input_tokens"),
+      outputTokens: numField(u, "output_tokens"),
+      cacheCreate: numField(u, "cache_creation_input_tokens"),
+      cacheRead: numField(u, "cache_read_input_tokens"),
+      costUsd: typeof cost === "number" ? cost : 0,
+    });
     if (msg.subtype === "success") return;
     // Surface errors as a system message so the client sees them.
     const err = msg.subtype === "error_during_execution" ? "execution error" : msg.subtype;
@@ -551,6 +566,11 @@ function safeStringify(x: unknown): string {
   } catch {
     return String(x);
   }
+}
+
+function numField(o: Record<string, unknown>, key: string): number {
+  const v = o[key];
+  return typeof v === "number" && Number.isFinite(v) ? v : 0;
 }
 
 function toolResultText(content: unknown): string {
