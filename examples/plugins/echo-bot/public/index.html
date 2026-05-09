@@ -1,0 +1,39 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Echo Bot</title>
+    <style>
+      body {
+        font-family: system-ui, -apple-system, sans-serif;
+        margin: 0;
+        padding: 24px;
+        background: #fafafa;
+        color: #111;
+      }
+      h1 { font-size: 18px; margin: 0 0 12px; }
+      p  { color: #555; font-size: 13px; margin: 0 0 16px; }
+      textarea { width: 100%; min-height: 80px; font-family: ui-monospace, monospace; font-size: 13px; padding: 8px; }
+      button { margin-top: 8px; padding: 6px 12px; cursor: pointer; }
+      pre { background: #f0f0f0; padding: 10px; border-radius: 4px; font-size: 12px; white-space: pre-wrap; }
+    </style>
+  </head>
+  <body>
+    <h1>Echo Bot</h1>
+    <p>Example plugin UI. Sends <code>plugin.call</code> frames through the parent window's RCC session.</p>
+    <textarea id="payload">{"hello": "world"}</textarea>
+    <div><button id="send">Echo via plugin.call</button></div>
+    <pre id="out">(nothing yet)</pre>
+    <script>
+      // Minimal demo: just display that the UI loaded. Real plugins would
+      // open a ws to the host using the ?token= passed on the URL.
+      document.getElementById("send").addEventListener("click", () => {
+        const txt = document.getElementById("payload").value;
+        document.getElementById("out").textContent =
+          "Plugin UI can't call the host directly from this iframe demo. " +
+          "Wire your own ws (reuse token from URL ?token=...) or build an in-parent bridge. " +
+          "Payload drafted: " + txt;
+      });
+    </script>
+  </body>
+</html>

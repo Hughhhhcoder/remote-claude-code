@@ -84,13 +84,13 @@ export function NewSessionModal(props: Props) {
         class="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm grid place-items-center"
         onClick={(e) => e.target === e.currentTarget && props.onCancel()}
       >
-        <div class="w-[560px] max-w-[calc(100vw-32px)] rounded-2xl border border-zinc-800 bg-zinc-950 shadow-2xl overflow-hidden">
+        <div class="w-[560px] max-w-[calc(100vw-32px)] max-h-[calc(100vh-32px)] rounded-2xl border border-zinc-800 bg-zinc-950 shadow-2xl overflow-hidden flex flex-col">
           <div class="px-5 py-4 border-b border-zinc-900">
             <div class="text-sm font-semibold">新建会话</div>
             <div class="text-xs text-zinc-500 mt-0.5">项目 · 工作目录 · 权限模式</div>
           </div>
 
-          <div class="p-5 space-y-4">
+          <div class="p-5 space-y-4 overflow-y-auto flex-1 min-h-0">
             <Show when={props.starters.length > 0}>
               <div>
                 <label class="block text-[11px] uppercase tracking-widest text-zinc-500 mb-1.5">

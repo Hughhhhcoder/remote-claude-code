@@ -8,6 +8,7 @@ test("recording: start → stop produces playable .cast file", async ({ page, ba
   // regardless of whatever recordings prior tests may have produced.
   await page.getByRole("button", { name: "New session" }).click();
   await expect(page.getByRole("button", { name: "创建会话", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "创建会话", exact: true }).scrollIntoViewIfNeeded();
   await page.getByRole("button", { name: "创建会话", exact: true }).click();
   await expect(page.getByRole("button", { name: "创建会话", exact: true })).toBeHidden();
 

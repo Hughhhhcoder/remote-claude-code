@@ -2111,6 +2111,105 @@ export const StarterRemoved = z.object({
   id: z.string(),
 });
 
+// [plugins] — M8
+//
+// Third-party plugins live in ~/.rcc/plugins/<id>/ as <manifest.json, entry
+// ts/js, optional public/>. Host scans on boot, dynamic-imports the entry,
+// and keeps the Plugin instance in memory. Plugins can't extend the protocol
+// (client/server share one schema) so dynamic calls go through a pair of
+// catch-all frames: `plugin.call` (client → host) routes to the addressed
+// plugin's `handleCall(method, payload)`, host echoes `plugin.result`.
+// Plugins can also `plugin.broadcast` arbitrary JSON to every connected ws.
+
+export const PluginPermission = z.enum([
+  "session:read",
+  "session:write",
+  "chat:read",
+  "broadcast",
+]);
+export type PluginPermission = z.infer<typeof PluginPermission>;
+
+export const PluginInfo = z.object({
+  id: z.string(),
+  name: z.string(),
+  version: z.string(),
+  enabled: z.boolean(),
+  hasUi: z.boolean(),
+  permissions: z.array(PluginPermission),
+  error: z.string().optional(),
+});
+export type PluginInfo = z.infer<typeof PluginInfo>;
+
+export const PluginListRequest = z.object({
+  ...base,
+  t: z.literal("plugin.list.request"),
+});
+
+export const PluginList = z.object({
+  ...base,
+  t: z.literal("plugin.list"),
+  plugins: z.array(PluginInfo),
+});
+
+export const PluginCall = z.object({
+  ...base,
+  t: z.literal("plugin.call"),
+  pluginId: z.string(),
+  method: z.string(),
+  callId: z.string(),
+  payload: z.unknown().optional(),
+});
+
+export const PluginResult = z.object({
+  ...base,
+  t: z.literal("plugin.result"),
+  callId: z.string(),
+  pluginId: z.string(),
+  ok: z.boolean(),
+  data: z.unknown().optional(),
+  error: z.string().optional(),
+});
+
+export const PluginBroadcast = z.object({
+  ...base,
+  t: z.literal("plugin.broadcast"),
+  pluginId: z.string(),
+  kind: z.string(),
+  payload: z.unknown().optional(),
+});
+
+// [audit] — Batch 14
+//
+// Append-only security audit trail. Host persists entries to
+// `~/.rcc/audit.jsonl` (0600, daily-rotated, 30-day retention) and keeps the
+// last 500 in memory for fast UI queries. Emitted inline at the sites that
+// perform sensitive mutations (pair/revoke/session.*/share.*/config…). Only
+// authenticated (non-share) clients may issue `audit.query.request`.
+
+export const AuditEntry = z.object({
+  ts: z.number(),
+  kind: z.string(),
+  deviceId: z.string().optional(),
+  ip: z.string().optional(),
+  details: z.record(z.string(), z.unknown()).default({}),
+});
+export type AuditEntry = z.infer<typeof AuditEntry>;
+
+export const AuditQueryRequest = z.object({
+  ...base,
+  t: z.literal("audit.query.request"),
+  kind: z.string().optional(),
+  since: z.number().optional(),
+  until: z.number().optional(),
+  limit: z.number().int().positive().max(10_000).optional(),
+});
+
+export const AuditEntries = z.object({
+  ...base,
+  t: z.literal("audit.entries"),
+  entries: z.array(AuditEntry),
+});
+
 // ──────────────────────────────────────────────────────────────────────────
 
 export const Frame = z.discriminatedUnion("t", [
@@ -2289,6 +2388,13 @@ export const Frame = z.discriminatedUnion("t", [
   StarterSaved,
   StarterRemove,
   StarterRemoved,
+  PluginListRequest,
+  PluginList,
+  PluginCall,
+  PluginResult,
+  PluginBroadcast,
+  AuditQueryRequest,
+  AuditEntries,
 ]);
 export type Frame = z.infer<typeof Frame>;
 

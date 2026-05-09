@@ -9,6 +9,8 @@ import { PermissionsTab } from "./PermissionsTab.tsx";
 import { WorkflowsTab } from "./WorkflowsTab.tsx";
 import { PromptsTab } from "./PromptsTab.tsx";
 import { StartersTab } from "./StartersTab.tsx";
+import { PluginsTab } from "./PluginsTab.tsx";
+import { AuditTab } from "./AuditView.tsx";
 import type { WorkflowRunRequest } from "./workflow-runner.ts";
 
 type TabKey =
@@ -20,7 +22,9 @@ type TabKey =
   | "permissions"
   | "workflows"
   | "prompts"
-  | "starters";
+  | "starters"
+  | "plugins"
+  | "audit";
 
 interface TabSpec {
   key: TabKey;
@@ -103,6 +107,20 @@ const TABS: readonly TabSpec[] = [
     icon: "🚀",
     accent: "text-indigo-300",
     render: (ctx) => <StartersTab client={ctx.client} />,
+  },
+  {
+    key: "plugins",
+    label: "Plugins",
+    icon: "🧩",
+    accent: "text-fuchsia-300",
+    render: (ctx) => <PluginsTab client={ctx.client} />,
+  },
+  {
+    key: "audit",
+    label: "审计日志",
+    icon: "📜",
+    accent: "text-zinc-300",
+    render: (ctx) => <AuditTab client={ctx.client} />,
   },
 ] as const;
 

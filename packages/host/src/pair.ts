@@ -13,6 +13,13 @@ interface PairDeps {
   hostKeys: HostKeypair;
   /** Called when a new pairing code is created so the host can surface it to the user. */
   onCodeCreated?: (code: string) => void;
+  /** Called after a successful claim so the host can record an audit entry. */
+  onClaimed?: (info: {
+    deviceId: string;
+    deviceName: string;
+    ip: string | null;
+    userAgent: string | null;
+  }) => void;
 }
 
 function readJson<T>(req: IncomingMessage, max = 16 * 1024): Promise<T> {
@@ -147,6 +154,12 @@ async function handleClaim(
     name: deviceName || "unnamed device",
     userAgent,
     sharedKey,
+  });
+  deps.onClaimed?.({
+    deviceId: device.id,
+    deviceName: device.name,
+    ip: req.socket.remoteAddress ?? null,
+    userAgent,
   });
   sendJson(res, 200, {
     token,

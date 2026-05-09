@@ -98,6 +98,7 @@ import { WorkflowStore } from "./workflows.ts";
 import { NotebookStore } from "./notebooks.ts";
 import { PromptStore } from "./prompts.ts";
 import { StarterStore } from "./starters.ts";
+import { AuditLog } from "./audit.ts";
 import { GitWatcher } from "./git-watcher.ts";
 import { runGit, isReadOnlyGitArgs, getStatus as getGitStatus } from "./git.ts";
 import { ActivityFeed } from "./activity.ts";
@@ -114,6 +115,8 @@ import {
   rewriteLocalToRemote,
   type PeerConfig,
 } from "./federation.ts";
+import { PluginHost, PluginEventBus } from "./plugins.ts";
+import { handleRestRoute } from "./rest.ts";
 import { randomUUID } from "node:crypto";
 
 interface WsState {
@@ -213,6 +216,7 @@ const workflows = await WorkflowStore.load();
 const notebooks = await NotebookStore.load();
 const prompts = await PromptStore.load();
 const starters = await StarterStore.load();
+const audit = await AuditLog.load();
 await ensureSodiumReady();
 const hostKeys = await loadOrCreateHostKeys();
 const webauthn = new WebAuthnService(trust);
@@ -420,6 +424,32 @@ const approvalWatchers = new Map<string, ApprovalWatcher>();
 // with `activity.list.request` and then consume live `activity.append`.
 const activity = new ActivityFeed((frame) => broadcast(frame));
 
+// [plugins] M8 — dynamic-imported user plugins from ~/.rcc/plugins/*.
+const pluginSessionCreatedBus = new PluginEventBus<import("@rcc/protocol").SessionMeta>();
+const pluginSessionExitedBus = new PluginEventBus<string>();
+const pluginHost = new PluginHost({
+  listSessions: () => registry.list().map((s) => s.meta()),
+  broadcastFrame: (frame) => broadcastFiltered(frame),
+  onSessionCreatedBus: pluginSessionCreatedBus,
+  onSessionExitedBus: pluginSessionExitedBus,
+});
+await pluginHost.loadAll();
+
+function notifyPluginSessionCreated(s: AnySession): void {
+  try {
+    pluginSessionCreatedBus.emit(s.meta());
+  } catch {
+    // ignore
+  }
+  s.onExit(() => {
+    try {
+      pluginSessionExitedBus.emit(s.id);
+    } catch {
+      // ignore
+    }
+  });
+}
+
 function broadcastApproval(frame: Frame): void {
   for (const client of wss.clients) {
     if (client.readyState !== WebSocket.OPEN) continue;
@@ -598,6 +628,84 @@ function sessionMetaWithSummary(session: AnySession): import("@rcc/protocol").Se
   return out;
 }
 
+function buildRestCtx() {
+  return {
+    registry,
+    projects,
+    trust,
+    shares,
+    starters,
+    defaultCwd: DEFAULT_CWD,
+    defaultPermissionMode: DEFAULT_PERMISSION_MODE,
+    claudeCommand: CLAUDE_COMMAND,
+    claudeArgs: CLAUDE_ARGS,
+    authenticate: (req: import("node:http").IncomingMessage) => {
+      const r = authenticate(req);
+      if (r.ok) return { ok: true, device: r.device ?? null };
+      return { ok: false, device: null, reason: r.reason };
+    },
+    onSessionCreated: (s: AnySession) => {
+      attachApprovalWatcher(s);
+      attachChatBroadcast(s);
+      attachMetricsTap(s);
+      attachGitWatcher(s);
+      attachSummaryOnExit(s);
+      wirePersistence(s);
+      broadcast({ v: 1, t: "session.created", session: s.meta() });
+      broadcast({ v: 1, t: "session.list", sessions: mergedSessionList() });
+      if (s instanceof SdkSession) {
+        s.start().catch(() => {});
+      }
+    },
+    resumeArchivedSession: (sid: string): AnySession | null => {
+      const s = registry.get(sid);
+      if (!(s instanceof DeadSession)) return null;
+      const archivedChat = s.chat.list();
+      const saver = saveDebouncers.get(s.id);
+      if (saver) {
+        saver.cancel();
+        saveDebouncers.delete(s.id);
+      }
+      registry.remove(s.id);
+      let live: AnySession;
+      try {
+        live = createSession({
+          driver: s.driver,
+          id: s.id,
+          createdAt: s.createdAt,
+          command: s.driver === "cli" ? CLAUDE_COMMAND : undefined,
+          args: s.driver === "cli" ? CLAUDE_ARGS : undefined,
+          cwd: s.cwd,
+          cols: s.cols,
+          rows: s.rows,
+          permissionMode: s.permissionMode,
+          projectId: s.projectId,
+          initialChat: archivedChat,
+        });
+      } catch (err) {
+        registry.add(s);
+        throw err;
+      }
+      registry.add(live);
+      attachApprovalWatcher(live);
+      attachChatBroadcast(live);
+      attachMetricsTap(live);
+      attachGitWatcher(live);
+      attachSummaryOnExit(live);
+      wirePersistence(live);
+      broadcast({ v: 1, t: "session.resumed", session: live.meta() });
+      broadcast({ v: 1, t: "session.list", sessions: mergedSessionList() });
+      if (live instanceof SdkSession) {
+        live.start().catch(() => {});
+      }
+      return live;
+    },
+    broadcast,
+    sessionMetaWithSummary,
+    mergedSessionList,
+  };
+}
+
 async function generateAndBroadcastSummary(sid: string): Promise<void> {
   const chat = chatBySid.get(sid) ?? [];
   if (chat.length === 0) return;
@@ -732,6 +840,7 @@ if (registry.list().length === 0) {
   attachGitWatcher(boot);
   attachSummaryOnExit(boot);
   wirePersistence(boot);
+  notifyPluginSessionCreated(boot);
   console.log(
     `[rcc-host] bootstrapped session ${boot.id} at ${boot.cwd} (permission: ${boot.permissionMode})`,
   );
@@ -845,6 +954,10 @@ function attach(ws: WebSocket, state: WsState, session: AnySession, since: numbe
   });
 }
 
+function auditCtx(_ws: WebSocket, state: WsState): { deviceId?: string; ip?: string } {
+  return { deviceId: state.device?.id };
+}
+
 function handle(ws: WebSocket, state: WsState, frame: Frame): void {
   if (state.share) {
     // Readonly share guest. Only a tiny whitelist of frames is tolerated —
@@ -915,6 +1028,11 @@ function handle(ws: WebSocket, state: WsState, frame: Frame): void {
         .then(() => {
           startPeer(cfg);
           broadcastFiltered({ v: 1, t: "peer.list", peers: peersInfoList() });
+          audit.write({
+            kind: "peer.add",
+            ...auditCtx(ws, state),
+            details: { id: cfg.id, url: cfg.url, label: cfg.label },
+          });
         })
         .catch((err) => {
           send(ws, {
@@ -937,6 +1055,11 @@ function handle(ws: WebSocket, state: WsState, frame: Frame): void {
         .then(() => {
           broadcastFiltered({ v: 1, t: "peer.list", peers: peersInfoList() });
           broadcast({ v: 1, t: "session.list", sessions: mergedSessionList() });
+          audit.write({
+            kind: "peer.remove",
+            ...auditCtx(ws, state),
+            details: { id: frame.id },
+          });
         })
         .catch((err) => {
           send(ws, {
@@ -978,9 +1101,15 @@ function handle(ws: WebSocket, state: WsState, frame: Frame): void {
       attachGitWatcher(s);
       attachSummaryOnExit(s);
       wirePersistence(s);
+      notifyPluginSessionCreated(s);
       send(ws, { v: 1, t: "session.created", session: s.meta() });
       send(ws, { v: 1, t: "session.list", sessions: mergedSessionList() });
       attach(ws, state, s, null);
+      audit.write({
+        kind: "session.new",
+        ...auditCtx(ws, state),
+        details: { sid: s.id, cwd, driver, projectId: project.id, starterId: frame.starterId },
+      });
       // SDK sessions need an explicit `start()` to open the query stream.
       // Failures surface as system chat messages (and close the session); we
       // also emit a one-shot error frame so the client doesn't have to
@@ -1070,9 +1199,15 @@ function handle(ws: WebSocket, state: WsState, frame: Frame): void {
       attachGitWatcher(live);
       attachSummaryOnExit(live);
       wirePersistence(live);
+      notifyPluginSessionCreated(live);
       // Notify every client so their sidebars flip running/dot colour.
       broadcast({ v: 1, t: "session.resumed", session: live.meta() });
       broadcast({ v: 1, t: "session.list", sessions: mergedSessionList() });
+      audit.write({
+        kind: "session.resume",
+        ...auditCtx(ws, state),
+        details: { sid: live.id, driver: live.driver },
+      });
       // Caller attaches to the resumed session so pty output starts flowing.
       attach(ws, state, live, null);
       if (live instanceof SdkSession) {
@@ -1098,6 +1233,7 @@ function handle(ws: WebSocket, state: WsState, frame: Frame): void {
       }
       void deleteSnapshot(frame.sid).catch(() => {});
       send(ws, { v: 1, t: "session.list", sessions: mergedSessionList() });
+      audit.write({ kind: "session.close", ...auditCtx(ws, state), details: { sid: frame.sid } });
       return;
     }
     case "pty.in": {
@@ -1306,6 +1442,11 @@ function handle(ws: WebSocket, state: WsState, frame: Frame): void {
         // a device we've just locked out.
         void push.revokeDevice(frame.deviceId);
         broadcastDeviceList();
+        audit.write({
+          kind: "auth.revoke",
+          ...auditCtx(ws, state),
+          details: { target: frame.deviceId },
+        });
       });
       return;
     }
@@ -1321,6 +1462,11 @@ function handle(ws: WebSocket, state: WsState, frame: Frame): void {
           return;
         }
         broadcastDeviceList();
+        audit.write({
+          kind: "auth.rename",
+          ...auditCtx(ws, state),
+          details: { target: frame.deviceId, name: frame.name },
+        });
       });
       return;
     }
@@ -1420,7 +1566,14 @@ function handle(ws: WebSocket, state: WsState, frame: Frame): void {
     case "skill.toggle": {
       toggleSkill(frame.id, frame.enabled, DEFAULT_CWD)
         .then(() => listSkills(DEFAULT_CWD))
-        .then((skills) => send(ws, { v: 1, t: "skill.list", skills }))
+        .then((skills) => {
+          send(ws, { v: 1, t: "skill.list", skills });
+          audit.write({
+            kind: "config.skill.toggle",
+            ...auditCtx(ws, state),
+            details: { id: frame.id, enabled: frame.enabled },
+          });
+        })
         .catch((err) => {
           send(ws, {
             v: 1,
@@ -1467,7 +1620,14 @@ function handle(ws: WebSocket, state: WsState, frame: Frame): void {
         DEFAULT_CWD,
       )
         .then(() => listSkills(DEFAULT_CWD))
-        .then((skills) => send(ws, { v: 1, t: "skill.list", skills }))
+        .then((skills) => {
+          send(ws, { v: 1, t: "skill.list", skills });
+          audit.write({
+            kind: "config.skill.save",
+            ...auditCtx(ws, state),
+            details: { scope: frame.scope, name: frame.name },
+          });
+        })
         .catch((err) => {
           send(ws, {
             v: 1,
@@ -1491,6 +1651,11 @@ function handle(ws: WebSocket, state: WsState, frame: Frame): void {
             return;
           }
           send(ws, { v: 1, t: "skill.deleted", id: frame.id });
+          audit.write({
+            kind: "config.skill.delete",
+            ...auditCtx(ws, state),
+            details: { id: frame.id },
+          });
           return listSkills(DEFAULT_CWD).then((skills) =>
             send(ws, { v: 1, t: "skill.list", skills }),
           );
@@ -1551,6 +1716,11 @@ function handle(ws: WebSocket, state: WsState, frame: Frame): void {
           const server = servers.find((s) => s.name === frame.name);
           if (server) broadcastMcp(server, "added");
           broadcastMcpList(servers);
+          audit.write({
+            kind: "config.mcp.add",
+            ...auditCtx(ws, state),
+            details: { name: frame.name, scope: frame.scope, transport: frame.transport },
+          });
         })
         .catch((err) => {
           send(ws, {
@@ -1566,6 +1736,11 @@ function handle(ws: WebSocket, state: WsState, frame: Frame): void {
       removeMcp(frame.name, frame.scope, DEFAULT_CWD)
         .then(() => {
           broadcastMcpRemoved(frame.name);
+          audit.write({
+            kind: "config.mcp.remove",
+            ...auditCtx(ws, state),
+            details: { name: frame.name, scope: frame.scope ?? null },
+          });
           return listMcp(DEFAULT_CWD);
         })
         .then((servers) => broadcastMcpList(servers))
@@ -1821,6 +1996,17 @@ function handle(ws: WebSocket, state: WsState, frame: Frame): void {
         .then(() => {
           send(ws, { v: 1, t: "hook.written", scope: frame.scope, event: frame.event });
           broadcastHookList();
+          audit.write({
+            kind: "config.hook.write",
+            ...auditCtx(ws, state),
+            details: {
+              scope: frame.scope,
+              event: frame.event,
+              index: frame.index,
+              matcher: frame.matcher,
+              count: frame.hooks.length,
+            },
+          });
         })
         .catch((err) => {
           send(ws, { v: 1, t: "error", code: "hook_write_failed", message: err?.message ?? String(err) });
@@ -1842,6 +2028,11 @@ function handle(ws: WebSocket, state: WsState, frame: Frame): void {
             index: frame.index,
           });
           broadcastHookList();
+          audit.write({
+            kind: "config.hook.delete",
+            ...auditCtx(ws, state),
+            details: { scope: frame.scope, event: frame.event, index: frame.index },
+          });
         })
         .catch((err) => {
           send(ws, { v: 1, t: "error", code: "hook_delete_failed", message: err?.message ?? String(err) });
@@ -1899,6 +2090,11 @@ function handle(ws: WebSocket, state: WsState, frame: Frame): void {
             rule,
           });
           broadcastPermList();
+          audit.write({
+            kind: "config.permission.add",
+            ...auditCtx(ws, state),
+            details: { scope: frame.scope, bucket: frame.bucket, rule },
+          });
         })
         .catch((err) => {
           send(ws, {
@@ -1921,6 +2117,11 @@ function handle(ws: WebSocket, state: WsState, frame: Frame): void {
             rule: frame.rule,
           });
           broadcastPermList();
+          audit.write({
+            kind: "config.permission.remove",
+            ...auditCtx(ws, state),
+            details: { scope: frame.scope, bucket: frame.bucket, rule: frame.rule },
+          });
         })
         .catch((err) => {
           send(ws, {
@@ -1942,6 +2143,11 @@ function handle(ws: WebSocket, state: WsState, frame: Frame): void {
             mode: frame.mode,
           });
           broadcastPermList();
+          audit.write({
+            kind: "config.permission.set-default",
+            ...auditCtx(ws, state),
+            details: { scope: frame.scope, mode: frame.mode },
+          });
         })
         .catch((err) => {
           send(ws, {
@@ -2388,6 +2594,27 @@ function handle(ws: WebSocket, state: WsState, frame: Frame): void {
       send(ws, { v: 1, t: "starter.list", starters: starters.list() });
       return;
     }
+    case "audit.query.request": {
+      audit
+        .query({
+          kind: frame.kind,
+          since: frame.since,
+          until: frame.until,
+          limit: frame.limit,
+        })
+        .then((entries) => {
+          send(ws, { v: 1, t: "audit.entries", entries });
+        })
+        .catch((err) => {
+          send(ws, {
+            v: 1,
+            t: "error",
+            code: "audit_query_failed",
+            message: err?.message ?? String(err),
+          });
+        });
+      return;
+    }
     case "starter.save": {
       starters
         .save({
@@ -2404,6 +2631,11 @@ function handle(ws: WebSocket, state: WsState, frame: Frame): void {
         .then((starter) => {
           send(ws, { v: 1, t: "starter.saved", starter });
           broadcastFiltered({ v: 1, t: "starter.list", starters: starters.list() });
+          audit.write({
+            kind: "config.starter.save",
+            ...auditCtx(ws, state),
+            details: { id: starter.id, name: starter.name },
+          });
         })
         .catch((err) => {
           send(ws, {
@@ -2422,6 +2654,11 @@ function handle(ws: WebSocket, state: WsState, frame: Frame): void {
           if (ok) {
             send(ws, { v: 1, t: "starter.removed", id: frame.id });
             broadcastFiltered({ v: 1, t: "starter.list", starters: starters.list() });
+            audit.write({
+              kind: "config.starter.remove",
+              ...auditCtx(ws, state),
+              details: { id: frame.id },
+            });
           } else {
             send(ws, {
               v: 1,
@@ -2437,6 +2674,71 @@ function handle(ws: WebSocket, state: WsState, frame: Frame): void {
             t: "error",
             code: "starter_remove_failed",
             message: err?.message ?? String(err),
+          });
+        });
+      return;
+    }
+    case "plugin.list.request": {
+      send(ws, { v: 1, t: "plugin.list", plugins: pluginHost.list() });
+      return;
+    }
+    case "plugin.call": {
+      const MAX_PAYLOAD = 256 * 1024;
+      try {
+        const encoded = JSON.stringify(frame.payload ?? null);
+        if (Buffer.byteLength(encoded, "utf8") > MAX_PAYLOAD) {
+          send(ws, {
+            v: 1,
+            t: "plugin.result",
+            callId: frame.callId,
+            pluginId: frame.pluginId,
+            ok: false,
+            error: "payload too large (>256KB)",
+          });
+          return;
+        }
+      } catch {
+        send(ws, {
+          v: 1,
+          t: "plugin.result",
+          callId: frame.callId,
+          pluginId: frame.pluginId,
+          ok: false,
+          error: "payload not serialisable",
+        });
+        return;
+      }
+      pluginHost
+        .call(frame.pluginId, frame.method, frame.payload)
+        .then((res) => {
+          if (res.ok) {
+            send(ws, {
+              v: 1,
+              t: "plugin.result",
+              callId: frame.callId,
+              pluginId: frame.pluginId,
+              ok: true,
+              data: res.data,
+            });
+          } else {
+            send(ws, {
+              v: 1,
+              t: "plugin.result",
+              callId: frame.callId,
+              pluginId: frame.pluginId,
+              ok: false,
+              error: res.error,
+            });
+          }
+        })
+        .catch((err) => {
+          send(ws, {
+            v: 1,
+            t: "plugin.result",
+            callId: frame.callId,
+            pluginId: frame.pluginId,
+            ok: false,
+            error: err?.message ?? String(err),
           });
         });
       return;
@@ -2707,6 +3009,12 @@ async function handleShareRoute(
       t: "share.list",
       shares: shares.list().map(shareSummaryFor),
     });
+    audit.write({
+      kind: "share.new",
+      deviceId: createdBy ?? undefined,
+      ip: req.socket.remoteAddress ?? undefined,
+      details: { id: entry.id, sid: entry.sid, ttlMinutes: ttl, expiresAt: entry.expiresAt },
+    });
     return;
   }
   if (url.startsWith("/share/list") && req.method === "GET") {
@@ -2742,6 +3050,12 @@ async function handleShareRoute(
       v: 1,
       t: "share.list",
       shares: shares.list().map(shareSummaryFor),
+    });
+    audit.write({
+      kind: "share.revoke",
+      deviceId: createdBy ?? undefined,
+      ip: req.socket.remoteAddress ?? undefined,
+      details: { id },
     });
     return;
   }
@@ -2875,8 +3189,23 @@ const httpServer = createServer(async (req, res) => {
         console.log(`[rcc-host]    valid for 5 minutes. Enter it on the remote device.`);
         console.log("");
       },
+      onClaimed: (info) => {
+        audit.write({
+          kind: "auth.pair",
+          deviceId: info.deviceId,
+          ip: info.ip ?? undefined,
+          details: { name: info.deviceName, userAgent: info.userAgent },
+        });
+      },
     })
   ) {
+    return;
+  }
+
+  // REST API — /api/v1/* + /api/openapi.json. Dispatches to rest.ts which
+  // mirrors the main ws frames over HTTP for curl / Postman / 3rd-party use.
+  if (req.url?.startsWith("/api/v1/") || req.url?.startsWith("/api/openapi")) {
+    await handleRestRoute(req, res, buildRestCtx());
     return;
   }
 
@@ -3070,6 +3399,47 @@ const httpServer = createServer(async (req, res) => {
     return;
   }
 
+  // [plugins] GET /plugins/:id/* — authenticated static file serving for a
+  // plugin's UI bundle (if it declared a `ui` dir). iframe-hosted plugin UIs
+  // pass the device token via ?token=... on the URL because iframes can't set
+  // Authorization headers.
+  {
+    const m = /^\/plugins\/([a-z0-9-]+)\/(.*?)(?:\?.*)?$/.exec(req.url ?? "");
+    if (m && req.method === "GET") {
+      const auth = authenticate(req);
+      if (!auth.ok) {
+        res.writeHead(401, {
+          "content-type": "application/json",
+          "x-rcc-auth-reason": auth.reason,
+        });
+        res.end(JSON.stringify({ error: auth.reason }));
+        return;
+      }
+      const pid = m[1]!;
+      const rel = m[2] ?? "";
+      const path = pluginHost.resolveUiAsset(pid, rel);
+      if (!path) {
+        res.writeHead(404, { "content-type": "application/json" });
+        res.end(JSON.stringify({ error: "plugin asset not found" }));
+        return;
+      }
+      try {
+        const body = await readFile(path);
+        const ext = extname(path).toLowerCase();
+        res.writeHead(200, {
+          "content-type": MIME[ext] ?? "application/octet-stream",
+          "cache-control": "no-store",
+          "x-content-type-options": "nosniff",
+        });
+        res.end(body);
+      } catch {
+        res.writeHead(404, { "content-type": "application/json" });
+        res.end(JSON.stringify({ error: "plugin asset not found" }));
+      }
+      return;
+    }
+  }
+
   // Serve the built web bundle when present.
   const served = await serveStatic(req.url ?? "/");
   if (served) {
@@ -3240,6 +3610,11 @@ installCrashHandler((frame) => {
     type: frame.type,
   });
   broadcast(frame);
+  audit.write({
+    kind: "crash",
+    ts: frame.at,
+    details: { message: frame.message, type: frame.type },
+  });
 });
 
 // [activity] Periodic update probe — once at boot + every 6h. Only emits an
@@ -3257,6 +3632,10 @@ async function probeUpdate(): Promise<void> {
         latest: r.latest,
         notes: r.notes,
         timestamp: Date.now(),
+      });
+      audit.write({
+        kind: "update.available",
+        details: { current: r.current, latest: r.latest },
       });
     }
   } catch {
