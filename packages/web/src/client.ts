@@ -373,6 +373,11 @@ export class RccClient {
     this.send({ v: 1, t: "session.close", sid });
   }
 
+  resumeSession(sid: string): void {
+    // Archived dead session → host reopens pty/SDK with same id + chat history.
+    this.send({ v: 1, t: "session.resume", sid });
+  }
+
   on(l: Listener): () => void {
     this.listeners.add(l);
     return () => this.listeners.delete(l);

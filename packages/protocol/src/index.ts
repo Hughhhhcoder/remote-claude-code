@@ -262,6 +262,21 @@ export const SessionExited = z.object({
   code: z.number().int().nullable(),
 });
 
+// [persistence] Added in M6 batch 8: resume an archived (status:"exited")
+// session — the host reopens a pty / SDK query using the stored meta and keeps
+// the same id so chat/ringTail continuity is preserved on every client.
+export const SessionResume = z.object({
+  ...base,
+  t: z.literal("session.resume"),
+  sid: z.string(),
+});
+
+export const SessionResumed = z.object({
+  ...base,
+  t: z.literal("session.resumed"),
+  session: SessionMeta,
+});
+
 export const PtyIn = z.object({
   ...base,
   t: z.literal("pty.in"),
@@ -1282,6 +1297,65 @@ export const MarketMcpInstalled = z.object({
   error: z.string().optional(),
 });
 
+// [ui-prefs] — per-user UI preferences (accent color / font scale / custom
+// terminal key buttons / theme placeholder). Persisted server-side at
+// ~/.rcc/ui-prefs.json and mirrored in localStorage. All connected clients
+// share the same prefs for now; `prefs` frames broadcast after mutation.
+
+export const UI_ACCENT_COLORS = [
+  "orange",
+  "cyan",
+  "violet",
+  "pink",
+  "emerald",
+] as const;
+export const UiAccent = z.enum(UI_ACCENT_COLORS);
+export type UiAccent = z.infer<typeof UiAccent>;
+
+export const UiTheme = z.enum(["dark", "light", "system"]);
+export type UiTheme = z.infer<typeof UiTheme>;
+
+export const UiCustomKey = z.object({
+  label: z.string().min(1).max(32),
+  send: z.string().min(1).max(64),
+  hint: z.string().max(120).optional(),
+});
+export type UiCustomKey = z.infer<typeof UiCustomKey>;
+
+export const UiPrefs = z.object({
+  accent: UiAccent.default("orange"),
+  fontScale: z.number().min(0.8).max(1.4).default(1.0),
+  customKeys: z.array(UiCustomKey).max(32).default([]),
+  theme: UiTheme.default("dark"),
+});
+export type UiPrefs = z.infer<typeof UiPrefs>;
+
+export const UiPrefsPartial = UiPrefs.partial();
+export type UiPrefsPartial = z.infer<typeof UiPrefsPartial>;
+
+export const PrefsRequest = z.object({
+  ...base,
+  t: z.literal("prefs.request"),
+});
+
+export const Prefs = z.object({
+  ...base,
+  t: z.literal("prefs"),
+  prefs: UiPrefs,
+});
+
+export const PrefsUpdate = z.object({
+  ...base,
+  t: z.literal("prefs.update"),
+  prefs: UiPrefsPartial,
+});
+
+export const PrefsUpdated = z.object({
+  ...base,
+  t: z.literal("prefs.updated"),
+  prefs: UiPrefs,
+});
+
 // [health] — filled by M5 batch 6
 //
 // Host captures uncaughtException / unhandledRejection, writes JSONL to
@@ -1297,6 +1371,75 @@ export const HealthCrash = z.object({
   type: z.string().optional(),
 });
 
+// [metrics] — observability panel
+//
+// MetricsCollector on host keeps a 60-sample rolling window (1s resolution)
+// of process / session / ws / pty stats plus monotonic counters (crashes,
+// replay rejects, decrypt fails, auth fails). Clients opt in via
+// `metrics.subscribe` and receive `metrics.tick` ~every 2s until
+// `metrics.unsubscribe`. Same shape is served at `GET /metrics` for one-shot
+// reads. Series arrays are exactly 60 entries (oldest → newest).
+
+export const MetricsSnapshot = z.object({
+  at: z.number(),
+  uptimeSec: z.number(),
+  process: z.object({
+    rss: z.number(),
+    heapUsed: z.number(),
+    heapTotal: z.number(),
+    external: z.number(),
+    cpuPct: z.number(),
+  }),
+  rssSeries: z.array(z.number()),
+  cpuSeries: z.array(z.number()),
+  sessions: z.object({
+    total: z.number(),
+    running: z.number(),
+    exited: z.number(),
+    byDriver: z.object({ cli: z.number(), sdk: z.number() }),
+  }),
+  ws: z.object({
+    connections: z.number(),
+    subscribers: z.number(),
+    bytesInPerSec: z.number(),
+    bytesOutPerSec: z.number(),
+    msgsInPerSec: z.number(),
+    msgsOutPerSec: z.number(),
+    bytesInSeries: z.array(z.number()),
+    bytesOutSeries: z.array(z.number()),
+  }),
+  pty: z.object({
+    bytesInPerSec: z.number(),
+    bytesOutPerSec: z.number(),
+  }),
+  chat: z.object({
+    msgsPerSec: z.number(),
+  }),
+  counters: z.object({
+    crashes: z.number(),
+    replayRejects: z.number(),
+    decryptFails: z.number(),
+    authFails: z.number(),
+  }),
+});
+export type MetricsSnapshot = z.infer<typeof MetricsSnapshot>;
+
+export const MetricsSubscribe = z.object({
+  ...base,
+  t: z.literal("metrics.subscribe"),
+});
+
+export const MetricsUnsubscribe = z.object({
+  ...base,
+  t: z.literal("metrics.unsubscribe"),
+});
+
+export const MetricsTick = z.object({
+  ...base,
+  t: z.literal("metrics.tick"),
+  snapshot: MetricsSnapshot,
+});
+
 // ──────────────────────────────────────────────────────────────────────────
 
 export const Frame = z.discriminatedUnion("t", [
@@ -1307,6 +1450,8 @@ export const Frame = z.discriminatedUnion("t", [
   SessionAttach,
   SessionClose,
   SessionExited,
+  SessionResume,
+  SessionResumed,
   PtyIn,
   PtyOut,
   PtyResize,
@@ -1416,6 +1561,13 @@ export const Frame = z.discriminatedUnion("t", [
   MarketInstallMcp,
   MarketMcpInstalled,
   HealthCrash,
+  PrefsRequest,
+  Prefs,
+  PrefsUpdate,
+  PrefsUpdated,
+  MetricsSubscribe,
+  MetricsUnsubscribe,
+  MetricsTick,
 ]);
 export type Frame = z.infer<typeof Frame>;
 

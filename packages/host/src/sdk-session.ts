@@ -39,7 +39,8 @@ import type { BufferedChunk, ExitListener, SessionListener } from "./session.ts"
 export class SdkSession {
   readonly id: string;
   readonly cwd: string;
-  readonly createdAt = Date.now();
+  readonly createdAt: number;
+  lastActiveAt: number;
   readonly permissionMode: PermissionMode;
   readonly driver = "sdk" as const;
   projectId: string | null;
@@ -88,14 +89,22 @@ export class SdkSession {
     rows?: number;
     permissionMode?: PermissionMode;
     projectId?: string | null;
+    id?: string;
+    createdAt?: number;
+    initialChat?: readonly ChatMessage[];
   }) {
-    this.id = randomUUID().slice(0, 8);
+    this.id = opts.id ?? randomUUID().slice(0, 8);
+    this.createdAt = opts.createdAt ?? Date.now();
+    this.lastActiveAt = this.createdAt;
     this.cwd = opts.cwd ?? process.cwd();
     this.cols = opts.cols ?? 120;
     this.rows = opts.rows ?? 32;
     this.permissionMode = opts.permissionMode ?? "default";
     this.projectId = opts.projectId ?? null;
     this.chat = new ChatParser(this.id);
+    if (opts.initialChat && opts.initialChat.length > 0) {
+      for (const m of opts.initialChat) this.chat.appendMessage({ ...m, sid: this.id });
+    }
   }
 
   /**
@@ -149,6 +158,7 @@ export class SdkSession {
    */
   write(data: string): void {
     if (this.status !== "running") return;
+    this.lastActiveAt = Date.now();
     this.inputBuffer += data;
     // Split on either \r or \n; flush completed lines.
     let idx: number;
@@ -196,6 +206,12 @@ export class SdkSession {
       pending.reject(new Error("session closed"));
     }
     this.markExited(null);
+  }
+
+  /** SDK sessions never emit pty bytes; persistence keeps an empty string so
+   * the SessionSnapshot shape stays uniform. */
+  ringTail(): string {
+    return "";
   }
 
   meta(): SessionMeta {
@@ -284,6 +300,7 @@ export class SdkSession {
   }
 
   private handleSdkMessage(msg: SDKMessage): void {
+    this.lastActiveAt = Date.now();
     switch (msg.type) {
       case "assistant":
         this.onAssistantMessage(msg);

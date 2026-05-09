@@ -3,6 +3,7 @@
 // when you need to inspect or revoke devices without going through the UI
 // (e.g. lost phone).
 import { TrustStore } from "./trust.ts";
+import { loadAllSnapshots, purgeAll, purgeStale, SESSIONS_DIR } from "./persistence.ts";
 
 function usage(): never {
   console.error(`
@@ -10,12 +11,43 @@ Usage:
   rcc-admin devices                # list paired devices
   rcc-admin revoke <device-id>     # remove a device
   rcc-admin rename <device-id> <new-name>
+  rcc-admin sessions               # list persisted session snapshots
+  rcc-admin sessions --purge       # delete all snapshots in ~/.rcc/sessions/
+  rcc-admin sessions --stale       # delete snapshots idle > 30 days
 `);
   process.exit(1);
 }
 
 const args = process.argv.slice(2);
 const cmd = args[0];
+
+if (cmd === "sessions" || cmd === "ss") {
+  const flag = args[1];
+  if (flag === "--purge") {
+    const n = await purgeAll();
+    console.log(`purged ${n} snapshot(s) from ${SESSIONS_DIR}`);
+  } else if (flag === "--stale") {
+    const n = await purgeStale();
+    console.log(`purged ${n} stale snapshot(s) (idle > 30d)`);
+  } else {
+    const snaps = await loadAllSnapshots();
+    if (snaps.length === 0) {
+      console.log(`(no snapshots in ${SESSIONS_DIR})`);
+    } else {
+      for (const s of snaps) {
+        const created = new Date(s.meta.createdAt).toISOString().slice(0, 19).replace("T", " ");
+        const seen = new Date(s.meta.lastActiveAt).toISOString().slice(0, 19).replace("T", " ");
+        console.log(
+          `${s.meta.id}  ${s.meta.driver.padEnd(3)}  ${s.meta.title ?? s.meta.cwd}`,
+        );
+        console.log(
+          `        created ${created}  last ${seen}  chat ${s.chat.length}  ring ${s.ringTail.length}B`,
+        );
+      }
+    }
+  }
+  process.exit(0);
+}
 
 const trust = await TrustStore.load();
 

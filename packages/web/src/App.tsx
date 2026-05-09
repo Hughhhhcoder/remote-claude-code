@@ -25,7 +25,10 @@ import { InstallPrompt } from "./InstallPrompt.tsx";
 import { PermissionApproval } from "./PermissionApproval.tsx";
 import { PushPrompt } from "./PushPrompt.tsx";
 import { VersionBadge } from "./VersionBadge.tsx";
+import { MetricsPanel } from "./MetricsPanel.tsx";
 import { clearToken, loadToken } from "./auth.ts";
+import { SettingsModal } from "./SettingsModal.tsx";
+import { createPrefsStore, DEFAULT_CUSTOM_KEYS } from "./prefs.ts";
 
 const FALLBACK_PINNED: readonly CommandSummary[] = [
   { id: "builtin:review", name: "review", description: "完整 PR 代码审查", scope: "builtin", pinned: true },
@@ -43,6 +46,8 @@ function dotForScope(scope: "builtin" | "user" | "project"): string {
 export function App() {
   const client = new RccClient({ url: defaultWsUrl(), token: loadToken() });
   const isMobile = useIsMobile();
+  const prefsStore = createPrefsStore(client);
+  const [settingsOpen, setSettingsOpen] = createSignal(false);
 
   const [sessions, setSessions] = createSignal<SessionMeta[]>([]);
   const [activeSid, setActiveSid] = createSignal<string | null>(null);
@@ -99,6 +104,11 @@ export function App() {
     if (frame.t === "session.created") {
       setSessions((s) => [...s, frame.session]);
       setActiveSid(frame.session.id);
+    } else if (frame.t === "session.resumed") {
+      setSessions((s) =>
+        s.map((x) => (x.id === frame.session.id ? { ...x, ...frame.session } : x)),
+      );
+      setActiveSid(frame.session.id);
     } else if (frame.t === "session.exited") {
       setSessions((s) =>
         s.map((x) => (x.id === frame.sid ? { ...x, status: "exited" } : x)),
@@ -134,9 +144,15 @@ export function App() {
     return out;
   });
 
+  const customKeys = createMemo(() => {
+    const k = prefsStore.prefs().customKeys;
+    return k.length > 0 ? k : [...DEFAULT_CUSTOM_KEYS];
+  });
+
   onCleanup(() => {
     unsubStatus();
     unsubFrame();
+    prefsStore.dispose();
     client.dispose();
   });
 
@@ -225,6 +241,16 @@ export function App() {
     }
   }
 
+  function onResumeSession(sid: string) {
+    // Archived (dead) session — host will reopen pty/SDK with the same id and
+    // broadcast session.resumed. We optimistically flip status locally.
+    client.resumeSession(sid);
+    setSessions((s) =>
+      s.map((x) => (x.id === sid ? { ...x, status: "running" } : x)),
+    );
+    setActiveSid(sid);
+  }
+
   function sendCommand(cmd: string) {
     const sid = activeSid();
     if (!sid) return;
@@ -290,7 +316,15 @@ export function App() {
           <TunnelBadge info={tunnel()} />
           <PushPrompt client={client} />
           <VersionBadge client={client} />
+          <MetricsPanel client={client} />
           <InstallPrompt />
+          <button
+            onClick={() => setSettingsOpen(true)}
+            class="text-xs px-2 py-1 rounded-md border border-zinc-800 bg-zinc-900/60 hover:bg-zinc-800/80 hover:border-accent-500/50 text-zinc-300 hover:text-accent-300 transition"
+            title="主题 / 键位 / 字体设置"
+          >
+            🎨
+          </button>
           <StatusBadge status={status()} />
         </div>
       </div>
@@ -307,7 +341,7 @@ export function App() {
         <aside class="bg-zinc-950 border-r border-zinc-900 flex flex-col overflow-hidden">
           <div class="p-3 border-b border-zinc-900 space-y-2">
             <button
-              class="w-full py-2 rounded-lg bg-gradient-to-r from-orange-500 to-rose-500 text-white text-sm font-medium flex items-center justify-center gap-2 hover:opacity-90 transition"
+              class="w-full py-2 rounded-lg bg-gradient-to-r from-accent-500 to-accent-600 text-white text-sm font-medium flex items-center justify-center gap-2 hover:opacity-90 transition"
               onClick={() => onNewSession()}
             >
               <span>+</span> New session
@@ -362,7 +396,7 @@ export function App() {
                             e.stopPropagation();
                             onNewSession(p.id);
                           }}
-                          class="text-[10px] text-zinc-500 hover:text-orange-300 opacity-0 group-hover:opacity-100 px-1"
+                          class="text-[10px] text-zinc-500 hover:text-accent-300 opacity-0 group-hover:opacity-100 px-1"
                           title={`在 ${p.name} 中新建会话`}
                         >
                           +
@@ -387,6 +421,7 @@ export function App() {
                                 active={activeSid() === s.id}
                                 onActivate={() => setActiveSid(s.id)}
                                 onClose={() => onCloseSession(s.id)}
+                                onResume={() => onResumeSession(s.id)}
                               />
                             )}
                           </For>
@@ -418,7 +453,7 @@ export function App() {
             </button>
             <button
               class={`w-full text-xs flex items-center gap-1.5 py-1.5 px-2 rounded hover:bg-zinc-900 ${
-                fileBrowserOpen() ? "text-orange-300" : "text-zinc-500 hover:text-zinc-200"
+                fileBrowserOpen() ? "text-accent-300" : "text-zinc-500 hover:text-zinc-200"
               }`}
               onClick={() => setFileBrowserOpen((v) => !v)}
               title="切换文件浏览器"
@@ -510,7 +545,7 @@ export function App() {
                         <button
                           class={`shrink-0 text-[11px] px-2.5 py-1.5 rounded-md border flex items-center gap-1.5 font-mono ${
                             c.scope === "project"
-                              ? "bg-orange-500/10 border-orange-500/30 text-orange-300 hover:bg-orange-500/20"
+                              ? "bg-accent-500/10 border-accent-500/30 text-accent-300 hover:bg-accent-500/20"
                               : "bg-zinc-900 border-zinc-800 text-zinc-300 hover:border-zinc-700"
                           }`}
                           onClick={() => sendCommand(`/${c.name}`)}
@@ -522,16 +557,15 @@ export function App() {
                       )}
                     </For>
                     <span class="shrink-0 w-px h-5 bg-zinc-800 mx-0.5" />
-                    <KeyButton label="Esc" onClick={() => client.write(activeSid()!, "\x1b")} />
-                    <KeyButton label="Tab" onClick={() => client.write(activeSid()!, "\t")} />
-                    <KeyButton label="↑" onClick={() => client.write(activeSid()!, "\x1b[A")} />
-                    <KeyButton label="↓" onClick={() => client.write(activeSid()!, "\x1b[B")} />
-                    <KeyButton label="^C" onClick={() => client.write(activeSid()!, "\x03")} />
-                    <KeyButton
-                      label="Shift+Tab"
-                      onClick={() => client.write(activeSid()!, "\x1b[Z")}
-                      hint="plan mode toggle"
-                    />
+                    <For each={customKeys()}>
+                      {(k) => (
+                        <KeyButton
+                          label={k.label}
+                          onClick={() => client.write(activeSid()!, k.send)}
+                          hint={k.hint}
+                        />
+                      )}
+                    </For>
                   </div>
                   <div class="mt-2 flex items-center justify-between text-[11px] text-zinc-600">
                     <div>点击按钮向当前 session 发送字符</div>
@@ -595,9 +629,19 @@ export function App() {
         client={client}
         onClose={() => setMarketOpen(false)}
       />
+      <SettingsModal
+        open={settingsOpen()}
+        store={prefsStore}
+        onClose={() => setSettingsOpen(false)}
+      />
       <PermissionApproval client={client} device={currentDevice()} />
       <Show when={isMobile() && activeSid()}>
-        <MobileKeyBar client={client} sid={activeSid()} pinnedCommands={pinnedCommands} />
+        <MobileKeyBar
+          client={client}
+          sid={activeSid()}
+          pinnedCommands={pinnedCommands}
+          customKeys={customKeys}
+        />
       </Show>
     </div>
     </Show>
@@ -718,7 +762,9 @@ function SessionRow(props: {
   active: boolean;
   onActivate: () => void;
   onClose: () => void;
+  onResume: () => void;
 }) {
+  const isArchived = () => props.meta.status === "exited";
   return (
     <div
       class={`group p-2.5 rounded-lg mb-1.5 cursor-pointer ${
@@ -742,8 +788,28 @@ function SessionRow(props: {
             <span class="text-xs text-zinc-500 font-mono truncate">{props.meta.id}</span>
             <PermissionChip mode={props.meta.permissionMode} />
             <DriverChip driver={props.meta.driver ?? "cli"} />
+            <Show when={isArchived()}>
+              <span
+                class="text-[9px] px-1 py-px rounded bg-zinc-800 text-zinc-400 border border-zinc-700"
+                title="会话已存档,点重开恢复"
+              >
+                💾 存档
+              </span>
+            </Show>
           </div>
         </div>
+        <Show when={isArchived()}>
+          <button
+            class="opacity-0 group-hover:opacity-100 text-[10px] px-1.5 py-0.5 rounded border border-emerald-700 text-emerald-300 hover:bg-emerald-900/30"
+            onClick={(e) => {
+              e.stopPropagation();
+              props.onResume();
+            }}
+            title="重开会话(保留 id 和历史)"
+          >
+            重开
+          </button>
+        </Show>
         <button
           class="opacity-0 group-hover:opacity-100 text-zinc-500 hover:text-rose-400 text-xs"
           onClick={(e) => {

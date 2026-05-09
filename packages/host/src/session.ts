@@ -7,6 +7,8 @@ import { RingBuffer } from "./ring-buffer.ts";
 import { ChatParser } from "./chat-parser.ts";
 import { SdkSession } from "./sdk-session.ts";
 
+const RING_TAIL_BYTES = 32 * 1024;
+
 export interface BufferedChunk {
   seq: number;
   data: string;
@@ -23,7 +25,8 @@ export type ExitListener = (code: number | null) => void;
 export class Session {
   readonly id: string;
   readonly cwd: string;
-  readonly createdAt = Date.now();
+  readonly createdAt: number;
+  lastActiveAt: number;
   readonly permissionMode: PermissionMode;
   readonly driver = "cli" as const;
   /**
@@ -39,6 +42,7 @@ export class Session {
 
   private readonly pty: IPty;
   private readonly buffer = new RingBuffer<BufferedChunk>(1024);
+  private tailAccumulator = "";
   private readonly listeners = new Set<SessionListener>();
   private readonly exitListeners = new Set<ExitListener>();
   private nextSeq = 0;
@@ -55,14 +59,29 @@ export class Session {
     env?: Record<string, string>;
     permissionMode?: PermissionMode;
     projectId?: string | null;
+    id?: string;
+    createdAt?: number;
+    initialRingTail?: string;
+    initialChat?: readonly import("@rcc/protocol").ChatMessage[];
   }) {
-    this.id = randomUUID().slice(0, 8);
+    this.id = opts.id ?? randomUUID().slice(0, 8);
+    this.createdAt = opts.createdAt ?? Date.now();
+    this.lastActiveAt = this.createdAt;
     this.cwd = opts.cwd ?? process.cwd();
     this.cols = opts.cols ?? 120;
     this.rows = opts.rows ?? 32;
     this.permissionMode = opts.permissionMode ?? "default";
     this.projectId = opts.projectId ?? null;
     this.chat = new ChatParser(this.id);
+    if (opts.initialChat && opts.initialChat.length > 0) {
+      for (const m of opts.initialChat) this.chat.appendMessage({ ...m, sid: this.id });
+    }
+    if (opts.initialRingTail) {
+      this.tailAccumulator = opts.initialRingTail.slice(-RING_TAIL_BYTES);
+      // Seed replay with one synthetic chunk so attach() can show the archive.
+      const chunk: BufferedChunk = { seq: this.nextSeq++, data: this.tailAccumulator };
+      this.buffer.push(chunk);
+    }
 
     const env: Record<string, string> = {
       ...(process.env as Record<string, string>),
@@ -92,6 +111,14 @@ export class Session {
     this.pty.onData((data) => {
       const chunk: BufferedChunk = { seq: this.nextSeq++, data };
       this.buffer.push(chunk);
+      // Keep a short ANSI tail in memory for persistence — snapshots ship the
+      // last ~32KB so a reattached client sees recent terminal state even
+      // after host restart.
+      this.tailAccumulator += data;
+      if (this.tailAccumulator.length > RING_TAIL_BYTES * 2) {
+        this.tailAccumulator = this.tailAccumulator.slice(-RING_TAIL_BYTES);
+      }
+      this.lastActiveAt = Date.now();
       for (const l of this.listeners) l(chunk);
       // [messages] keep the chat parser fed alongside the raw stream.
       this.chat.feedOutput(data);
@@ -106,6 +133,7 @@ export class Session {
 
   write(data: string): void {
     if (this.status !== "running") return;
+    this.lastActiveAt = Date.now();
     this.pty.write(data);
   }
 
@@ -146,6 +174,12 @@ export class Session {
     }
   }
 
+  /** Last ~32KB of ANSI output — fed into the snapshot so a reattached client
+   * can restore recent terminal state after a host restart. */
+  ringTail(): string {
+    return this.tailAccumulator.slice(-RING_TAIL_BYTES);
+  }
+
   meta(): SessionMeta {
     return {
       id: this.id,
@@ -180,7 +214,107 @@ function isClaudeLike(command: string): boolean {
  * (resize, raw key writes) are no-ops on SDK sessions; clients are expected
  * to render SDK sessions via ChatView only.
  */
-export type AnySession = Session | SdkSession;
+export type AnySession = Session | SdkSession | DeadSession;
+
+/**
+ * Registry-resident archive of a previously-live session whose pty / SDK query
+ * is gone (host restart, caller explicitly killed but kept the archive). Has
+ * no backing process, so write/resize/kill are no-ops; replay() returns the
+ * persisted ring tail as one synthetic chunk; chat is restored from disk.
+ * UI sees `status: "exited"` like any other dead session and can offer a
+ * "resume" button that sends a `session.resume` frame — the host then swaps
+ * this archive out for a fresh live {@link Session} / {@link SdkSession} that
+ * reuses the same id, cwd, and chat history.
+ */
+export class DeadSession {
+  readonly id: string;
+  readonly cwd: string;
+  readonly createdAt: number;
+  lastActiveAt: number;
+  readonly permissionMode: PermissionMode;
+  readonly driver: "cli" | "sdk";
+  projectId: string | null;
+  cols: number;
+  rows: number;
+  readonly status = "exited" as const;
+  readonly exitCode: number | null = null;
+  readonly chat: ChatParser;
+  private readonly _ringTail: string;
+
+  constructor(h: SessionHydration) {
+    this.id = h.id;
+    this.cwd = h.meta.cwd;
+    this.createdAt = h.createdAt;
+    this.lastActiveAt = h.createdAt;
+    this.permissionMode = h.meta.permissionMode;
+    this.driver = h.meta.driver;
+    this.projectId = h.meta.projectId ?? null;
+    this.cols = h.meta.cols;
+    this.rows = h.meta.rows;
+    this.chat = new ChatParser(this.id);
+    for (const m of h.chat) this.chat.appendMessage({ ...m, sid: this.id });
+    this._ringTail = h.ringTail ?? "";
+  }
+
+  write(_data: string): void {
+    // no-op — caller should resume first
+  }
+
+  resize(cols: number, rows: number): void {
+    this.cols = cols;
+    this.rows = rows;
+  }
+
+  subscribe(_l: SessionListener): () => void {
+    return () => {};
+  }
+
+  onExit(_l: ExitListener): () => void {
+    return () => {};
+  }
+
+  replay(_since: number | null): BufferedChunk[] {
+    if (!this._ringTail) return [];
+    return [{ seq: 0, data: this._ringTail }];
+  }
+
+  kill(): void {
+    // already dead
+  }
+
+  ringTail(): string {
+    return this._ringTail;
+  }
+
+  meta(): SessionMeta {
+    return {
+      id: this.id,
+      cwd: this.cwd,
+      title: displayCwd(this.cwd),
+      cols: this.cols,
+      rows: this.rows,
+      createdAt: this.createdAt,
+      status: "exited",
+      permissionMode: this.permissionMode,
+      driver: this.driver,
+      projectId: this.projectId ?? undefined,
+    };
+  }
+}
+
+/**
+ * Snapshot shape consumed by `hydrateSession` to rebuild a dead session (as a
+ * registry entry only, with no live pty / SDK query) after a host restart.
+ * Mirrors {@link SessionSnapshot} in persistence.ts but sealed off from the
+ * fs-layer type so callers don't need a round-trip through zod.
+ */
+export interface SessionHydration {
+  id: string;
+  createdAt: number;
+  meta: SessionMeta;
+  chat: readonly import("@rcc/protocol").ChatMessage[];
+  ringTail: string;
+}
 
 export interface CreateSessionOpts {
   driver?: "cli" | "sdk";
@@ -193,6 +327,11 @@ export interface CreateSessionOpts {
   rows?: number;
   permissionMode?: PermissionMode;
   projectId?: string | null;
+  /** Reuse this id (resume path). When omitted a fresh 8-char uuid is minted. */
+  id?: string;
+  createdAt?: number;
+  initialChat?: readonly import("@rcc/protocol").ChatMessage[];
+  initialRingTail?: string;
 }
 
 /**
@@ -209,6 +348,9 @@ export function createSession(opts: CreateSessionOpts): AnySession {
       rows: opts.rows,
       permissionMode: opts.permissionMode,
       projectId: opts.projectId ?? null,
+      id: opts.id,
+      createdAt: opts.createdAt,
+      initialChat: opts.initialChat,
     });
   }
   if (!opts.command) {
@@ -222,6 +364,10 @@ export function createSession(opts: CreateSessionOpts): AnySession {
     rows: opts.rows,
     permissionMode: opts.permissionMode,
     projectId: opts.projectId ?? null,
+    id: opts.id,
+    createdAt: opts.createdAt,
+    initialChat: opts.initialChat,
+    initialRingTail: opts.initialRingTail,
   });
 }
 
@@ -231,10 +377,13 @@ export class SessionRegistry {
   create(opts: CreateSessionOpts): AnySession {
     const session = createSession(opts);
     this.sessions.set(session.id, session);
-    session.onExit(() => {
-      setTimeout(() => this.sessions.delete(session.id), 30_000);
-    });
     return session;
+  }
+
+  /** Add a pre-built session (e.g. a DeadSession rebuilt from a snapshot,
+   * or a live session resumed from an archive). */
+  add(session: AnySession): void {
+    this.sessions.set(session.id, session);
   }
 
   get(id: string): AnySession | undefined {
@@ -243,6 +392,12 @@ export class SessionRegistry {
 
   list(): AnySession[] {
     return [...this.sessions.values()];
+  }
+
+  /** Drop the registry entry without touching disk. Used when a snapshot is
+   * deleted (close) or when replacing a dead session with a live one. */
+  remove(id: string): boolean {
+    return this.sessions.delete(id);
   }
 
   close(id: string): boolean {

@@ -1,15 +1,16 @@
 import { For, Show, createSignal, onCleanup, onMount } from "solid-js";
-import type { CommandSummary } from "@rcc/protocol";
+import type { CommandSummary, UiCustomKey } from "@rcc/protocol";
 import type { RccClient } from "./client.ts";
 
 type Props = {
   client: RccClient;
   sid: string | null;
   pinnedCommands: () => readonly CommandSummary[];
+  customKeys: () => readonly UiCustomKey[];
 };
 
 function dotForScope(scope: "builtin" | "user" | "project"): string {
-  if (scope === "project") return "bg-orange-400";
+  if (scope === "project") return "bg-accent-400";
   if (scope === "user") return "bg-sky-400";
   return "bg-violet-400";
 }
@@ -70,7 +71,7 @@ export function MobileKeyBar(props: Props) {
                 type="button"
                 class={`shrink-0 h-9 min-w-[36px] px-2.5 rounded-md border font-mono text-[11px] flex items-center gap-1.5 active:scale-95 active:opacity-80 transition ${
                   c.scope === "project"
-                    ? "bg-orange-500/10 border-orange-500/30 text-orange-300"
+                    ? "bg-accent-500/10 border-accent-500/30 text-accent-300"
                     : "bg-zinc-900 border-zinc-800 text-zinc-300"
                 }`}
                 onClick={() => sendCommand(c.name)}
@@ -84,24 +85,22 @@ export function MobileKeyBar(props: Props) {
       </div>
 
       <div class="px-2 pb-1 flex gap-1.5 overflow-x-auto no-scrollbar">
-        <MobileKey label="Esc" onTap={() => write("\x1b")} />
-        <MobileKey label="Tab" onTap={() => write("\t")} />
-        <MobileKey label="↑" onTap={() => write("\x1b[A")} />
-        <MobileKey label="↓" onTap={() => write("\x1b[B")} />
-        <MobileKey label="Enter" onTap={() => write("\r")} />
-        <MobileKey label="/" onTap={() => write("/")} />
-        <MobileKey label="^C" onTap={() => write("\x03")} />
-        <MobileKey label="⇧Tab" onTap={() => write("\x1b[Z")} />
+        <For each={props.customKeys()}>
+          {(k) => (
+            <MobileKey label={k.label} onTap={() => write(k.send)} hint={k.hint} />
+          )}
+        </For>
       </div>
     </div>
   );
 }
 
-function MobileKey(props: { label: string; onTap: () => void }) {
+function MobileKey(props: { label: string; onTap: () => void; hint?: string }) {
   return (
     <button
       type="button"
-      class="shrink-0 h-9 min-w-[42px] px-3 rounded-md bg-zinc-900 border border-zinc-800 text-zinc-200 font-mono text-[12px] active:bg-orange-500/20 active:border-orange-500/40 active:text-orange-200 transition"
+      class="shrink-0 h-9 min-w-[42px] px-3 rounded-md bg-zinc-900 border border-zinc-800 text-zinc-200 font-mono text-[12px] active:bg-accent-500/20 active:border-accent-500/40 active:text-accent-300 transition"
+      title={props.hint ?? props.label}
       onPointerDown={(e) => {
         e.preventDefault();
         props.onTap();

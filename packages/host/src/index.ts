@@ -13,13 +13,28 @@ import {
   PROTOCOL_VERSION,
   PermissionMode as PermissionModeSchema,
 } from "@rcc/protocol";
-import { SessionRegistry, type AnySession, Session } from "./session.ts";
+import {
+  SessionRegistry,
+  type AnySession,
+  Session,
+  DeadSession,
+  createSession,
+} from "./session.ts";
+import { SdkSession } from "./sdk-session.ts";
 import { startTunnel, type Tunnel } from "./tunnel.ts";
 import { loadConfig, resolveTunnelConfig } from "./config.ts";
 import { ProjectStore } from "./projects.ts";
 import { TrustStore, PairingCodes, type PairedDevice } from "./trust.ts";
 import { handlePairRoute } from "./pair.ts";
 import { handleWhisperRoute } from "./whisper.ts";
+import {
+  Debouncer,
+  deleteSnapshot,
+  loadAllSnapshots,
+  purgeStale,
+  saveSnapshot,
+  type SessionSnapshot,
+} from "./persistence.ts";
 import {
   loadOrCreateHostKeys,
   isEnvelope,
@@ -73,11 +88,14 @@ import {
   installSkillFromCatalog,
   installMcpFromCatalog,
 } from "./marketplace.ts";
+import { PrefsStore } from "./prefs.ts";
+import { metrics } from "./metrics.ts";
 
 interface WsState {
   attached: Set<string>;
   unsubs: Map<string, () => void>;
   device: PairedDevice | null;
+  metricsSubscribed: boolean;
 }
 
 const CLAUDE_COMMAND = process.env.RCC_CLAUDE_CMD ?? "claude";
@@ -161,6 +179,7 @@ const DEFAULT_PERMISSION_MODE: PermissionMode = (() => {
 const trust = await TrustStore.load();
 const codes = new PairingCodes();
 const push = await PushService.load();
+const prefs = await PrefsStore.load();
 await ensureSodiumReady();
 const hostKeys = await loadOrCreateHostKeys();
 const webauthn = new WebAuthnService(trust);
@@ -205,16 +224,76 @@ function authenticate(req: { url?: string; headers: { [key: string]: any }; sock
       trust.touch(device.id).catch(() => {});
       return { ok: true, device };
     }
+    metrics.incr("auth.fails");
     return { ok: false, reason: "invalid_token" };
   }
   if (TRUST_LOOPBACK && isLoopback(req)) {
     return { ok: true, device: null };
   }
+  metrics.incr("auth.fails");
   return { ok: false, reason: "auth_required" };
 }
 
 const registry = new SessionRegistry();
 const crdt = new CrdtRelay();
+
+// [persistence] Per-session debounced saver. Created lazily the first time a
+// session is added / hydrated and torn down when the session is explicitly
+// closed (`session.close`). Host restart leaves the snapshot file on disk so
+// the next boot restores the archive.
+const saveDebouncers = new Map<string, Debouncer>();
+
+function snapshotFor(session: AnySession): SessionSnapshot {
+  const meta = session.meta();
+  return {
+    meta: { ...meta, status: session.status, lastActiveAt: session.lastActiveAt },
+    chat: session.chat.list(),
+    ringTail: session.ringTail(),
+  };
+}
+
+function scheduleSave(session: AnySession): void {
+  let d = saveDebouncers.get(session.id);
+  if (!d) {
+    d = new Debouncer(() => saveSnapshot(snapshotFor(session)), 500);
+    saveDebouncers.set(session.id, d);
+  }
+  d.schedule();
+}
+
+function flushSaveSync(session: AnySession): void {
+  // Fire-and-forget immediate write — used for create/exit events where we
+  // don't want to risk losing the snapshot to a 500ms jitter window.
+  saveSnapshot(snapshotFor(session)).catch(() => {
+    // persistence is best-effort
+  });
+}
+
+function wirePersistence(session: AnySession): void {
+  flushSaveSync(session);
+  const unsubMsg = session.chat.onMessage(() => scheduleSave(session));
+  const unsubUpd = session.chat.onUpdate(() => scheduleSave(session));
+  if (session instanceof Session) {
+    // Ring tail evolves with pty output; save debounced (message listener
+    // already covers most mutations).
+    const unsubOut = session.subscribe(() => scheduleSave(session));
+    session.onExit(() => {
+      unsubMsg();
+      unsubUpd();
+      unsubOut();
+      flushSaveSync(session);
+    });
+    return;
+  }
+  session.onExit(() => {
+    unsubMsg();
+    unsubUpd();
+    flushSaveSync(session);
+  });
+}
+
+metrics.bindRegistry(registry);
+metrics.start();
 
 // Approval watchers: one per session. Scan pty.out for Claude CLI y/n prompts
 // and surface structured `approval.request` frames to all clients. The actual
@@ -304,6 +383,7 @@ function attachApprovalWatcher(session: AnySession): void {
 // every attached client sees assistant messages as they're classified.
 function attachChatBroadcast(session: AnySession): void {
   const unsub = session.chat.onMessage((message) => {
+    metrics.incr("chat.msgs");
     broadcast({ v: 1, t: "chat.append", sid: session.id, message });
   });
   // SDK driver also fires streaming segment updates; CLI driver never does.
@@ -323,23 +403,69 @@ function attachChatBroadcast(session: AnySession): void {
   });
 }
 
+// [metrics] Count pty output bytes once per session (host-side), not per
+// subscriber, so the rate reflects raw Claude output volume.
+function attachMetricsTap(session: AnySession): void {
+  const unsub = session.subscribe((chunk) => {
+    if (chunk.data) metrics.incr("pty.bytes.out", Buffer.byteLength(chunk.data, "utf8"));
+  });
+  session.onExit(() => unsub());
+}
+
 // Pinned slash command ids — loaded once from ~/.rcc/pinned-commands.json, kept
 // in memory, and broadcast via `cmd.pinned` whenever mutated.
 let pinnedCommandsCache: string[] = await loadPinned();
 
-const boot = registry.create({
-  driver: "cli",
-  command: CLAUDE_COMMAND,
-  args: CLAUDE_ARGS,
-  cwd: DEFAULT_CWD,
-  permissionMode: DEFAULT_PERMISSION_MODE,
-  projectId: projects.getDefault().id,
+// [persistence] Sweep snapshots older than 30d before we load them — keeps
+// ~/.rcc/sessions/ from growing unbounded across long host uptime.
+void purgeStale().catch(() => {});
+
+// [persistence] Restore exited-session archives from ~/.rcc/sessions/<sid>.json.
+// Every snapshot is re-registered as a DeadSession regardless of the status it
+// had on disk (previously-running sessions are dead because the host process
+// is new). The client's hello frame advertises them with status:"exited" so
+// the UI can show a "重开" button that fires `session.resume`.
+const snapshots = await loadAllSnapshots().catch((err) => {
+  console.warn("[rcc-host] failed to load session snapshots:", err);
+  return [];
 });
-attachApprovalWatcher(boot);
-attachChatBroadcast(boot);
-console.log(
-  `[rcc-host] bootstrapped session ${boot.id} at ${boot.cwd} (permission: ${boot.permissionMode})`,
-);
+for (const snap of snapshots) {
+  try {
+    const dead = new DeadSession({
+      id: snap.meta.id,
+      createdAt: snap.meta.createdAt,
+      meta: snap.meta,
+      chat: snap.chat,
+      ringTail: snap.ringTail,
+    });
+    registry.add(dead);
+  } catch (err) {
+    console.warn(`[rcc-host] failed to hydrate snapshot ${snap.meta.id}:`, err);
+  }
+}
+if (snapshots.length > 0) {
+  console.log(`[rcc-host] restored ${snapshots.length} session snapshot(s) from disk`);
+}
+
+// Only spawn a fresh bootstrap session on a truly cold start — otherwise the
+// user reconnects to their archived set and picks one to resume.
+if (registry.list().length === 0) {
+  const boot = registry.create({
+    driver: "cli",
+    command: CLAUDE_COMMAND,
+    args: CLAUDE_ARGS,
+    cwd: DEFAULT_CWD,
+    permissionMode: DEFAULT_PERMISSION_MODE,
+    projectId: projects.getDefault().id,
+  });
+  attachApprovalWatcher(boot);
+  attachChatBroadcast(boot);
+  attachMetricsTap(boot);
+  wirePersistence(boot);
+  console.log(
+    `[rcc-host] bootstrapped session ${boot.id} at ${boot.cwd} (permission: ${boot.permissionMode})`,
+  );
+}
 
 type E2EWebSocket = WebSocket & {
   rccDevice?: PairedDevice | null;
@@ -370,7 +496,10 @@ function frameForClient(ws: E2EWebSocket, frame: Frame): string {
 function send(ws: WebSocket, frame: Frame): void {
   if (ws.readyState !== WebSocket.OPEN) return;
   try {
-    ws.send(frameForClient(ws as E2EWebSocket, frame));
+    const payload = frameForClient(ws as E2EWebSocket, frame);
+    ws.send(payload);
+    metrics.incr("ws.bytes.out", Buffer.byteLength(payload, "utf8"));
+    metrics.incr("ws.msgs.out");
   } catch (err) {
     console.error("[rcc-host] send error", err);
   }
@@ -420,6 +549,8 @@ function handle(ws: WebSocket, state: WsState, frame: Frame): void {
       });
       attachApprovalWatcher(s);
       attachChatBroadcast(s);
+      attachMetricsTap(s);
+      wirePersistence(s);
       send(ws, { v: 1, t: "session.created", session: s.meta() });
       send(ws, { v: 1, t: "session.list", sessions: registry.list().map((x) => x.meta()) });
       attach(ws, state, s, null);
@@ -427,7 +558,7 @@ function handle(ws: WebSocket, state: WsState, frame: Frame): void {
       // Failures surface as system chat messages (and close the session); we
       // also emit a one-shot error frame so the client doesn't have to
       // parse chat to discover the problem.
-      if (s.driver === "sdk") {
+      if (s instanceof SdkSession) {
         s.start().catch((err: Error) => {
           send(ws, {
             v: 1,
@@ -446,17 +577,103 @@ function handle(ws: WebSocket, state: WsState, frame: Frame): void {
         send(ws, { v: 1, t: "error", code: "no_such_session", message: frame.sid, sid: frame.sid });
         return;
       }
+      // DeadSession archives ship their chat history in one go so reattaching
+      // clients see the full timeline without a separate chat.list.request.
+      if (s instanceof DeadSession) {
+        send(ws, { v: 1, t: "chat.list", sid: s.id, messages: s.chat.list() });
+      }
       attach(ws, state, s, frame.since ?? null);
+      return;
+    }
+    case "session.resume": {
+      const s = registry.get(frame.sid);
+      if (!(s instanceof DeadSession)) {
+        send(ws, {
+          v: 1,
+          t: "error",
+          code: "session_not_resumable",
+          message: frame.sid,
+          sid: frame.sid,
+        });
+        return;
+      }
+      // Snapshot the archive before we swap it out — we need its chat history
+      // to seed the new live session so the timeline continues uninterrupted.
+      const archivedChat = s.chat.list();
+      const saver = saveDebouncers.get(s.id);
+      if (saver) {
+        saver.cancel();
+        saveDebouncers.delete(s.id);
+      }
+      registry.remove(s.id);
+      let live: AnySession;
+      try {
+        live = createSession({
+          driver: s.driver,
+          id: s.id,
+          createdAt: s.createdAt,
+          command: s.driver === "cli" ? CLAUDE_COMMAND : undefined,
+          args: s.driver === "cli" ? CLAUDE_ARGS : undefined,
+          cwd: s.cwd,
+          cols: s.cols,
+          rows: s.rows,
+          permissionMode: s.permissionMode,
+          projectId: s.projectId,
+          initialChat: archivedChat,
+          // We intentionally don't replay the old ringTail here — the CLI
+          // writes a fresh banner on start and the archive was already shown
+          // once via attach().
+        });
+      } catch (err) {
+        // Put the archive back so the UI still has something to show.
+        registry.add(s);
+        send(ws, {
+          v: 1,
+          t: "error",
+          code: "session_resume_failed",
+          message: (err as Error).message,
+          sid: frame.sid,
+        });
+        return;
+      }
+      registry.add(live);
+      attachApprovalWatcher(live);
+      attachChatBroadcast(live);
+      attachMetricsTap(live);
+      wirePersistence(live);
+      // Notify every client so their sidebars flip running/dot colour.
+      broadcast({ v: 1, t: "session.resumed", session: live.meta() });
+      broadcast({ v: 1, t: "session.list", sessions: registry.list().map((x) => x.meta()) });
+      // Caller attaches to the resumed session so pty output starts flowing.
+      attach(ws, state, live, null);
+      if (live instanceof SdkSession) {
+        live.start().catch((err: Error) => {
+          send(ws, {
+            v: 1,
+            t: "error",
+            code: "sdk_start_failed",
+            message: err.message,
+            sid: live.id,
+          });
+        });
+      }
       return;
     }
     case "session.close": {
       registry.close(frame.sid);
       crdt.dropSession(frame.sid);
+      const saver = saveDebouncers.get(frame.sid);
+      if (saver) {
+        saver.cancel();
+        saveDebouncers.delete(frame.sid);
+      }
+      void deleteSnapshot(frame.sid).catch(() => {});
       send(ws, { v: 1, t: "session.list", sessions: registry.list().map((x) => x.meta()) });
       return;
     }
     case "pty.in": {
       registry.get(frame.sid)?.write(frame.data);
+      metrics.incr("pty.bytes.in", Buffer.byteLength(frame.data, "utf8"));
       return;
     }
     case "pty.resize": {
@@ -465,6 +682,15 @@ function handle(ws: WebSocket, state: WsState, frame: Frame): void {
     }
     case "ping": {
       send(ws, { v: 1, t: "pong", ts: frame.ts });
+      return;
+    }
+    case "metrics.subscribe": {
+      state.metricsSubscribed = true;
+      send(ws, { v: 1, t: "metrics.tick", snapshot: metrics.snapshot() });
+      return;
+    }
+    case "metrics.unsubscribe": {
+      state.metricsSubscribed = false;
       return;
     }
     case "approval.response": {
@@ -1458,6 +1684,35 @@ function handle(ws: WebSocket, state: WsState, frame: Frame): void {
         });
       return;
     }
+    case "prefs.request": {
+      send(ws, { v: 1, t: "prefs", prefs: prefs.get() });
+      return;
+    }
+    case "prefs.update": {
+      prefs
+        .update(frame.prefs)
+        .then((next) => {
+          const broadcastFrame: Frame = { v: 1, t: "prefs", prefs: next };
+          for (const client of wss.clients) {
+            if (client.readyState !== WebSocket.OPEN) continue;
+            try {
+              client.send(frameForClient(client as E2EWebSocket, broadcastFrame));
+            } catch {
+              // ignore
+            }
+          }
+          send(ws, { v: 1, t: "prefs.updated", prefs: next });
+        })
+        .catch((err) => {
+          send(ws, {
+            v: 1,
+            t: "error",
+            code: "prefs_update_failed",
+            message: err?.message ?? String(err),
+          });
+        });
+      return;
+    }
     default:
       return;
   }
@@ -1793,6 +2048,18 @@ const httpServer = createServer(async (req, res) => {
     return;
   }
 
+  if (req.url === "/metrics" && req.method === "GET") {
+    const auth = authenticate(req);
+    if (!auth.ok) {
+      res.writeHead(401, { "content-type": "application/json", "x-rcc-auth-reason": auth.reason });
+      res.end(JSON.stringify({ error: auth.reason }));
+      return;
+    }
+    res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+    res.end(JSON.stringify(metrics.snapshot()));
+    return;
+  }
+
   // WebAuthn: passkey registration + high-risk approval assertion. Both
   // require a valid device token; the RP ID is derived from the Host header
   // so the host works on both `localhost` and a cloudflared hostname.
@@ -1910,11 +2177,18 @@ function currentTunnelInfo(): TunnelInfo | undefined {
   return tunnel.getStatus();
 }
 
+// Track per-ws state so the outer loop (e.g. metrics ticker) can read
+// subscription flags without threading WsState through every closure.
+const wsStates = new WeakMap<WebSocket, WsState>();
+
 function broadcast(frame: Frame): void {
   for (const client of wss.clients) {
     if (client.readyState === WebSocket.OPEN) {
       try {
-        client.send(frameForClient(client as E2EWebSocket, frame));
+        const payload = frameForClient(client as E2EWebSocket, frame);
+        client.send(payload);
+        metrics.incr("ws.bytes.out", Buffer.byteLength(payload, "utf8"));
+        metrics.incr("ws.msgs.out");
       } catch {
         // socket going away; ignore
       }
@@ -1922,7 +2196,55 @@ function broadcast(frame: Frame): void {
   }
 }
 
-installCrashHandler((frame) => broadcast(frame));
+metrics.bindWsStats(() => {
+  let subscribers = 0;
+  let connections = 0;
+  for (const client of wss.clients) {
+    if (client.readyState !== WebSocket.OPEN) continue;
+    connections++;
+    const st = wsStates.get(client);
+    if (st?.metricsSubscribed) subscribers++;
+  }
+  return { connections, subscribers };
+});
+
+// Push metrics tick to subscribed clients every 2s. Interval is unref'd so it
+// never blocks shutdown; subscribe gating keeps idle clients quiet.
+const metricsTickTimer = setInterval(() => {
+  let needed = false;
+  for (const client of wss.clients) {
+    if (client.readyState !== WebSocket.OPEN) continue;
+    const st = wsStates.get(client);
+    if (st?.metricsSubscribed) {
+      needed = true;
+      break;
+    }
+  }
+  if (!needed) return;
+  const snapshot = metrics.snapshot();
+  const frame: Frame = { v: 1, t: "metrics.tick", snapshot };
+  for (const client of wss.clients) {
+    if (client.readyState !== WebSocket.OPEN) continue;
+    const st = wsStates.get(client);
+    if (!st?.metricsSubscribed) continue;
+    try {
+      const payload = frameForClient(client as E2EWebSocket, frame);
+      client.send(payload);
+      metrics.incr("ws.bytes.out", Buffer.byteLength(payload, "utf8"));
+      metrics.incr("ws.msgs.out");
+    } catch {
+      // ignore
+    }
+  }
+}, 2000);
+if (typeof metricsTickTimer === "object" && metricsTickTimer && "unref" in metricsTickTimer) {
+  (metricsTickTimer as { unref: () => void }).unref();
+}
+
+installCrashHandler((frame) => {
+  metrics.incr("crashes");
+  broadcast(frame);
+});
 
 if (tunnel) {
   tunnel.on("status", (s) => {
@@ -1949,7 +2271,13 @@ trust.onExternalChange(() => {
 wss.on("connection", (ws) => {
   const eWs = ws as E2EWebSocket;
   const device = eWs.rccDevice ?? null;
-  const state: WsState = { attached: new Set(), unsubs: new Map(), device };
+  const state: WsState = {
+    attached: new Set(),
+    unsubs: new Map(),
+    device,
+    metricsSubscribed: false,
+  };
+  wsStates.set(ws, state);
   if (device && !eWs.rccSharedKey) {
     console.warn(
       `[rcc-host] device ${device.id} (${device.name}) paired before E2E — falling back to plaintext. Ask user to re-pair.`,
@@ -1967,11 +2295,17 @@ wss.on("connection", (ws) => {
     projects: projects.list(),
   });
 
+  // Deliver current prefs so new clients can apply them immediately.
+  send(ws, { v: 1, t: "prefs", prefs: prefs.get() });
+
   ws.on("message", (raw) => {
     let text: string;
     if (typeof raw === "string") text = raw;
     else if (Array.isArray(raw)) text = Buffer.concat(raw).toString("utf8");
     else text = (raw as Buffer).toString("utf8");
+
+    metrics.incr("ws.bytes.in", Buffer.byteLength(text, "utf8"));
+    metrics.incr("ws.msgs.in");
 
     // E2E: the outer message may be a secretbox envelope. Try to unwrap it
     // first. We still accept plaintext in two cases: (a) loopback/legacy
@@ -1990,6 +2324,7 @@ wss.on("connection", (ws) => {
         return;
       }
       if (!timestampWithinSkew(outer.ts)) {
+        metrics.incr("replay.rejects");
         try {
           ws.close(4402, "timestamp_skew");
         } catch {
@@ -2001,6 +2336,7 @@ wss.on("connection", (ws) => {
       if (replay) {
         const check = replay.check(outer.s);
         if (check !== "ok") {
+          metrics.incr("replay.rejects");
           try {
             ws.close(4402, check === "replay" ? "replay" : "too_old");
           } catch {
@@ -2011,6 +2347,7 @@ wss.on("connection", (ws) => {
       }
       const decrypted = decryptEnvelope(eWs.rccSharedKey, outer);
       if (!decrypted) {
+        metrics.incr("decrypt.fails");
         // Auth failure on the E2E envelope — either key rotated or tampering.
         // Close with the unauthorized code so the client drops its token and
         // re-pairs.
@@ -2053,6 +2390,8 @@ wss.on("connection", (ws) => {
     for (const unsub of state.unsubs.values()) unsub();
     state.unsubs.clear();
     state.attached.clear();
+    state.metricsSubscribed = false;
+    wsStates.delete(ws);
   });
 });
 
@@ -2081,6 +2420,14 @@ httpServer.listen(PORT, () => {
 process.on("SIGINT", () => {
   console.log("\n[rcc-host] shutting down...");
   tunnel?.stop();
-  registry.closeAll();
-  process.exit(0);
+  // Flush any debounced snapshot writes so in-flight chat/ringTail changes
+  // land on disk before we exit — otherwise a reconnect would miss the last
+  // few hundred ms of output.
+  const pending = [...saveDebouncers.values()].map((d) => d.flush());
+  void Promise.allSettled(pending).then(() => {
+    registry.closeAll();
+    metrics.dispose();
+    clearInterval(metricsTickTimer);
+    process.exit(0);
+  });
 });

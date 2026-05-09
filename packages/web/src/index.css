@@ -4,6 +4,14 @@
 
 @import "@xterm/xterm/css/xterm.css";
 
+:root {
+  /* Default accent = orange. Overridden by applyPrefs() when user changes. */
+  --accent-300: 253 186 116;
+  --accent-400: 251 146 60;
+  --accent-500: 249 115 22;
+  --accent-600: 234 88 12;
+}
+
 html,
 body,
 #root {
