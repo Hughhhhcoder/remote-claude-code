@@ -7,6 +7,7 @@ import {
   saveE2EKey,
   saveToken,
 } from "./auth.ts";
+import { t } from "./i18n/index.ts";
 
 interface Props {
   onPaired: (token: string) => void;
@@ -50,7 +51,7 @@ export function PairingView(props: Props) {
     const s = claimSecret();
     if (!c || !s) return;
     if (entered().replace(/\s/g, "") !== c) {
-      setError("输入的码与 host 显示的不一致。再确认一下主机终端输出。");
+      setError(t("pair.mismatch"));
       return;
     }
     setPhase("claiming");
@@ -81,8 +82,8 @@ export function PairingView(props: Props) {
               R
             </div>
             <div>
-              <div class="font-semibold text-sm">配对此设备</div>
-              <div class="text-xs text-zinc-500">每台设备只需要配对一次，之后自动登录</div>
+              <div class="font-semibold text-sm">{t("pair.title")}</div>
+              <div class="text-xs text-zinc-500">{t("pair.subtitle")}</div>
             </div>
           </div>
         </div>
@@ -91,16 +92,14 @@ export function PairingView(props: Props) {
           <Show when={phase() === "intro" || phase() === "requesting" || phase() === "error"}>
             <div class="space-y-4">
               <p class="text-sm text-zinc-400 leading-relaxed">
-                点击下方按钮向 host 请求一个一次性配对码。配对码将出现在
-                <span class="mx-1 text-zinc-300 font-mono text-[13px]">rcc-host</span>
-                的终端里——读出来输入到下一步的输入框。
+                {t("pair.intro")}
               </p>
               <button
                 onClick={startRequest}
                 disabled={phase() === "requesting"}
                 class="w-full py-2.5 rounded-lg bg-gradient-to-r from-orange-500 to-rose-500 text-white text-sm font-semibold disabled:opacity-50"
               >
-                {phase() === "requesting" ? "请求中…" : "请求配对码"}
+                {phase() === "requesting" ? t("pair.requesting") : t("pair.requestCode")}
               </button>
               <Show when={error()}>
                 <div class="rounded-lg px-3 py-2 border border-rose-500/30 bg-rose-500/5 text-rose-300 text-xs">
@@ -114,7 +113,7 @@ export function PairingView(props: Props) {
             <div class="space-y-4">
               <div>
                 <div class="text-[11px] uppercase tracking-widest text-zinc-500 mb-2">
-                  Host 显示的码
+                  {t("pair.hostShownCode")}
                 </div>
                 <div class="font-mono text-2xl text-zinc-200 tracking-[0.3em] select-all">
                   {code()!.slice(0, 3)} {code()!.slice(3)}
@@ -123,14 +122,14 @@ export function PairingView(props: Props) {
                   class={`text-[11px] mt-1 ${codeExpired() ? "text-rose-400" : "text-zinc-500"}`}
                 >
                   {codeExpired()
-                    ? "已过期，请重新请求。"
-                    : `有效时间: ${Math.floor(secondsLeft() / 60)}:${String(secondsLeft() % 60).padStart(2, "0")}`}
+                    ? t("pair.expired")
+                    : `${t("pair.validFor")}: ${Math.floor(secondsLeft() / 60)}:${String(secondsLeft() % 60).padStart(2, "0")}`}
                 </div>
               </div>
 
               <div>
                 <label class="block text-[11px] uppercase tracking-widest text-zinc-500 mb-1.5">
-                  请重新输入同一个 6 位码确认
+                  {t("pair.reenter")}
                 </label>
                 <input
                   type="text"
@@ -145,7 +144,7 @@ export function PairingView(props: Props) {
 
               <div>
                 <label class="block text-[11px] uppercase tracking-widest text-zinc-500 mb-1.5">
-                  这台设备的名字
+                  {t("pair.deviceName")}
                 </label>
                 <input
                   type="text"
@@ -161,14 +160,14 @@ export function PairingView(props: Props) {
                   onClick={startRequest}
                   class="px-3 py-2 rounded-lg border border-zinc-800 text-xs text-zinc-400 hover:border-zinc-700"
                 >
-                  重新请求
+                  {t("pair.retry")}
                 </button>
                 <button
                   onClick={confirm}
                   disabled={codeExpired() || entered().replace(/\s/g, "").length !== 6}
                   class="flex-1 py-2 rounded-lg bg-emerald-500 text-zinc-950 text-sm font-semibold disabled:opacity-40 disabled:cursor-not-allowed"
                 >
-                  完成配对
+                  {t("pair.finish")}
                 </button>
               </div>
 
@@ -181,7 +180,7 @@ export function PairingView(props: Props) {
           </Show>
 
           <Show when={phase() === "claiming"}>
-            <div class="text-center py-6 text-sm text-zinc-400">正在确认…</div>
+            <div class="text-center py-6 text-sm text-zinc-400">{t("pair.confirming")}</div>
           </Show>
 
           <Show when={phase() === "success"}>
@@ -189,8 +188,8 @@ export function PairingView(props: Props) {
               <div class="w-12 h-12 mx-auto mb-3 rounded-full bg-emerald-500 grid place-items-center text-xl text-white">
                 ✓
               </div>
-              <div class="text-sm font-semibold mb-1">配对成功</div>
-              <div class="text-xs text-zinc-500">正在进入…</div>
+              <div class="text-sm font-semibold mb-1">{t("pair.success")}</div>
+              <div class="text-xs text-zinc-500">{t("pair.entering")}</div>
             </div>
           </Show>
         </div>

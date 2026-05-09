@@ -1,4 +1,5 @@
 import { createSignal, onCleanup, onMount, Show } from "solid-js";
+import { t } from "./i18n/index.ts";
 
 /**
  * Captures the `beforeinstallprompt` event so we can show a custom "📲 安装"
@@ -113,10 +114,10 @@ export function InstallPrompt() {
           type="button"
           onClick={onClick}
           class="text-xs px-2.5 py-1 rounded-md border border-zinc-800 bg-zinc-900/60 hover:bg-zinc-800/80 hover:border-orange-500/50 text-zinc-300 hover:text-orange-300 transition flex items-center gap-1.5"
-          title={deferred() ? "安装 RCC 到主屏" : "在 iOS Safari 手动添加到主屏"}
+          title={deferred() ? t("install.titleNative") : t("install.titleIos")}
         >
           <span>📲</span>
-          <span class="hidden sm:inline">安装</span>
+          <span class="hidden sm:inline">{t("install.label")}</span>
         </button>
         <Show when={iosHintOpen()}>
           <div
@@ -124,21 +125,21 @@ export function InstallPrompt() {
             onClick={(e) => e.stopPropagation()}
           >
             <div class="font-medium text-zinc-100 mb-1 flex items-center justify-between">
-              <span>在 iPhone / iPad 安装</span>
+              <span>{t("install.iosTitle")}</span>
               <button
                 class="text-zinc-500 hover:text-zinc-200"
                 onClick={dismissIosHint}
-                title="不再显示"
+                title={t("install.dismiss")}
               >
                 ✕
               </button>
             </div>
             <ol class="list-decimal pl-4 space-y-0.5 text-zinc-400">
-              <li>在 Safari 中点击底部 <span class="text-zinc-200">分享 ⬆</span> 按钮</li>
-              <li>滚动找到 <span class="text-zinc-200">"添加到主屏幕"</span></li>
-              <li>点击 <span class="text-zinc-200">"添加"</span> 完成</li>
+              <li>{t("install.iosStep1Prefix")} <span class="text-zinc-200">{t("install.iosStep1Share")}</span> {t("install.iosStep1Suffix")}</li>
+              <li>{t("install.iosStep2Prefix")} <span class="text-zinc-200">{t("install.iosStep2Name")}</span></li>
+              <li>{t("install.iosStep3Prefix")} <span class="text-zinc-200">{t("install.iosStep3Add")}</span> {t("install.iosStep3Suffix")}</li>
             </ol>
-            <div class="mt-2 text-zinc-600">iOS Safari 不支持原生安装弹窗，只能手动添加。</div>
+            <div class="mt-2 text-zinc-600">{t("install.iosFooter")}</div>
           </div>
         </Show>
       </div>

@@ -1,6 +1,7 @@
 import { createSignal, createMemo, For, Show, onCleanup, onMount } from "solid-js";
 import type {
   MarketMcpEntry,
+  MarketPluginEntry,
   MarketScope,
   MarketSkillEntry,
   MarketSource,
@@ -10,6 +11,7 @@ import type { RccClient } from "./client.ts";
 interface CatalogState {
   skills: MarketSkillEntry[];
   mcps: MarketMcpEntry[];
+  plugins: MarketPluginEntry[];
   sources: MarketSource[];
   fetchedAt: number;
 }
@@ -20,7 +22,7 @@ interface Props {
   onClose: () => void;
 }
 
-type Tab = "skills" | "mcps";
+type Tab = "skills" | "mcps" | "plugins";
 
 type InstallState = Record<
   string,
@@ -38,6 +40,10 @@ interface McpInstallPrompt {
   env: Record<string, string>;
 }
 
+interface PluginInstallPrompt {
+  entry: MarketPluginEntry;
+}
+
 const ICONS = ["✨", "🔒", "🔍", "📝", "🎨", "📚", "⚙", "🧪", "🚀", "🧠", "📦"];
 function iconFor(s: string): string {
   let h = 0;
@@ -53,12 +59,14 @@ export function MarketplaceView(props: Props) {
   const [state, setState] = createSignal<InstallState>({});
   const [skillPrompt, setSkillPrompt] = createSignal<SkillInstallPrompt | null>(null);
   const [mcpPrompt, setMcpPrompt] = createSignal<McpInstallPrompt | null>(null);
+  const [pluginPrompt, setPluginPrompt] = createSignal<PluginInstallPrompt | null>(null);
 
   const unsub = props.client.on((frame) => {
     if (frame.t === "market.catalog") {
       setCatalog({
         skills: frame.skills,
         mcps: frame.mcps,
+        plugins: frame.plugins ?? [],
         sources: frame.sources,
         fetchedAt: frame.fetchedAt,
       });
@@ -79,6 +87,17 @@ export function MarketplaceView(props: Props) {
         [`mcp:${frame.id}`]: {
           status: frame.ok ? "ok" : "error",
           message: frame.ok ? `已添加为 ${frame.installedName}` : frame.error,
+        },
+      }));
+    }
+    if (frame.t === "market.plugin.installed") {
+      setState((s) => ({
+        ...s,
+        [`plugin:${frame.id}`]: {
+          status: frame.ok ? "ok" : "error",
+          message: frame.ok
+            ? `已写入 ~/.rcc/plugins/${frame.pluginId}/ — 重启 host 后生效`
+            : frame.error,
         },
       }));
     }
@@ -128,6 +147,17 @@ export function MarketplaceView(props: Props) {
     });
   });
 
+  const filteredPlugins = createMemo(() => {
+    const c = catalog();
+    if (!c) return [];
+    const q = query().trim().toLowerCase();
+    if (!q) return c.plugins;
+    return c.plugins.filter((p) => {
+      const blob = `${p.name} ${p.description} ${(p.tags ?? []).join(" ")} ${p.author ?? ""} ${(p.permissions ?? []).join(" ")}`.toLowerCase();
+      return blob.includes(q);
+    });
+  });
+
   function openSkillPrompt(entry: MarketSkillEntry) {
     setSkillPrompt({ entry, scope: "user" });
   }
@@ -167,6 +197,22 @@ export function MarketplaceView(props: Props) {
       env,
     });
     setMcpPrompt(null);
+  }
+
+  function openPluginPrompt(entry: MarketPluginEntry) {
+    setPluginPrompt({ entry });
+  }
+
+  function confirmPluginInstall() {
+    const p = pluginPrompt();
+    if (!p) return;
+    setState((s) => ({ ...s, [`plugin:${p.entry.id}`]: { status: "installing" } }));
+    props.client.send({
+      v: 1,
+      t: "market.install.plugin",
+      id: p.entry.id,
+    });
+    setPluginPrompt(null);
   }
 
   return (
@@ -230,6 +276,12 @@ export function MarketplaceView(props: Props) {
               label="MCP Servers"
               count={catalog()?.mcps.length ?? 0}
             />
+            <TabBtn
+              active={tab() === "plugins"}
+              onClick={() => setTab("plugins")}
+              label="Plugins"
+              count={catalog()?.plugins.length ?? 0}
+            />
             <Show when={catalog()}>
               <span class="ml-auto text-[11px] text-zinc-600">
                 来源: {catalog()!.sources.length} · 已缓存 1h
@@ -280,6 +332,24 @@ export function MarketplaceView(props: Props) {
                   </div>
                 </Show>
               </Show>
+              <Show when={tab() === "plugins"}>
+                <Show
+                  when={filteredPlugins().length > 0}
+                  fallback={<EmptyCard label="没有匹配的 plugin" />}
+                >
+                  <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <For each={filteredPlugins()}>
+                      {(p) => (
+                        <PluginCard
+                          entry={p}
+                          state={state()[`plugin:${p.id}`]}
+                          onInstall={() => openPluginPrompt(p)}
+                        />
+                      )}
+                    </For>
+                  </div>
+                </Show>
+              </Show>
               <Show when={catalog() && catalog()!.sources.some((s) => !s.ok)}>
                 <div class="mt-5 rounded-lg border border-amber-500/20 bg-amber-500/5 p-3 text-[11px] text-amber-200">
                   <div class="font-medium mb-1">部分 manifest 加载失败:</div>
@@ -306,6 +376,7 @@ export function MarketplaceView(props: Props) {
 
         <Show when={skillPrompt()}>{renderSkillPrompt()}</Show>
         <Show when={mcpPrompt()}>{renderMcpPrompt()}</Show>
+        <Show when={pluginPrompt()}>{renderPluginPrompt()}</Show>
       </div>
     </Show>
   );
@@ -430,6 +501,83 @@ export function MarketplaceView(props: Props) {
               class="px-3 py-1.5 rounded bg-gradient-to-r from-orange-500 to-rose-500 text-white text-xs font-medium"
             >
               安装到 {p.scope}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  function renderPluginPrompt() {
+    const p = pluginPrompt()!;
+    const perms = p.entry.permissions ?? [];
+    return (
+      <div
+        class="fixed inset-0 z-[70] bg-black/60 grid place-items-center p-4"
+        onClick={(e) => e.target === e.currentTarget && setPluginPrompt(null)}
+      >
+        <div class="w-[520px] max-w-[calc(100vw-24px)] rounded-2xl border border-zinc-800 bg-zinc-950 shadow-2xl overflow-hidden">
+          <div class="px-5 py-4 border-b border-zinc-900">
+            <div class="text-sm font-semibold">安装 Plugin: {p.entry.name}</div>
+            <div class="text-xs text-zinc-500 mt-0.5 font-mono truncate">
+              {p.entry.id}@{p.entry.version}
+            </div>
+          </div>
+          <div class="px-5 py-4 space-y-3 max-h-[60vh] overflow-y-auto scrollbar">
+            <p class="text-[12px] text-zinc-400">{p.entry.description}</p>
+            <div class="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3">
+              <div class="text-[11px] uppercase tracking-wider text-amber-300 mb-1.5">
+                ⚠ 所需权限
+              </div>
+              <Show
+                when={perms.length > 0}
+                fallback={
+                  <div class="text-[11px] text-amber-100/70">无（最小权限）</div>
+                }
+              >
+                <div class="flex gap-1 flex-wrap">
+                  <For each={perms}>
+                    {(perm) => (
+                      <span class="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-200 border border-amber-500/40 font-mono">
+                        {perm}
+                      </span>
+                    )}
+                  </For>
+                </div>
+              </Show>
+              <div class="text-[10px] text-amber-100/70 mt-2 leading-relaxed">
+                Plugin 会在 host Node 进程内加载,拥有完整 fs/network 权限。只安装你信任的作者发布的 plugin。
+              </div>
+            </div>
+            <div class="text-[11px] text-zinc-500">
+              写入位置: <span class="font-mono text-zinc-400">~/.rcc/plugins/{p.entry.id}/</span>
+            </div>
+            <div class="text-[11px] text-zinc-500">
+              安装后默认不启用;需要在 Plugins 页手动启用,并<span class="text-zinc-300">重启 host</span> 让变更生效。
+            </div>
+            <Show when={p.entry.homepage}>
+              <a
+                href={p.entry.homepage}
+                target="_blank"
+                rel="noopener noreferrer"
+                class="text-[11px] text-sky-400 hover:underline"
+              >
+                主页 → {p.entry.homepage}
+              </a>
+            </Show>
+          </div>
+          <div class="px-5 py-3 border-t border-zinc-900 flex items-center justify-end gap-2">
+            <button
+              onClick={() => setPluginPrompt(null)}
+              class="px-3 py-1.5 rounded text-xs text-zinc-400 hover:bg-zinc-900"
+            >
+              取消
+            </button>
+            <button
+              onClick={confirmPluginInstall}
+              class="px-3 py-1.5 rounded bg-gradient-to-r from-orange-500 to-rose-500 text-white text-xs font-medium"
+            >
+              确认安装
             </button>
           </div>
         </div>
@@ -664,6 +812,83 @@ function ScopeRadio(props: {
           </div>
         </label>
       </div>
+    </div>
+  );
+}
+
+function PluginCard(props: {
+  entry: MarketPluginEntry;
+  state?: InstallState[string];
+  onInstall: () => void;
+}) {
+  const perms = () => props.entry.permissions ?? [];
+  const isTarball = () => props.entry.source.mode === "tarball";
+  return (
+    <div class="rounded-xl border border-zinc-800 bg-zinc-900/40 p-4 flex flex-col gap-2 hover:border-zinc-700 transition">
+      <div class="flex items-start gap-3 min-w-0">
+        <div class="w-9 h-9 rounded-lg bg-zinc-800 grid place-items-center shrink-0 text-lg">
+          {iconFor(props.entry.name)}
+        </div>
+        <div class="min-w-0 flex-1">
+          <div class="flex items-center gap-2 flex-wrap">
+            <span class="font-medium text-sm truncate">{props.entry.name}</span>
+            <span class="text-[10px] px-1.5 py-0.5 rounded font-mono bg-emerald-500/10 text-emerald-300 border border-emerald-500/20">
+              v{props.entry.version}
+            </span>
+            <Show when={props.entry.author}>
+              <span class="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-500">
+                @{props.entry.author}
+              </span>
+            </Show>
+            <InstallBadge state={props.state} />
+          </div>
+          <div class="text-[11px] text-zinc-500 font-mono truncate">{props.entry.id}</div>
+        </div>
+      </div>
+      <p class="text-[12px] text-zinc-400 leading-relaxed line-clamp-2 min-h-[32px]">
+        {props.entry.description || <span class="italic text-zinc-600">（无描述）</span>}
+      </p>
+      <Show when={perms().length > 0}>
+        <div class="flex items-center gap-1 flex-wrap">
+          <span class="text-[10px] text-amber-500/80">⚠ perms:</span>
+          <For each={perms()}>
+            {(p) => (
+              <span class="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-300 font-mono border border-amber-500/20">
+                {p}
+              </span>
+            )}
+          </For>
+        </div>
+      </Show>
+      <div class="flex items-center justify-between gap-2 mt-1">
+        <div class="flex gap-1 flex-wrap min-w-0">
+          <For each={(props.entry.tags ?? []).slice(0, 4)}>
+            {(t) => (
+              <span class="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400">
+                {t}
+              </span>
+            )}
+          </For>
+        </div>
+        <button
+          onClick={props.onInstall}
+          disabled={props.state?.status === "installing" || isTarball()}
+          title={isTarball() ? "tarball 安装留待 M9" : undefined}
+          class="text-[11px] px-2.5 py-1 rounded bg-orange-500/15 hover:bg-orange-500/25 text-orange-300 disabled:opacity-50"
+        >
+          📥 {isTarball() ? "（tarball, M9）" : "安装"}
+        </button>
+      </div>
+      <Show when={props.state?.status === "error" && props.state?.message}>
+        <div class="text-[10px] text-rose-400 mt-1 break-words">
+          {props.state!.message}
+        </div>
+      </Show>
+      <Show when={props.state?.status === "ok" && props.state?.message}>
+        <div class="text-[10px] text-emerald-400 mt-1 break-words">
+          {props.state!.message}
+        </div>
+      </Show>
     </div>
   );
 }

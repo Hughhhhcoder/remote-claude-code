@@ -89,6 +89,7 @@ import {
   fetchCatalogs,
   installSkillFromCatalog,
   installMcpFromCatalog,
+  installPluginFromCatalog,
 } from "./marketplace.ts";
 import { PrefsStore } from "./prefs.ts";
 import { metrics } from "./metrics.ts";
@@ -2324,6 +2325,7 @@ function handle(ws: WebSocket, state: WsState, frame: Frame): void {
             t: "market.catalog",
             skills: cat.skills,
             mcps: cat.mcps,
+            plugins: cat.plugins,
             sources: cat.sources,
             fetchedAt: cat.fetchedAt,
           }),
@@ -2397,6 +2399,38 @@ function handle(ws: WebSocket, state: WsState, frame: Frame): void {
           send(ws, {
             v: 1,
             t: "market.mcp.installed",
+            id: frame.id,
+            ok: false,
+            error: err?.message ?? String(err),
+          });
+        });
+      return;
+    }
+    case "market.install.plugin": {
+      installPluginFromCatalog(frame.id)
+        .then((res) => {
+          if (res.ok) {
+            send(ws, {
+              v: 1,
+              t: "market.plugin.installed",
+              id: frame.id,
+              ok: true,
+              pluginId: res.pluginId,
+            });
+          } else {
+            send(ws, {
+              v: 1,
+              t: "market.plugin.installed",
+              id: frame.id,
+              ok: false,
+              error: res.error,
+            });
+          }
+        })
+        .catch((err) => {
+          send(ws, {
+            v: 1,
+            t: "market.plugin.installed",
             id: frame.id,
             ok: false,
             error: err?.message ?? String(err),

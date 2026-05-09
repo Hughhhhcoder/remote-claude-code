@@ -3,6 +3,7 @@ import type { RccClient } from "./client.ts";
 import type { ChatMessage, ChatSegment, SessionMeta, PromptTemplate } from "@rcc/protocol";
 import { createSharedText, type SharedText } from "./crdt.ts";
 import { ContextInjector } from "./ContextInjector.tsx";
+import { t } from "./i18n/index.ts";
 import {
   usePromptExpansion,
   type PromptPrefixMatch,
@@ -273,15 +274,15 @@ export function ChatView(props: {
               send();
             }
           }}
-          placeholder="输入消息… Cmd/Ctrl+Enter 发送"
+          placeholder={t("chat.inputPlaceholder")}
         />
         <div class="flex flex-col gap-2 shrink-0">
           <button
             type="button"
             class="px-3 py-2 rounded-lg text-base leading-none border bg-zinc-900 border-zinc-800 text-zinc-400 hover:text-zinc-200 hover:border-zinc-700 transition"
             onClick={() => setInjectOpen(true)}
-            title="复用其他会话上下文"
-            aria-label="复用上下文"
+            title={t("chat.injectContext")}
+            aria-label={t("chat.injectContextLabel")}
           >
             📋
           </button>
@@ -298,9 +299,9 @@ export function ChatView(props: {
                 ? voiceMode() === "recorder"
                   ? "录音中(停止后 Whisper 转写)"
                   : "录音中(点击停止)"
-                : "语音输入"
+                : t("chat.voice")
             }
-            aria-label="语音输入"
+            aria-label={t("chat.voice")}
           >
             🎙
           </button>
@@ -308,7 +309,7 @@ export function ChatView(props: {
             class="px-4 py-2 bg-gradient-to-r from-orange-500 to-rose-500 rounded-lg text-sm font-medium"
             onClick={send}
           >
-            发送
+            {t("chat.send")}
           </button>
         </div>
       </div>

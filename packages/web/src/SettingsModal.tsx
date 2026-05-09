@@ -2,6 +2,7 @@ import { For, Show, createSignal } from "solid-js";
 import type { UiAccent, UiCustomKey, UiPrefs } from "@rcc/protocol";
 import { UI_ACCENT_COLORS } from "@rcc/protocol";
 import { DEFAULT_CUSTOM_KEYS, decodeSendEscapes, encodeSendEscapes, type PrefsStore } from "./prefs.ts";
+import { availableLocales, getLocale, setLocale, t } from "./i18n/index.ts";
 
 type Props = {
   open: boolean;
@@ -15,6 +16,11 @@ const ACCENT_SWATCH: Record<UiAccent, string> = {
   violet: "bg-violet-500",
   pink: "bg-pink-500",
   emerald: "bg-emerald-500",
+};
+
+const LOCALE_LABELS: Record<string, string> = {
+  zh: "简体中文",
+  en: "English",
 };
 
 export function SettingsModal(props: Props) {
@@ -31,31 +37,32 @@ export function SettingsModal(props: Props) {
           <div class="flex items-center justify-between px-5 py-3 border-b border-zinc-900 sticky top-0 bg-zinc-950">
             <div class="flex items-center gap-2 text-sm font-medium">
               <span>🎨</span>
-              <span>界面与键位</span>
+              <span>{t("settings.title")}</span>
             </div>
             <button
               class="text-zinc-500 hover:text-zinc-200 text-sm"
               onClick={props.onClose}
-              title="关闭"
+              title={t("settings.close")}
             >
               ✕
             </button>
           </div>
 
           <div class="p-5 space-y-6">
+            <LanguageSection />
             <AccentSection store={props.store} />
             <FontScaleSection store={props.store} />
             <KeysSection store={props.store} />
           </div>
 
           <div class="px-5 py-3 border-t border-zinc-900 flex items-center justify-between text-[11px] text-zinc-600">
-            <div>保存到 ~/.rcc/ui-prefs.json,全部设备同步</div>
+            <div>{t("settings.footer")}</div>
             <button
               class="px-2.5 py-1 rounded border border-zinc-800 text-zinc-400 hover:text-zinc-100 hover:border-zinc-700"
               onClick={() => props.store.update({ customKeys: [...DEFAULT_CUSTOM_KEYS] })}
-              title="恢复默认键位"
+              title={t("settings.resetKeysTitle")}
             >
-              重置键位
+              {t("settings.resetKeys")}
             </button>
           </div>
         </div>
@@ -64,10 +71,29 @@ export function SettingsModal(props: Props) {
   );
 }
 
+function LanguageSection() {
+  return (
+    <section>
+      <div class="text-[10px] uppercase tracking-widest text-zinc-500 mb-2">
+        {t("settings.language")}
+      </div>
+      <select
+        value={getLocale()}
+        onChange={(e) => setLocale(e.currentTarget.value)}
+        class="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-100 outline-none focus:border-zinc-700"
+      >
+        <For each={availableLocales()}>
+          {(code) => <option value={code}>{LOCALE_LABELS[code] ?? code}</option>}
+        </For>
+      </select>
+    </section>
+  );
+}
+
 function AccentSection(props: { store: PrefsStore }) {
   return (
     <section>
-      <div class="text-[10px] uppercase tracking-widest text-zinc-500 mb-2">强调色</div>
+      <div class="text-[10px] uppercase tracking-widest text-zinc-500 mb-2">{t("settings.accent")}</div>
       <div class="flex items-center gap-2 flex-wrap">
         <For each={UI_ACCENT_COLORS}>
           {(c) => {
@@ -96,7 +122,7 @@ function FontScaleSection(props: { store: PrefsStore }) {
   return (
     <section>
       <div class="flex items-center justify-between mb-2">
-        <div class="text-[10px] uppercase tracking-widest text-zinc-500">字体缩放</div>
+        <div class="text-[10px] uppercase tracking-widest text-zinc-500">{t("settings.fontScale")}</div>
         <div class="text-xs text-zinc-400 font-mono">{props.store.prefs().fontScale.toFixed(2)}×</div>
       </div>
       <input
@@ -116,7 +142,7 @@ function FontScaleSection(props: { store: PrefsStore }) {
           class="text-zinc-500 hover:text-zinc-200"
           onClick={() => props.store.update({ fontScale: 1.0 })}
         >
-          重置
+          {t("settings.reset")}
         </button>
         <span>1.4×</span>
       </div>
@@ -159,13 +185,13 @@ function KeysSection(props: { store: PrefsStore }) {
   return (
     <section>
       <div class="flex items-center justify-between mb-2">
-        <div class="text-[10px] uppercase tracking-widest text-zinc-500">快捷键</div>
+        <div class="text-[10px] uppercase tracking-widest text-zinc-500">{t("settings.keys")}</div>
         <button
           class="text-[11px] px-2 py-0.5 rounded border border-zinc-800 text-zinc-400 hover:text-zinc-100 hover:border-zinc-700"
           onClick={add}
           disabled={keys().length >= 32}
         >
-          + 新增
+          {t("settings.addKey")}
         </button>
       </div>
       <div class="space-y-1.5">
@@ -177,7 +203,7 @@ function KeysSection(props: { store: PrefsStore }) {
         </div>
         <Show
           when={keys().length > 0}
-          fallback={<div class="text-[11px] text-zinc-600 px-1 py-2">暂无快捷键</div>}
+          fallback={<div class="text-[11px] text-zinc-600 px-1 py-2">{t("settings.noKeys")}</div>}
         >
           <For each={keys()}>
             {(k, i) => (
@@ -238,7 +264,7 @@ function KeyRow(props: {
       <button
         class="text-zinc-600 hover:text-rose-400 text-sm"
         onClick={props.onRemove}
-        title="删除"
+        title={t("settings.remove")}
       >
         ✕
       </button>

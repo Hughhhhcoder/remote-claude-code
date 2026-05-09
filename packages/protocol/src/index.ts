@@ -1371,11 +1371,42 @@ export const MarketCatalogRequest = z.object({
   force: z.boolean().optional(),
 });
 
+// Marketplace plugin entry. `source.mode === "inline"` carries a synthetic
+// plugin as a flat map of `relative path -> file text`; `tarball` is reserved
+// for M9 (see marketplace.ts — tarball install is not implemented yet).
+export const MarketPluginSource = z.union([
+  z.object({
+    mode: z.literal("inline"),
+    files: z.record(z.string(), z.string()),
+  }),
+  z.object({
+    mode: z.literal("tarball"),
+    url: z.string(),
+  }),
+]);
+export type MarketPluginSource = z.infer<typeof MarketPluginSource>;
+
+export const MarketPluginEntry = z.object({
+  id: z.string(),
+  name: z.string(),
+  description: z.string().default(""),
+  version: z.string(),
+  entry: z.string(),
+  ui: z.string().optional(),
+  permissions: z.array(z.enum(["session:read", "session:write", "chat:read", "broadcast"])).default([]),
+  author: z.string().optional(),
+  homepage: z.string().optional(),
+  tags: z.array(z.string()).optional(),
+  source: MarketPluginSource,
+});
+export type MarketPluginEntry = z.infer<typeof MarketPluginEntry>;
+
 export const MarketCatalog = z.object({
   ...base,
   t: z.literal("market.catalog"),
   skills: z.array(MarketSkillEntry),
   mcps: z.array(MarketMcpEntry),
+  plugins: z.array(MarketPluginEntry).default([]),
   sources: z.array(MarketSource),
   fetchedAt: z.number(),
 });
@@ -1410,6 +1441,21 @@ export const MarketMcpInstalled = z.object({
   id: z.string(),
   ok: z.boolean(),
   installedName: z.string().optional(),
+  error: z.string().optional(),
+});
+
+export const MarketInstallPlugin = z.object({
+  ...base,
+  t: z.literal("market.install.plugin"),
+  id: z.string(),
+});
+
+export const MarketPluginInstalled = z.object({
+  ...base,
+  t: z.literal("market.plugin.installed"),
+  id: z.string(),
+  ok: z.boolean(),
+  pluginId: z.string().optional(),
   error: z.string().optional(),
 });
 
@@ -2330,6 +2376,8 @@ export const Frame = z.discriminatedUnion("t", [
   MarketSkillInstalled,
   MarketInstallMcp,
   MarketMcpInstalled,
+  MarketInstallPlugin,
+  MarketPluginInstalled,
   HealthCrash,
   PrefsRequest,
   Prefs,

@@ -7,6 +7,7 @@ import {
   type SessionDriver,
   type Starter,
 } from "@rcc/protocol";
+import { t } from "./i18n/index.ts";
 
 interface Props {
   open: boolean;
@@ -86,28 +87,28 @@ export function NewSessionModal(props: Props) {
       >
         <div class="w-[560px] max-w-[calc(100vw-32px)] max-h-[calc(100vh-32px)] rounded-2xl border border-zinc-800 bg-zinc-950 shadow-2xl overflow-hidden flex flex-col">
           <div class="px-5 py-4 border-b border-zinc-900">
-            <div class="text-sm font-semibold">新建会话</div>
-            <div class="text-xs text-zinc-500 mt-0.5">项目 · 工作目录 · 权限模式</div>
+            <div class="text-sm font-semibold">{t("newSession.title")}</div>
+            <div class="text-xs text-zinc-500 mt-0.5">{t("newSession.subtitle")}</div>
           </div>
 
           <div class="p-5 space-y-4 overflow-y-auto flex-1 min-h-0">
             <Show when={props.starters.length > 0}>
               <div>
                 <label class="block text-[11px] uppercase tracking-widest text-zinc-500 mb-1.5">
-                  Starter (可选)
+                  {t("newSession.starter")}
                 </label>
                 <select
                   value={starterId() ?? ""}
                   onChange={(e) => pickStarter(e.currentTarget.value)}
                   class="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-100 outline-none focus:border-zinc-700"
                 >
-                  <option value="">(无 starter · 从头开始)</option>
+                  <option value="">{t("newSession.noStarter")}</option>
                   <For each={props.starters}>
                     {(s) => (
                       <option value={s.id}>
                         {s.icon ? `${s.icon} ` : ""}
                         {s.name}
-                        {s.builtin ? " · 内置" : ""}
+                        {s.builtin ? t("newSession.builtinSuffix") : ""}
                       </option>
                     )}
                   </For>
@@ -147,7 +148,7 @@ export function NewSessionModal(props: Props) {
             <Show when={props.projects.length > 0}>
               <div>
                 <label class="block text-[11px] uppercase tracking-widest text-zinc-500 mb-1.5">
-                  项目
+                  {t("newSession.project")}
                 </label>
                 <select
                   value={projectId() ?? ""}
@@ -158,7 +159,7 @@ export function NewSessionModal(props: Props) {
                     {(p) => (
                       <option value={p.id}>
                         {p.name}
-                        {p.isDefault ? " (默认)" : ""}
+                        {p.isDefault ? ` (${t("newSession.default")})` : ""}
                       </option>
                     )}
                   </For>
@@ -173,7 +174,7 @@ export function NewSessionModal(props: Props) {
 
             <div>
               <label class="block text-[11px] uppercase tracking-widest text-zinc-500 mb-1.5">
-                工作目录 (cwd) — 可覆盖
+                {t("newSession.cwd")}
               </label>
               <input
                 value={cwd()}
@@ -184,12 +185,12 @@ export function NewSessionModal(props: Props) {
                 placeholder={activeProject()?.cwd ?? "/Users/you/project"}
                 class="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm font-mono text-zinc-100 outline-none focus:border-zinc-700"
               />
-              <div class="text-[11px] text-zinc-500 mt-1">留空使用上方项目的 cwd</div>
+              <div class="text-[11px] text-zinc-500 mt-1">{t("newSession.cwdHint")}</div>
             </div>
 
             <div>
               <label class="block text-[11px] uppercase tracking-widest text-zinc-500 mb-1.5">
-                驱动 (driver)
+                {t("newSession.driver")}
               </label>
               <div class="grid grid-cols-2 gap-2">
                 <button
@@ -244,7 +245,7 @@ export function NewSessionModal(props: Props) {
 
             <div>
               <label class="block text-[11px] uppercase tracking-widest text-zinc-500 mb-1.5">
-                权限模式
+                {t("newSession.permissionMode")}
               </label>
               <div class="grid grid-cols-2 gap-2">
                 <For each={PERMISSION_MODES}>
@@ -290,7 +291,7 @@ export function NewSessionModal(props: Props) {
               onClick={props.onCancel}
               class="px-3 py-1.5 rounded-lg border border-zinc-800 text-xs text-zinc-300 hover:border-zinc-700"
             >
-              取消
+              {t("newSession.cancel")}
             </button>
             <button
               type="button"
@@ -305,7 +306,7 @@ export function NewSessionModal(props: Props) {
               }
               class="px-4 py-1.5 rounded-lg bg-gradient-to-r from-orange-500 to-rose-500 text-white text-xs font-medium"
             >
-              创建会话
+              {t("newSession.create")}
             </button>
           </div>
         </div>

@@ -18,6 +18,7 @@ export default defineConfig({
     headless: true,
     trace: "retain-on-failure",
     video: "retain-on-failure",
+    locale: "zh-CN",
   },
   projects: [
     {

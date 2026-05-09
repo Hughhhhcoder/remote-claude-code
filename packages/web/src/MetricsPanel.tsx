@@ -1,6 +1,7 @@
 import { createSignal, createMemo, For, Show, onCleanup } from "solid-js";
 import type { MetricsSnapshot, SessionMeta } from "@rcc/protocol";
 import type { RccClient } from "./client.ts";
+import { t } from "./i18n/index.ts";
 
 /**
  * Observability popover. Opens from the top bar, subscribes to `metrics.tick`
@@ -61,7 +62,7 @@ export function MetricsPanel(props: { client: RccClient; sessions?: SessionMeta[
             ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
             : "border-zinc-800 bg-zinc-900 text-zinc-400 hover:text-zinc-100"
         }`}
-        title="观测面板"
+        title={t("top.metricsTitle")}
       >
         📊
       </button>
@@ -69,7 +70,7 @@ export function MetricsPanel(props: { client: RccClient; sessions?: SessionMeta[
         <div class="absolute right-0 top-full mt-1 z-40 w-[340px] rounded-lg border border-zinc-800 bg-zinc-950 shadow-xl p-3 space-y-3">
           <Show
             when={snap()}
-            fallback={<div class="text-xs text-zinc-500">等待数据…</div>}
+            fallback={<div class="text-xs text-zinc-500">{t("metrics.waiting")}</div>}
           >
             <PanelBody snap={snap()!} usage={usageTotals()} />
           </Show>

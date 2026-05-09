@@ -41,6 +41,7 @@ import { RecordingPanel } from "./RecordingPanel.tsx";
 import { CommandPalette, type PaletteAction } from "./CommandPalette.tsx";
 import { InboxView, createInboxStore } from "./InboxView.tsx";
 import { createWorkflowRunner, type WorkflowRunRequest } from "./workflow-runner.ts";
+import { t } from "./i18n/index.ts";
 
 function readShareTokenFromLocation(): string | null {
   try {
@@ -413,7 +414,7 @@ export function App() {
   }
 
   function onCloseSession(sid: string) {
-    if (!confirm(`关闭会话 ${sid}?`)) return;
+    if (!confirm(`${t("session.closeConfirm")} ${sid}?`)) return;
     client.closeSession(sid);
     setSessions((s) => s.filter((x) => x.id !== sid));
     if (activeSid() === sid) {
@@ -483,7 +484,7 @@ export function App() {
             <span class="font-semibold text-sm">rcc</span>
           </div>
           <span class="text-zinc-700">/</span>
-          <span class="text-sm text-zinc-300">local host</span>
+          <span class="text-sm text-zinc-300">{t("top.localHost")}</span>
           <Show when={activeSession()}>
             <span class="text-zinc-700">/</span>
             <span class="text-xs text-zinc-500 font-mono">{activeSession()!.title}</span>
@@ -492,18 +493,18 @@ export function App() {
         <div class="flex items-center gap-3">
           <Show when={currentDevice()}>
             <div class="flex items-center gap-1.5 text-[11px] text-zinc-500">
-              <span>as</span>
+              <span>{t("top.as")}</span>
               <button
                 class="text-zinc-300 hover:text-orange-400 underline decoration-dotted"
                 onClick={() => setDevicesOpen(true)}
-                title="管理已配对设备"
+                title={t("top.manageDevices")}
               >
                 {currentDevice()!.name}
               </button>
               <button
                 onClick={onSignOut}
                 class="ml-1 px-1.5 py-0.5 rounded text-zinc-600 hover:text-rose-400 hover:bg-rose-500/10"
-                title="退出登录 (清除本设备 token)"
+                title={t("top.signOut")}
               >
                 ⏏
               </button>
@@ -526,7 +527,7 @@ export function App() {
           <button
             onClick={() => setInboxOpen(true)}
             class="relative text-xs px-2 py-1 rounded-md border border-zinc-800 bg-zinc-900/60 hover:bg-zinc-800/80 hover:border-accent-500/50 text-zinc-300 hover:text-accent-300 transition"
-            title="Inbox 活动流"
+            title={t("top.inbox")}
           >
             📥
             <Show when={inboxStore.unread() > 0}>
@@ -541,7 +542,7 @@ export function App() {
           <button
             onClick={() => setSettingsOpen(true)}
             class="text-xs px-2 py-1 rounded-md border border-zinc-800 bg-zinc-900/60 hover:bg-zinc-800/80 hover:border-accent-500/50 text-zinc-300 hover:text-accent-300 transition"
-            title="主题 / 键位 / 字体设置"
+            title={t("top.settingsTitle")}
           >
             🎨
           </button>
@@ -576,20 +577,20 @@ export function App() {
               class="w-full py-2 rounded-lg bg-gradient-to-r from-accent-500 to-accent-600 text-white text-sm font-medium flex items-center justify-center gap-2 hover:opacity-90 transition"
               onClick={() => onNewSession()}
             >
-              <span>+</span> New session
+              <span>+</span> {t("sidebar.newSession")}
             </button>
             <button
               class="w-full py-1.5 rounded-lg border border-zinc-800 text-xs text-zinc-300 hover:border-zinc-700 hover:text-zinc-100 flex items-center justify-center gap-1.5"
               onClick={() => setNewProjectOpen(true)}
             >
-              <span>+</span> 新建项目
+              <span>+</span> {t("sidebar.newProject")}
             </button>
           </div>
           <div class="flex-1 overflow-y-auto scrollbar p-2">
             <div class="px-2 py-2">
               <input
                 type="search"
-                placeholder="🔍 搜索会话…"
+                placeholder={t("sidebar.searchPlaceholder")}
                 value={searchQuery()}
                 onInput={(e) => {
                   const q = e.currentTarget.value;
@@ -606,7 +607,7 @@ export function App() {
             <Show when={searchResults()}>
               <div class="px-2 py-2">
                 <div class="text-[10px] uppercase tracking-widest text-zinc-600 pb-1">
-                  搜索结果 ({searchResults()!.length})
+                  {t("sidebar.searchResults")} ({searchResults()!.length})
                 </div>
                 <For each={searchResults()}>
                   {(m) => (
@@ -629,24 +630,24 @@ export function App() {
                   )}
                 </For>
                 <Show when={searchResults()!.length === 0}>
-                  <div class="text-xs text-zinc-600 py-2">无匹配</div>
+                  <div class="text-xs text-zinc-600 py-2">{t("sidebar.noMatches")}</div>
                 </Show>
               </div>
             </Show>
             <Show when={!searchResults()}>
             <div class="flex items-center justify-between px-2 py-2">
-              <div class="text-[10px] uppercase tracking-widest text-zinc-600">Projects</div>
+              <div class="text-[10px] uppercase tracking-widest text-zinc-600">{t("sidebar.projects")}</div>
               <button
                 onClick={() => setProjectsModalOpen(true)}
                 class="text-[10px] text-zinc-500 hover:text-zinc-200"
-                title="管理项目"
+                title={t("sidebar.manage")}
               >
-                管理
+                {t("sidebar.manage")}
               </button>
             </div>
             <Show
               when={projects().length > 0}
-              fallback={<div class="px-2 py-4 text-xs text-zinc-600">暂无项目</div>}
+              fallback={<div class="px-2 py-4 text-xs text-zinc-600">{t("sidebar.noProjects")}</div>}
             >
               <For each={projects()}>
                 {(p) => {
@@ -660,7 +661,7 @@ export function App() {
                         <button
                           onClick={() => toggleProjectCollapsed(p.id)}
                           class="flex items-center gap-1.5 min-w-0 flex-1 text-left"
-                          title={collapsed() ? "展开" : "收起"}
+                          title={collapsed() ? t("sidebar.expand") : t("sidebar.collapse")}
                         >
                           <span class="text-[10px] text-zinc-600 w-2 shrink-0">
                             {collapsed() ? "▶" : "▼"}
@@ -690,7 +691,7 @@ export function App() {
                           when={sess().length > 0}
                           fallback={
                             <div class="pl-4 px-2 py-1 text-[11px] text-zinc-600 italic">
-                              无会话
+                              {t("sidebar.noSessions")}
                             </div>
                           }
                         >
@@ -717,14 +718,14 @@ export function App() {
             <Show when={peers().length > 0}>
               <div class="flex items-center justify-between px-2 py-2 mt-2 border-t border-zinc-900">
                 <div class="text-[10px] uppercase tracking-widest text-zinc-600">
-                  Remote peers
+                  {t("sidebar.remotePeers")}
                 </div>
                 <button
                   onClick={() => setPeersModalOpen(true)}
                   class="text-[10px] text-zinc-500 hover:text-zinc-200"
-                  title="管理远程 host"
+                  title={t("sidebar.manageRemote")}
                 >
-                  管理
+                  {t("sidebar.manage")}
                 </button>
               </div>
               <For each={peers()}>
@@ -741,7 +742,7 @@ export function App() {
                           class={`w-1.5 h-1.5 rounded-full shrink-0 ${
                             pr.connected ? "bg-emerald-400" : "bg-zinc-700"
                           }`}
-                          title={pr.connected ? "已连接" : pr.error ?? "离线"}
+                          title={pr.connected ? t("sidebar.connected") : pr.error ?? t("sidebar.offline")}
                         />
                         <span class="text-[10px] text-zinc-600 shrink-0">
                           {sess().length}
@@ -757,7 +758,7 @@ export function App() {
                         fallback={
                           <Show when={pr.connected}>
                             <div class="pl-4 px-2 py-1 text-[11px] text-zinc-600 italic">
-                              无会话
+                              {t("sidebar.noSessions")}
                             </div>
                           </Show>
                         }
@@ -788,36 +789,36 @@ export function App() {
             <button
               class="w-full text-xs text-zinc-500 hover:text-zinc-200 flex items-center gap-1.5 py-1.5 px-2 rounded hover:bg-zinc-900"
               onClick={() => setConfigOpen(true)}
-              title="管理 Skills / MCP / Slash Commands / Subagents / Hooks"
+              title={t("sidebar.configTitle")}
             >
               <span>⚙</span>
-              <span>Claude Code 配置</span>
+              <span>{t("sidebar.config")}</span>
             </button>
             <button
               class="w-full text-xs text-zinc-500 hover:text-zinc-200 flex items-center gap-1.5 py-1.5 px-2 rounded hover:bg-zinc-900"
               onClick={() => setMarketOpen(true)}
-              title="浏览 skills + MCP marketplace"
+              title={t("sidebar.marketplaceTitle")}
             >
               <span>📥</span>
-              <span>Marketplace</span>
+              <span>{t("sidebar.marketplace")}</span>
             </button>
             <button
               class={`w-full text-xs flex items-center gap-1.5 py-1.5 px-2 rounded hover:bg-zinc-900 ${
                 fileBrowserOpen() ? "text-accent-300" : "text-zinc-500 hover:text-zinc-200"
               }`}
               onClick={() => setFileBrowserOpen((v) => !v)}
-              title="切换文件浏览器"
+              title={t("sidebar.fileBrowserTitle")}
             >
               <span>📁</span>
-              <span>文件浏览器</span>
+              <span>{t("sidebar.fileBrowser")}</span>
             </button>
             <button
               class="w-full text-xs text-zinc-500 hover:text-zinc-200 flex items-center gap-1.5 py-1.5 px-2 rounded hover:bg-zinc-900"
               onClick={() => setDevicesOpen(true)}
-              title="管理已配对设备"
+              title={t("top.manageDevices")}
             >
               <span>🔑</span>
-              <span>已配对设备</span>
+              <span>{t("sidebar.devices")}</span>
             </button>
           </div>
         </aside>
@@ -828,7 +829,7 @@ export function App() {
             when={activeSid()}
             fallback={
               <div class="flex-1 grid place-items-center text-zinc-500 text-sm">
-                选择或新建一个会话开始
+                {t("main.emptyHint")}
               </div>
             }
           >
@@ -866,15 +867,15 @@ export function App() {
                     }`}
                     title={
                       activeSession()?.driver === "sdk"
-                        ? "SDK 会话只有对话视图"
-                        : "切换终端 / 语义化对话视图"
+                        ? t("main.toggleViewDisabled")
+                        : t("main.toggleViewTitle")
                     }
                   >
                     {activeSession()?.driver === "sdk"
-                      ? "💬 SDK"
+                      ? t("main.toggleViewSdk")
                       : viewMode() === "chat"
-                        ? "💬 对话"
-                        : "▶ 终端"}
+                        ? t("main.toggleViewChat")
+                        : t("main.toggleViewTerminal")}
                   </button>
                 </div>
                 <div class="flex items-center gap-2 text-[11px] text-zinc-500 shrink-0">
@@ -885,9 +886,9 @@ export function App() {
                         ? "border-accent-500 text-accent-300 bg-accent-500/10"
                         : "border-zinc-700 text-zinc-400 hover:text-zinc-100"
                     }`}
-                    title="切换协作笔记本"
+                    title={t("main.notebookTitle")}
                   >
-                    📓 笔记
+                    {t("main.notebook")}
                   </button>
                   <RecordingPanel client={client} sid={activeSid()} />
                   <span class="text-zinc-700">{activeSession()?.cols}×{activeSession()?.rows}</span>
@@ -955,7 +956,7 @@ export function App() {
                     </For>
                   </div>
                   <div class="mt-2 flex items-center justify-between text-[11px] text-zinc-600">
-                    <div>点击按钮向当前 session 发送字符</div>
+                    <div>{t("main.commandHint")}</div>
                     <div>M1 · 本地模式</div>
                   </div>
                 </div>
@@ -1203,15 +1204,15 @@ function StatusBadge(props: { status: ConnStatus }) {
     <div class="flex items-center gap-1.5 text-xs">
       <Show when={props.status === "connected"}>
         <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 pulse-soft" />
-        <span class="text-emerald-400">connected</span>
+        <span class="text-emerald-400">{t("status.connected")}</span>
       </Show>
       <Show when={props.status === "connecting"}>
         <span class="w-1.5 h-1.5 rounded-full bg-amber-400 pulse-soft" />
-        <span class="text-amber-400">connecting…</span>
+        <span class="text-amber-400">{t("status.connecting")}</span>
       </Show>
       <Show when={props.status === "closed"}>
         <span class="w-1.5 h-1.5 rounded-full bg-rose-400" />
-        <span class="text-rose-400">disconnected</span>
+        <span class="text-rose-400">{t("status.disconnected")}</span>
       </Show>
     </div>
   );
@@ -1266,9 +1267,9 @@ function SessionRow(props: {
             <Show when={isArchived()}>
               <span
                 class="text-[9px] px-1 py-px rounded bg-zinc-800 text-zinc-400 border border-zinc-700"
-                title="会话已存档,点重开恢复"
+                title={t("session.archivedTitle")}
               >
-                💾 存档
+                {t("session.archived")}
               </span>
             </Show>
           </div>
@@ -1280,9 +1281,9 @@ function SessionRow(props: {
               e.stopPropagation();
               props.onResume();
             }}
-            title="重开会话(保留 id 和历史)"
+            title={t("session.resumeTitle")}
           >
-            重开
+            {t("session.resume")}
           </button>
         </Show>
         <button
@@ -1291,7 +1292,7 @@ function SessionRow(props: {
             e.stopPropagation();
             props.onShare();
           }}
-          title="生成只读分享链接"
+          title={t("session.share")}
         >
           🔗
         </button>
@@ -1301,7 +1302,7 @@ function SessionRow(props: {
             e.stopPropagation();
             props.onClose();
           }}
-          title="关闭会话"
+          title={t("session.close")}
         >
           ✕
         </button>
@@ -1367,7 +1368,7 @@ function WorkflowRunBar(props: {
         <div class="h-7 shrink-0 flex items-center gap-3 px-4 border-b border-teal-500/30 bg-gradient-to-r from-teal-500/10 via-teal-500/5 to-transparent text-[11px]">
           <span class="text-teal-300">⏵</span>
           <span class="text-zinc-300">
-            正在运行 workflow <span class="font-mono text-teal-200">{s().workflow.name}</span>
+            {t("workflow.running")} <span class="font-mono text-teal-200">{s().workflow.name}</span>
           </span>
           <span class="text-zinc-500 font-mono">
             {s().index + 1}/{s().total}
@@ -1382,7 +1383,7 @@ function WorkflowRunBar(props: {
             onClick={props.onStop}
             class="px-2 py-0.5 rounded border border-rose-500/40 text-rose-300 hover:bg-rose-500/10 text-[10px]"
           >
-            中止
+            {t("workflow.abort")}
           </button>
         </div>
       )}

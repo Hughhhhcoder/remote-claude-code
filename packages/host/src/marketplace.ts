@@ -1,11 +1,12 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { loadConfig } from "./config.ts";
 import { writeSkill } from "./skills.ts";
 import { addMcp, type McpScope, type McpTransport } from "./mcp.ts";
 
 export type MarketScope = "user" | "project";
+export type PluginPerm = "session:read" | "session:write" | "chat:read" | "broadcast";
 
 export interface MarketSkillEntry {
   id: string;
@@ -35,9 +36,34 @@ export interface MarketMcpEntry {
   tags?: string[];
 }
 
+export interface MarketPluginSourceInline {
+  mode: "inline";
+  files: Record<string, string>;
+}
+export interface MarketPluginSourceTarball {
+  mode: "tarball";
+  url: string;
+}
+export type MarketPluginSource = MarketPluginSourceInline | MarketPluginSourceTarball;
+
+export interface MarketPluginEntry {
+  id: string;
+  name: string;
+  description: string;
+  version: string;
+  entry: string;
+  ui?: string;
+  permissions: PluginPerm[];
+  author?: string;
+  homepage?: string;
+  tags?: string[];
+  source: MarketPluginSource;
+}
+
 export interface MarketCatalog {
   skills: MarketSkillEntry[];
   mcps: MarketMcpEntry[];
+  plugins: MarketPluginEntry[];
   sources: Array<{ url: string; ok: boolean; error?: string }>;
   fetchedAt: number;
 }
@@ -45,6 +71,7 @@ export interface MarketCatalog {
 interface RawManifest {
   skills?: Partial<MarketSkillEntry>[];
   mcps?: Partial<MarketMcpEntry>[];
+  plugins?: Partial<MarketPluginEntry>[];
 }
 
 const CACHE_TTL_MS = 60 * 60 * 1000;
@@ -135,11 +162,184 @@ const SEED_MCPS: MarketMcpEntry[] = [
   },
 ];
 
+const ECHO_BOT_INDEX_TS = `interface EchoPlugin {
+  id: "echo-bot";
+  name: string;
+  version: string;
+  onLoad?: (ctx: { log: (msg: string) => void }) => void;
+  handleCall?: (method: string, payload: unknown) => Promise<unknown> | unknown;
+}
+
+const plugin: EchoPlugin = {
+  id: "echo-bot",
+  name: "Echo Bot",
+  version: "1.0.0",
+  onLoad(ctx) {
+    ctx.log("echo-bot loaded");
+  },
+  async handleCall(method, payload) {
+    if (method === "echo") return { echoed: payload, at: Date.now() };
+    if (method === "ping") return { pong: true };
+    throw new Error(\`unknown method: \${method}\`);
+  },
+};
+
+export default plugin;
+`;
+
+const ECHO_BOT_UI_HTML = `<!doctype html>
+<html><head><meta charset="utf-8"><title>Echo Bot</title></head>
+<body style="font-family:system-ui;padding:24px;background:#fafafa;color:#111">
+  <h1 style="font-size:18px;margin:0 0 12px">Echo Bot</h1>
+  <p style="color:#555;font-size:13px">Plugin UI placeholder. Wire your own ws using ?token= from URL.</p>
+</body></html>
+`;
+
+const TIMER_INDEX_TS = `interface TimerPlugin {
+  id: "timer";
+  name: string;
+  version: string;
+  onLoad?: (ctx: { log: (msg: string) => void }) => void;
+  handleCall?: (method: string, payload: unknown) => Promise<unknown> | unknown;
+}
+
+const POMODORO_MS = 25 * 60 * 1000;
+
+const plugin: TimerPlugin = {
+  id: "timer",
+  name: "Pomodoro Timer",
+  version: "1.0.0",
+  onLoad(ctx) {
+    ctx.log("pomodoro timer loaded (" + POMODORO_MS + "ms)");
+  },
+  async handleCall(method) {
+    if (method === "start") return { startedAt: Date.now(), durationMs: POMODORO_MS };
+    if (method === "label") return { label: "pomodoro" };
+    throw new Error("unknown method: " + method);
+  },
+};
+
+export default plugin;
+`;
+
+const TIMER_UI_HTML = `<!doctype html>
+<html><head><meta charset="utf-8"><title>Pomodoro</title></head>
+<body style="font-family:system-ui;padding:24px;text-align:center;color:#111">
+  <h1 style="font-size:22px;margin:0">pomodoro</h1>
+  <p style="color:#555">25-minute focus timer. Call plugin.call timer.start to begin.</p>
+</body></html>
+`;
+
+const SEED_PLUGINS: MarketPluginEntry[] = [
+  {
+    id: "echo-bot",
+    name: "Echo Bot",
+    description: "Minimal echo plugin — returns the payload you send it.",
+    version: "1.0.0",
+    entry: "index.ts",
+    ui: "public",
+    permissions: ["broadcast", "session:read"],
+    author: "rcc",
+    tags: ["example", "demo"],
+    source: {
+      mode: "inline",
+      files: {
+        "manifest.json": JSON.stringify(
+          {
+            id: "echo-bot",
+            name: "Echo Bot",
+            version: "1.0.0",
+            entry: "index.ts",
+            ui: "public",
+            permissions: ["broadcast", "session:read"],
+          },
+          null,
+          2,
+        ),
+        "index.ts": ECHO_BOT_INDEX_TS,
+        "public/index.html": ECHO_BOT_UI_HTML,
+      },
+    },
+  },
+  {
+    id: "timer",
+    name: "Pomodoro Timer",
+    description: "Shows a 25-minute pomodoro timer. Minimal demo plugin with no permissions.",
+    version: "1.0.0",
+    entry: "index.ts",
+    ui: "public",
+    permissions: [],
+    author: "rcc",
+    tags: ["example", "productivity"],
+    source: {
+      mode: "inline",
+      files: {
+        "manifest.json": JSON.stringify(
+          {
+            id: "timer",
+            name: "Pomodoro Timer",
+            version: "1.0.0",
+            entry: "index.ts",
+            ui: "public",
+            permissions: [],
+          },
+          null,
+          2,
+        ),
+        "index.ts": TIMER_INDEX_TS,
+        "public/index.html": TIMER_UI_HTML,
+      },
+    },
+  },
+];
+
 interface ConfigMarketplace {
   manifestUrls?: string[];
 }
 
 let cache: { at: number; data: MarketCatalog } | null = null;
+
+const PLUGIN_ID_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
+const PLUGIN_VERSION_RE = /^[0-9A-Za-z.+-]{1,32}$/;
+const ALLOWED_PERMS: readonly PluginPerm[] = [
+  "session:read",
+  "session:write",
+  "chat:read",
+  "broadcast",
+];
+const MAX_PLUGIN_FILES = 64;
+const MAX_PLUGIN_FILE_BYTES = 256 * 1024;
+
+function isPluginEntry(x: unknown): x is MarketPluginEntry {
+  if (!x || typeof x !== "object") return false;
+  const o = x as Record<string, unknown>;
+  if (typeof o.id !== "string" || !PLUGIN_ID_RE.test(o.id)) return false;
+  if (typeof o.name !== "string" || !o.name.trim()) return false;
+  if (typeof o.version !== "string" || !PLUGIN_VERSION_RE.test(o.version)) return false;
+  if (typeof o.entry !== "string" || !o.entry.trim() || isAbsolute(o.entry)) return false;
+  if (o.ui !== undefined && (typeof o.ui !== "string" || isAbsolute(o.ui))) return false;
+  if (!Array.isArray(o.permissions)) return false;
+  for (const p of o.permissions) {
+    if (typeof p !== "string" || !ALLOWED_PERMS.includes(p as PluginPerm)) return false;
+  }
+  const src = o.source as { mode?: unknown; files?: unknown; url?: unknown } | undefined;
+  if (!src || typeof src !== "object") return false;
+  if (src.mode === "inline") {
+    if (!src.files || typeof src.files !== "object") return false;
+    const files = src.files as Record<string, unknown>;
+    const keys = Object.keys(files);
+    if (keys.length === 0 || keys.length > MAX_PLUGIN_FILES) return false;
+    for (const k of keys) {
+      if (typeof files[k] !== "string") return false;
+      if ((files[k] as string).length > MAX_PLUGIN_FILE_BYTES) return false;
+    }
+  } else if (src.mode === "tarball") {
+    if (typeof src.url !== "string" || !/^https:\/\//.test(src.url)) return false;
+  } else {
+    return false;
+  }
+  return true;
+}
 
 function isSkillEntry(x: unknown): x is MarketSkillEntry {
   if (!x || typeof x !== "object") return false;
@@ -203,8 +403,10 @@ export async function fetchCatalogs(force = false): Promise<MarketCatalog> {
 
   const skillMap = new Map<string, MarketSkillEntry>();
   const mcpMap = new Map<string, MarketMcpEntry>();
+  const pluginMap = new Map<string, MarketPluginEntry>();
   for (const s of SEED_SKILLS) skillMap.set(s.id, s);
   for (const m of SEED_MCPS) mcpMap.set(m.id, m);
+  for (const p of SEED_PLUGINS) pluginMap.set(p.id, p);
 
   const sources: Array<{ url: string; ok: boolean; error?: string }> = [
     { url: "seed://builtin", ok: true },
@@ -229,11 +431,17 @@ export async function fetchCatalogs(force = false): Promise<MarketCatalog> {
       if (!isMcpEntry(merged)) continue;
       mcpMap.set(merged.id, merged);
     }
+    for (const raw of res.data.plugins ?? []) {
+      const merged = { ...raw } as MarketPluginEntry;
+      if (!isPluginEntry(merged)) continue;
+      pluginMap.set(merged.id, merged);
+    }
   }
 
   const data: MarketCatalog = {
     skills: [...skillMap.values()].sort((a, b) => a.name.localeCompare(b.name)),
     mcps: [...mcpMap.values()].sort((a, b) => a.name.localeCompare(b.name)),
+    plugins: [...pluginMap.values()].sort((a, b) => a.name.localeCompare(b.name)),
     sources,
     fetchedAt: Date.now(),
   };
@@ -389,4 +597,57 @@ export async function installMcpFromCatalog(
     const msg = (err?.stderr || err?.message || String(err)) as string;
     return { ok: false, error: msg };
   }
+}
+
+function defaultPluginsRoot(): string {
+  return join(homedir(), ".rcc", "plugins");
+}
+
+function safeJoinInsidePluginDir(dir: string, relPath: string): string | null {
+  if (typeof relPath !== "string" || !relPath.length) return null;
+  if (isAbsolute(relPath)) return null;
+  // Strip leading ./, normalize separators on the way in.
+  const target = resolve(dir, relPath);
+  const rel = relative(dir, target);
+  if (rel.startsWith("..") || isAbsolute(rel)) return null;
+  return target;
+}
+
+export async function installPluginFromCatalog(
+  id: string,
+): Promise<{ ok: true; pluginId: string } | { ok: false; error: string }> {
+  const catalog = await fetchCatalogs();
+  const entry = catalog.plugins.find((p) => p.id === id);
+  if (!entry) return { ok: false, error: `plugin not in catalog: ${id}` };
+
+  if (entry.source.mode === "tarball") {
+    return { ok: false, error: "tarball install not yet supported (M9); use inline sources" };
+  }
+
+  const files = entry.source.files;
+  if (!files["manifest.json"]) {
+    return { ok: false, error: "inline source missing manifest.json" };
+  }
+
+  const pluginDir = join(defaultPluginsRoot(), entry.id);
+  try {
+    await mkdir(pluginDir, { recursive: true });
+  } catch (err: unknown) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+
+  for (const [relPath, content] of Object.entries(files)) {
+    const target = safeJoinInsidePluginDir(pluginDir, relPath);
+    if (!target) {
+      return { ok: false, error: `unsafe path in inline source: ${relPath}` };
+    }
+    try {
+      await mkdir(dirname(target), { recursive: true });
+      await writeFile(target, content, "utf8");
+    } catch (err: unknown) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
+  return { ok: true, pluginId: entry.id };
 }
