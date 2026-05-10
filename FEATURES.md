@@ -386,9 +386,22 @@
 
 ### Phase 9 · 可访问性 + 键盘(batch 16-17 · 6 agent)
 **batch 16** · a11y:
-- B16-A 所有 primitives 加 aria-*,role,focus ring 达到 WCAG AA
+- B16-A 所有 primitives 加 aria-*,role,focus ring 达到 WCAG AA ✅ (2026-05-10)
+  - 审计 14 个 primitive + 5 个 shell 组件;绝大多数已合规(Button/IconButton/TextInput/Textarea/Toggle/Spinner/ErrorBoundary/TabNav/Sidebar/TopBar 已有 focus-visible ring + aria 属性)。
+  - Dialog:`aria-label={title}` 改为 `aria-labelledby={titleId}`,给 `<h2>` 加稳定 id;无 title 时回退 `aria-label="对话框"`。+4 LOC。
+  - Popover:桌面面板加 `aria-label="弹出面板"`;移动端 bottom-sheet 分支加 `aria-modal="true"` + aria-label。+2 LOC。
+  - Toast:danger 色 toast 改用 `role="alert" aria-live="assertive"`,其它继续 `role="status" aria-live="polite"`;关闭按钮加 focus ring;容器加 `aria-label="通知"`。+4 LOC。
+  - AppShell:顶部加「跳至主内容」skip-link(`sr-only focus:not-sr-only`),两个 `<main>` 都补 `id="main"`。+14 LOC。
+  - 未动:chat/* (由 B16-B 负责)、approvals/inbox/devices/peers(17+ 拥有)。
+  - Tailwind 已默认提供 `sr-only`;无需改 config。
+  - typecheck ✅ · `pnpm -F @rcc/web build` ✅(62s)。共 +24 LOC。
 - B16-B 屏幕阅读器遍历 chat 流(message role, timestamp)
-- B16-C 高对比度模式(CSS var 高对比覆盖)
+- B16-C 高对比度模式(CSS var 高对比覆盖) ✅ (2026-05-10)
+  - `tokens.css` 追加 `[data-theme-contrast="high"]` 与 `[data-theme="dark"][data-theme-contrast="high"]` 两套覆盖 + focus-visible 规则(+74 LOC,保持 RGB 三元组以配合 Tailwind `rgb(var()/<alpha>)`)。
+  - `tokens/theme.ts` 扩展 `useTheme()`:新增 `highContrast()` / `setHighContrast(v)`;持久化 `rcc.theme.contrast` ("0"/"1");默认跟随 `prefers-contrast: more`;监听系统变化(用户未显式设置时自动跟随)(+58 LOC)。
+  - `SettingsModal.tsx` 新增「外观」小节,复用 `Toggle` primitive;i18n 新增 `settings.appearance` / `settings.highContrast` / `settings.highContrastHint`(zh/en)(+27 LOC)。
+  - 对比度(light):`--text-primary on --bg-page` 9.77:1 → 15.84:1;真正的胜利在 muted / accent:`--text-muted` 2.91:1 → 6.26:1(AA→near AAA),`--accent` 2.95:1 → 6.42:1(fail→AA)。dark AAA 文本 21:1。
+  - typecheck ✅ · build ✅(24s)。
 
 **batch 17** · 键盘:
 - B17-A 全局快捷键表(?. 呼出,g s 切 session,c n 新建,等)

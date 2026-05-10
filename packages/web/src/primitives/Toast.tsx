@@ -75,7 +75,8 @@ function ToastRow(props: { item: ToastItem }): JSX.Element {
 
   return (
     <div
-      role="status"
+      role={props.item.tone === "danger" ? "alert" : "status"}
+      aria-live={props.item.tone === "danger" ? "assertive" : "polite"}
       class={[
         "relative overflow-hidden flex items-start gap-2",
         "bg-bg-surface rounded-md px-3 py-2 shadow-md border",
@@ -90,7 +91,7 @@ function ToastRow(props: { item: ToastItem }): JSX.Element {
       <span class="pl-1 flex-1 leading-snug">{props.item.message}</span>
       <button
         type="button"
-        class="shrink-0 text-text-muted hover:text-text-primary leading-none px-1"
+        class="shrink-0 text-text-muted hover:text-text-primary leading-none px-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded-sm"
         aria-label="Dismiss"
         onClick={() => dismiss(props.item.id)}
       >
@@ -108,6 +109,7 @@ export function ToastContainer(): JSX.Element {
   return (
     <Show when={items().length > 0}>
       <div
+        aria-label="通知"
         class={[
           "fixed z-[70] pointer-events-none flex flex-col gap-2",
           "bottom-4 left-1/2 -translate-x-1/2 w-[min(360px,calc(100vw-2rem))]",

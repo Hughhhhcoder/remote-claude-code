@@ -181,6 +181,7 @@ export function Popover(props: PopoverProps): JSX.Element {
             <div
               ref={panelRef}
               role="dialog"
+              aria-label="弹出面板"
               class={[
                 "fixed z-50 pointer-events-auto",
                 "bg-bg-surface text-text-primary",
@@ -216,6 +217,8 @@ export function Popover(props: PopoverProps): JSX.Element {
             <div
               ref={panelRef}
               role="dialog"
+              aria-modal="true"
+              aria-label="弹出面板"
               class={[
                 "pointer-events-auto w-full",
                 "bg-bg-surface text-text-primary",

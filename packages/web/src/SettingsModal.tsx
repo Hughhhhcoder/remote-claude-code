@@ -3,6 +3,8 @@ import type { UiAccent, UiCustomKey, UiPrefs } from "@rcc/protocol";
 import { UI_ACCENT_COLORS } from "@rcc/protocol";
 import { DEFAULT_CUSTOM_KEYS, decodeSendEscapes, encodeSendEscapes, type PrefsStore } from "./prefs.ts";
 import { availableLocales, getLocale, setLocale, t } from "./i18n/index.ts";
+import { useTheme } from "./tokens/theme.ts";
+import { Toggle } from "./primitives/Toggle.tsx";
 
 type Props = {
   open: boolean;
@@ -50,6 +52,7 @@ export function SettingsModal(props: Props) {
 
           <div class="p-5 space-y-6">
             <LanguageSection />
+            <AppearanceSection />
             <AccentSection store={props.store} />
             <FontScaleSection store={props.store} />
             <KeysSection store={props.store} />
@@ -86,6 +89,28 @@ function LanguageSection() {
           {(code) => <option value={code}>{LOCALE_LABELS[code] ?? code}</option>}
         </For>
       </select>
+    </section>
+  );
+}
+
+function AppearanceSection() {
+  const { highContrast, setHighContrast } = useTheme();
+  return (
+    <section>
+      <div class="text-[10px] uppercase tracking-widest text-zinc-500 mb-2">
+        {t("settings.appearance")}
+      </div>
+      <div class="flex items-center justify-between gap-3">
+        <div class="min-w-0">
+          <div class="text-sm text-zinc-200">{t("settings.highContrast")}</div>
+          <div class="text-[11px] text-zinc-500">{t("settings.highContrastHint")}</div>
+        </div>
+        <Toggle
+          checked={highContrast()}
+          onChange={setHighContrast}
+          aria-label={t("settings.highContrast")}
+        />
+      </div>
     </section>
   );
 }

@@ -152,8 +152,17 @@ export function MessageList(props: MessageListProps): JSX.Element {
   };
 
   // --- Render -------------------------------------------------------------
+  const logAriaLabel = (): string =>
+    `对话已加载,${props.messages.length} 条消息`;
+
   return (
-    <div class="relative">
+    <div
+      class="relative"
+      role="log"
+      aria-live="polite"
+      aria-relevant="additions"
+      aria-label={logAriaLabel()}
+    >
       <Show when={props.messages.length === 0}>
         <div class="text-center text-xs text-text-muted py-8">等待回复…</div>
       </Show>
@@ -164,6 +173,7 @@ export function MessageList(props: MessageListProps): JSX.Element {
             type="button"
             class="text-xs text-text-secondary hover:text-text-primary border border-border-subtle rounded-full px-3 py-1.5 bg-bg-surface"
             onClick={onExpandOlder}
+            aria-label={`显示更早消息,共 ${hiddenCount()} 条`}
           >
             显示更早消息 ({hiddenCount()})
           </button>

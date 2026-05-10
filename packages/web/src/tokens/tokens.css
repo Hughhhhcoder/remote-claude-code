@@ -101,3 +101,64 @@
     --duration-drawer: 0ms;
   }
 }
+
+/**
+ * High-contrast mode (WCAG AAA ≥ 7:1) — applied when
+ * <html data-theme-contrast="high">. Only tokens that differ from the
+ * normal palette are redeclared. Values stay as RGB triplets to match
+ * Tailwind's `rgb(var(--token) / <alpha-value>)` pattern.
+ *
+ * Light + high-contrast.
+ */
+[data-theme-contrast="high"] {
+  --bg-page: 245 241 223;            /* #f5f1df brighter cream */
+  --bg-surface: 255 255 255;         /* #ffffff pure white cards */
+  --bg-surface-strong: 250 247 236;  /* #faf7ec */
+  --border-subtle: 181 168 144;      /* #b5a890 darker border */
+  --border-strong: 138 125 96;       /* #8a7d60 */
+  --text-primary: 26 23 8;           /* #1a1708 near-black */
+  --text-secondary: 61 57 41;        /* #3d3929 */
+  --text-muted: 94 88 69;            /* #5e5845 darker muted */
+  --accent: 160 65 30;               /* #a0411e darker terra cotta */
+  --accent-hover: 125 47 15;         /* #7d2f0f */
+  --accent-bg: 250 230 218;          /* slightly darker peach backdrop */
+  --success: 30 107 60;              /* #1e6b3c */
+  --warn: 138 94 20;                 /* #8a5e14 */
+  --danger: 138 32 32;               /* #8a2020 */
+  --user-bubble: 229 223 197;        /* #e5dfc5 */
+  --code-bg: 255 255 255;            /* #ffffff */
+  --accent-300: 210 138 112;
+  --accent-400: 185 101 71;
+  --accent-500: 160 65 30;
+  --accent-600: 125 47 15;
+}
+
+/* Dark + high-contrast. */
+[data-theme="dark"][data-theme-contrast="high"] {
+  --bg-page: 0 0 0;                  /* #000000 */
+  --bg-surface: 26 24 22;            /* #1a1816 */
+  --bg-surface-strong: 36 34 30;     /* #24221e */
+  --border-subtle: 138 130 112;      /* #8a8270 */
+  --border-strong: 196 186 160;      /* #c4baa0 */
+  --text-primary: 255 255 255;       /* #ffffff */
+  --text-secondary: 219 212 188;     /* #dbd4bc */
+  --text-muted: 165 160 138;         /* #a5a08a */
+  --accent: 255 155 122;             /* #ff9b7a */
+  --accent-hover: 255 192 168;       /* #ffc0a8 */
+  --accent-bg: 64 42 32;
+  --success: 90 170 120;             /* #5aaa78 */
+  --warn: 226 166 80;                /* #e2a650 */
+  --danger: 240 80 80;               /* #f05050 */
+  --user-bubble: 46 43 37;           /* #2e2b25 */
+  --code-bg: 26 24 22;               /* #1a1816 */
+  --accent-300: 255 192 168;
+  --accent-400: 255 173 142;
+  --accent-500: 255 155 122;
+  --accent-600: 255 125 92;
+}
+
+/* High-contrast focus ring — thicker and always visible. */
+[data-theme-contrast="high"] *:focus-visible {
+  outline: 3px solid rgb(var(--text-primary)) !important;
+  outline-offset: 2px;
+}

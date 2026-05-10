@@ -128,6 +128,9 @@ export const en = {
   "settings.footer": "Saved to ~/.rcc/ui-prefs.json, synced across devices",
   "settings.remove": "Remove",
   "settings.language": "Language / 语言",
+  "settings.appearance": "Appearance",
+  "settings.highContrast": "High-contrast mode",
+  "settings.highContrastHint": "Boost text/bg contrast to WCAG AAA (7:1)",
 
   // chat view
   "chat.inputPlaceholder": "Type message… Cmd/Ctrl+Enter to send",

@@ -113,6 +113,21 @@ export function AppShell(props: AppShellProps): JSX.Element {
   return (
     <AppShellContext.Provider value={ctx}>
       <div class="h-[100svh] flex flex-col bg-bg-page text-text-primary">
+        {/* Skip-to-content link — revealed when focused via keyboard. */}
+        <a
+          href="#main"
+          class={[
+            "sr-only focus:not-sr-only",
+            "focus:fixed focus:top-2 focus:left-2 focus:z-[80]",
+            "focus:bg-bg-surface focus:text-text-primary",
+            "focus:px-3 focus:py-2 focus:rounded-md focus:shadow-lg",
+            "focus:outline-none focus:ring-2 focus:ring-accent",
+            "font-sans text-sm",
+          ].join(" ")}
+        >
+          跳至主内容
+        </a>
+
         {/* ----- TopBar ---------------------------------------------------
             Sticky on mobile so scrolling main content keeps chrome visible.
             On >=640 it's just shrink-0 at the top of the flex column. */}
@@ -142,6 +157,7 @@ export function AppShell(props: AppShellProps): JSX.Element {
           when={!isCompact()}
           fallback={
             <main
+              id="main"
               class={[
                 "flex-1 min-h-0 overflow-y-auto",
                 props.tabNav ? TAB_NAV_PAD_CLASS : "",
@@ -155,7 +171,7 @@ export function AppShell(props: AppShellProps): JSX.Element {
             <aside class="min-h-0 overflow-y-auto border-r border-border-subtle bg-bg-surface">
               {props.sidebar}
             </aside>
-            <main class="min-h-0 overflow-y-auto">{props.children}</main>
+            <main id="main" class="min-h-0 overflow-y-auto">{props.children}</main>
           </div>
         </Show>
 

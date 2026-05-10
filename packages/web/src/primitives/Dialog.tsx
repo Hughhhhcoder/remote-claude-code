@@ -55,6 +55,9 @@ export function Dialog(props: DialogProps): JSX.Element {
   const size = () => local.size ?? "md";
   const dismissible = () => local.dismissible ?? true;
 
+  // Stable id for the optional heading so we can wire aria-labelledby.
+  const titleId = `dlg-${Math.random().toString(36).slice(2, 9)}-title`;
+
   let panelRef: HTMLDivElement | undefined;
   const [previouslyFocused, setPreviouslyFocused] =
     createSignal<HTMLElement | null>(null);
@@ -138,7 +141,8 @@ export function Dialog(props: DialogProps): JSX.Element {
             ref={panelRef}
             role="dialog"
             aria-modal="true"
-            aria-label={local.title}
+            aria-label={local.title ? undefined : "对话框"}
+            aria-labelledby={local.title ? titleId : undefined}
             tabIndex={-1}
             class={[
               "pointer-events-auto relative",
@@ -169,7 +173,10 @@ export function Dialog(props: DialogProps): JSX.Element {
 
             <Show when={local.title}>
               <div class="px-5 pt-4 pb-3 sm:px-6 sm:pt-5 shrink-0">
-                <h2 class="font-serif text-lg sm:text-xl font-medium text-text-primary m-0">
+                <h2
+                  id={titleId}
+                  class="font-serif text-lg sm:text-xl font-medium text-text-primary m-0"
+                >
                   {local.title}
                 </h2>
               </div>

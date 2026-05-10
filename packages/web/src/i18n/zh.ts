@@ -128,6 +128,9 @@ export const zh = {
   "settings.footer": "保存到 ~/.rcc/ui-prefs.json,全部设备同步",
   "settings.remove": "删除",
   "settings.language": "Language / 语言",
+  "settings.appearance": "外观",
+  "settings.highContrast": "高对比模式",
+  "settings.highContrastHint": "提升文字 / 背景对比度,达到 WCAG AAA (7:1)",
 
   // chat view
   "chat.inputPlaceholder": "输入消息… Cmd/Ctrl+Enter 发送",

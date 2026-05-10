@@ -111,6 +111,7 @@ function ActionsBar(props: {
       <IconButton
         size="sm"
         aria-label="重新生成 (批次 7 提供)"
+        aria-disabled="true"
         title="批次 7 提供"
         disabled
         class="opacity-50"
@@ -139,13 +140,28 @@ export function MessageRow(props: MessageRowProps): JSX.Element {
   const handleQuote = () => props.onPin?.(props.msg.id);
 
   const role = () => props.msg.role;
+  const roleLabel = (): string =>
+    role() === "user" ? "用户" : role() === "assistant" ? "助手" : "系统";
+
+  const SrRoleHeader = (): JSX.Element => (
+    <span class="sr-only">
+      {roleLabel()} · {formatTimestamp(props.msg.timestamp)}
+      {props.msg.streaming ? " · 正在输入" : ""}
+    </span>
+  );
 
   return (
     <Show
       when={role() === "system"}
       fallback={
         <Show when={role() === "user"} fallback={
-          <div class="group flex gap-2 sm:gap-3 my-4 relative">
+          <div
+            class="group flex gap-2 sm:gap-3 my-4 relative"
+            role="article"
+            aria-roledescription="消息"
+            aria-busy={props.msg.streaming ? "true" : "false"}
+          >
+            <SrRoleHeader />
             <div class="w-5 sm:w-6 shrink-0 flex justify-center pt-[6px]">
               <Show when={!props.isFollowup}>
                 <span
@@ -159,11 +175,11 @@ export function MessageRow(props: MessageRowProps): JSX.Element {
               <div class="font-serif text-[15px] leading-[1.65] text-text-primary">
                 <For each={segments()}>{(seg) => <SegmentView seg={seg} />}</For>
                 <Show when={props.msg.streaming}>
-                  <span class="pulse-soft ml-0.5">▍</span>
+                  <span class="pulse-soft ml-0.5" aria-hidden="true">▍</span>
                 </Show>
               </div>
               <Show when={!props.isFollowup}>
-                <div class="text-text-muted text-[11px] font-sans mt-1">
+                <div class="text-text-muted text-[11px] font-sans mt-1" aria-hidden="true">
                   {formatTimestamp(props.msg.timestamp)}
                 </div>
               </Show>
@@ -175,13 +191,19 @@ export function MessageRow(props: MessageRowProps): JSX.Element {
             </div>
           </div>
         }>
-          <div class="group flex justify-end my-3 relative">
+          <div
+            class="group flex justify-end my-3 relative"
+            role="article"
+            aria-roledescription="消息"
+            aria-busy={props.msg.streaming ? "true" : "false"}
+          >
+            <SrRoleHeader />
             <div class="relative max-w-[88%] sm:max-w-[80%] ml-auto">
               <ActionsBar onCopy={handleCopy} onQuote={handleQuote} />
               <div class="rounded-lg bg-userBubble text-text-primary px-4 py-3 font-serif text-[15px] leading-[1.6]">
                 <For each={segments()}>{(seg) => <SegmentView seg={seg} />}</For>
                 <Show when={props.msg.streaming}>
-                  <span class="pulse-soft ml-0.5">▍</span>
+                  <span class="pulse-soft ml-0.5" aria-hidden="true">▍</span>
                 </Show>
               </div>
               <Show when={copied()}>
@@ -194,7 +216,8 @@ export function MessageRow(props: MessageRowProps): JSX.Element {
         </Show>
       }
     >
-      <div class="my-2 text-center">
+      <div class="my-2 text-center" role="article" aria-roledescription="系统消息">
+        <SrRoleHeader />
         <span class="font-sans text-xs italic text-text-muted">
           {concatText(segments())}
         </span>

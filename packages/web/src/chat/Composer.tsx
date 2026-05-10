@@ -143,6 +143,8 @@ export function Composer(props: ComposerProps): JSX.Element {
       props.remoteEditing ? "ring-2 ring-accent/20" : "",
     ].join(" ");
 
+  const hintId = `composer-hint-${Math.random().toString(36).slice(2, 8)}`;
+
   return (
     <div class={props.slashPaletteSlot ? "relative" : undefined}>
       <Show when={props.slashPaletteSlot}>
@@ -150,6 +152,10 @@ export function Composer(props: ComposerProps): JSX.Element {
           {props.slashPaletteSlot}
         </div>
       </Show>
+
+      <span id={hintId} class="sr-only">
+        按回车发送,Shift+回车换行
+      </span>
 
       <div class={outerCls()}>
         <Show when={props.attachSlot}>
@@ -164,8 +170,10 @@ export function Composer(props: ComposerProps): JSX.Element {
           rows={1}
           value={draft()}
           disabled={props.disabled}
+          aria-disabled={props.disabled ? "true" : "false"}
+          aria-describedby={hintId}
           placeholder={props.placeholder ?? ""}
-          aria-label="Message"
+          aria-label="输入消息"
           class={
             "flex-1 min-w-0 resize-none bg-transparent outline-none " +
             "font-serif text-[15px] leading-[1.55] text-text-primary " +
@@ -191,9 +199,12 @@ export function Composer(props: ComposerProps): JSX.Element {
 
         <IconButton
           size="md"
-          aria-label="Send message"
+          aria-label="发送消息"
           onClick={submit}
           disabled={props.disabled || draft().trim().length === 0}
+          aria-disabled={
+            props.disabled || draft().trim().length === 0 ? "true" : "false"
+          }
           class={[
             "shrink-0 rounded-full h-11 w-11 sm:h-9 sm:w-9",
             "bg-accent text-bg-page hover:bg-accent-hover",

@@ -109,6 +109,8 @@ export function ChatPane(props: ChatPaneProps): JSX.Element {
           ref={(el) => setScrollEl(el)}
           class="flex-1 min-h-0 overflow-y-auto"
           data-chat-scroll="true"
+          role="region"
+          aria-label="对话内容"
         >
           <div class="mx-auto max-w-[760px] w-full px-4 md:px-6 py-6">
             {props.messagesSlot ?? (
@@ -121,7 +123,11 @@ export function ChatPane(props: ChatPaneProps): JSX.Element {
         </div>
 
         {/* Composer slot — border-t separator, same 760px centering. */}
-        <div class="shrink-0 border-t border-border-subtle bg-bg-page">
+        <div
+          class="shrink-0 border-t border-border-subtle bg-bg-page"
+          role="region"
+          aria-label="消息输入"
+        >
           <div class="mx-auto max-w-[760px] w-full px-4 py-3">
             {props.composerSlot ?? <PlaceholderComposer />}
           </div>
