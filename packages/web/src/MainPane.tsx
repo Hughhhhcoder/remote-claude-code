@@ -9,7 +9,7 @@ import type {
 } from "@rcc/protocol";
 import type { RccClient } from "./client.ts";
 import { TerminalView } from "./TerminalView.tsx";
-import { ChatView } from "./ChatView.tsx";
+import { ChatSurface } from "./chat/ChatSurface.tsx";
 import { NotebookView } from "./NotebookView.tsx";
 import { RecordingPanel } from "./RecordingPanel.tsx";
 import { permissionChip } from "./NewSessionModal.tsx";
@@ -42,6 +42,8 @@ export interface MainPaneProps {
   sendCommand: (cmd: string) => void;
   customKeys: () => readonly { label: string; send: string; hint?: string }[];
   pinnedCommands: () => readonly CommandSummary[];
+  allCommands: () => readonly CommandSummary[];
+  sessions: () => SessionMeta[];
   viewMode: () => "chat" | "terminal";
   setViewMode: (v: "chat" | "terminal" | ((prev: "chat" | "terminal") => "chat" | "terminal")) => void;
   fileBrowserOpen: () => boolean;
@@ -53,6 +55,8 @@ export interface MainPaneProps {
   activeSid: () => string | null;
   activeSession: () => SessionMeta | undefined;
   gitBySid: () => Record<string, GitStatusData | null>;
+  onShareSession: (sid: string) => void;
+  onPinToNotebook?: (messageId: string) => void;
 }
 
 export function MainPane(props: MainPaneProps): JSX.Element {
@@ -75,14 +79,29 @@ export function MainPane(props: MainPaneProps): JSX.Element {
       }}
     >
       <main class="bg-bg-page flex flex-col overflow-hidden min-w-0">
-        <SessionHeader {...props} />
-        <div class="flex-1 min-h-0 relative">
-          <Show
-            when={showTerminal()}
-            fallback={
-              <ChatView
+        <Show
+          when={showTerminal()}
+          fallback={
+            <div class="flex-1 min-h-0">
+              <ChatSurface
                 client={props.client}
                 sid={props.activeSid()!}
+                session={props.activeSession()}
+                sessions={props.sessions()}
+                gitStatus={props.gitBySid()[props.activeSid()!] ?? null}
+                commands={props.allCommands()}
+                viewMode={props.viewMode()}
+                onToggleViewMode={
+                  props.activeSession()?.driver === "sdk"
+                    ? undefined
+                    : () =>
+                        props.setViewMode((v) =>
+                          v === "chat" ? "terminal" : "chat",
+                        )
+                }
+                onShare={() => props.onShareSession(props.activeSid()!)}
+                onToggleNotebook={() => props.setNotebookOpen((v) => !v)}
+                notebookActive={props.notebookOpen()}
                 onPinToNotebook={(messageId) => {
                   props.setNotebookOpen(true);
                   const cid =
@@ -95,15 +114,19 @@ export function MainPane(props: MainPaneProps): JSX.Element {
                     sid: props.activeSid()!,
                     cell: { kind: "chatRef", id: cid, messageId },
                   });
+                  props.onPinToNotebook?.(messageId);
                 }}
               />
-            }
-          >
+            </div>
+          }
+        >
+          <SessionHeader {...props} />
+          <div class="flex-1 min-h-0 relative">
             <TerminalView client={props.client} sid={props.activeSid()!} />
+          </div>
+          <Show when={!props.isCompact}>
+            <CommandBar {...props} />
           </Show>
-        </div>
-        <Show when={!props.isCompact}>
-          <CommandBar {...props} />
         </Show>
       </main>
 

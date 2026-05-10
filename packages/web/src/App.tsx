@@ -345,6 +345,8 @@ export function App() {
             sendCommand={sendCommand}
             customKeys={customKeys}
             pinnedCommands={commandsStore.pinnedCommands}
+            allCommands={() => Object.values(commandsStore.commandsById())}
+            sessions={sessionsStore.sessions}
             viewMode={uiStore.viewMode}
             setViewMode={uiStore.setViewMode}
             fileBrowserOpen={uiStore.fileBrowserOpen}
@@ -356,6 +358,7 @@ export function App() {
             activeSid={activeSid}
             activeSession={activeSession}
             gitBySid={sessionsStore.gitBySid}
+            onShareSession={uiStore.openShare}
           />
         </Show>
       </AppShell>

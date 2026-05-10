@@ -173,11 +173,30 @@
 **batch 5 验收**: 6 文件 1126 行;`pnpm -F @rcc/web typecheck` ✅;`pnpm -F @rcc/web build` ✅(22s)。batch 5 完结,不打 tag;v0.1.6 留待 batch 6 收束。
 
 **batch 6** · Composer:
-- P4-I `chat/Composer.tsx`(pill 样式 + 自动展开 + 键盘跟随)
-- P4-J `chat/SlashPalette.tsx`(弹出命令选择器,桌面 popover / 手机 sheet)
-- P4-K `chat/VoiceButton.tsx` + `AttachButton.tsx`(语音/附件抽离)
+- P4-I `chat/Composer.tsx` ✅ (batch 6 · 2026-05-10) · 211 行
+  - `rounded-xl border bg-bg-surface focus-within:border-accent + ring`(暖米 pill)+ 左 attach / auto-grow textarea / voice / 圆角 accent 送出。
+  - Auto-grow 8 行(192px)clamp,空文本回 40px;`minHeight` style 托底。
+  - IME 安全:`compositionstart/end` + `KeyboardEvent.isComposing` 双闸门,中文回车不误送;Cmd/Ctrl+Enter 强送;Shift+Enter 换行(可 `allowShiftEnterForNewline:false` 退化为 Enter 强送,CLI 场景用);Escape blur 不清稿。
+  - 不自行追键盘位置:sticky 与 visualViewport 由 AppShell / ChatPane 负责,composer 只触发 `onFocus` 让父级 scroll 到底。
+- P4-J `chat/SlashPalette.tsx` ✅ (batch 6 · 2026-05-10) · 262 行
+  - Desktop popover(父容器 `bottom-full` 绝对定位)/ mobile `Portal` bottom sheet(`rounded-t-xl` + grabber + `env(safe-area-inset-bottom)`)两态。未复用 Dialog(Dialog 锁 body scroll + 固定 padding,不适合)。
+  - window 级 `keydown` capture 监听:↑↓/Enter/Esc/Tab,`stopPropagation` 不穿到 composer textarea,保证 focus 留在输入框。
+  - 过滤:`/` 前缀后空串 = 全量;非空 → prefix match 优先,substring 其次,同段按 category 字典序;top 20 + "…还有 N 个" footer。
+  - 行 `onPointerDown preventDefault` 避免抢 textarea focus;commands 为空或过滤无结果都有对应空态提示。
+- P4-K `chat/VoiceButton.tsx` + `AttachButton.tsx` ✅ (batch 6 · 2026-05-10) · 128 + 44 行
+  - VoiceButton:`startDictation` 封装;三态 idle/speech/recorder 视觉,mobile 44px / desktop 36px 触达;`onCleanup handle.cancel()` 防麦克风泄漏。`onStart` 让父 snapshot draft,`onTranscript(text, isFinal)` 报完整 voice 段(父级用 snapshot 拼接)。
+  - AttachButton:无状态 `+` 按钮,父级挂 ContextInjector。同 size/palette。
+  - 两者都未复用 IconButton(IconButton 固定 `rounded-md` 方形 size,不适合圆形 + danger-fill 动效)。
 
-**验收** (batch 6 结束):parity checklist + 旧 ChatView.tsx 删除 + mobile chat tab 删除。tag `v0.1.5`。
+**batch 6 集成 · ChatSurface.tsx 接线 · 145 行** ✅ (batch 6 · 2026-05-10)
+  - 新增 `chat/ChatSurface.tsx`:组装 `ChatPane` + `MessageList` + `Composer`(含 SlashPalette / VoiceButton / AttachButton)+ `createStreamingMessages` + CRDT `input-draft`;挂 ContextInjector 作为 attach 的响应弹窗。
+  - `MainPane.tsx` chat fallback 从 `ChatView` 换成 `ChatSurface`(terminal 模式保留旧 SessionHeader + TerminalView + CommandBar)。新增 `allCommands / sessions / onShareSession` 三个 props;`App.tsx` 接线 `Object.values(commandsStore.commandsById())` 作为 SlashPalette 全量命令源,share 走 `uiStore.openShare`。
+  - 旧 `ChatView.tsx` 现已未被引用,Phase 6 批 10 统一清理(继续保留以备回滚)。
+
+**batch 4–6 验收 → tag `v0.1.6`**:
+  - 13 chat 文件 1996 行新增;`pnpm -F @rcc/web typecheck` ✅;`pnpm -F @rcc/web build` ✅(32s,main chunk 487KB gzip 133KB,新组件入口约 +31KB)。
+  - 375px 手测清单(必测):ChatHeader 仅 title + permission chip + notebook + share;MessageList 消息 serif 15/1.65;user bubble 88% 宽右靠;assistant 24px gutter 菱形;Composer pill 圆角 20px,回车送出,软键盘下 tabnav 不遮;SlashPalette 移动端从底升上来 70vh sheet;voice 按钮 44px。
+  - 已知遗留:streaming 的 scroll-to-bottom 由 MessageList 自管(不再经 ChatSurface 显式调),ChatView 的 prompt-template 面板 (`/p:<name>` 填参)暂未搬到 ChatSurface,batch 24-25 随 Prompts 专项迁。
 
 ### Phase 5 · 功能面板响应式(batch 7-9 · 11 agent 跨 3 批)
 **batch 7** · 审批 + 通知 + 设备:

@@ -1,0 +1,193 @@
+import { Show, createMemo, createSignal, onCleanup, type JSX } from "solid-js";
+import type { CommandSummary, GitStatusData, SessionMeta } from "@rcc/protocol";
+import type { RccClient } from "../client";
+import { useIsMobile } from "../hooks/useMediaQuery";
+import { createSharedText, type SharedText } from "../crdt";
+import { ContextInjector } from "../ContextInjector";
+import { ChatPane } from "./ChatPane";
+import { MessageList } from "./MessageList";
+import { Composer } from "./Composer";
+import { SlashPalette, type SlashCommand } from "./SlashPalette";
+import { VoiceButton } from "./VoiceButton";
+import { AttachButton } from "./AttachButton";
+import { createStreamingMessages } from "./streaming";
+
+/**
+ * ChatSurface — wires Phase-4 components into a single drop-in replacement
+ * for the old ChatView (chat mode). Owns:
+ *   - streaming message store (P4-H)
+ *   - composer draft (local) + CRDT sync (`input-draft` shared text)
+ *   - slash-palette detection (/<name> prefix in draft)
+ *   - context injector modal
+ *
+ * Props mirror what MainPane already has — sid, session, gitStatus, sessions
+ * (for the injector), onPinToNotebook.
+ */
+
+export interface ChatSurfaceProps {
+  client: RccClient;
+  sid: string;
+  session: SessionMeta | undefined;
+  sessions: SessionMeta[];
+  gitStatus?: GitStatusData | null;
+  commands: readonly CommandSummary[];
+  onPinToNotebook?: (messageId: string) => void;
+  onShare?: () => void;
+  onToggleNotebook?: () => void;
+  notebookActive?: boolean;
+  viewMode?: "chat" | "terminal";
+  onToggleViewMode?: () => void;
+}
+
+function toSlashCommands(cmds: readonly CommandSummary[]): SlashCommand[] {
+  return cmds.map((c) => ({
+    id: c.id,
+    name: c.name,
+    description: c.description,
+    category: c.scope,
+  }));
+}
+
+export function ChatSurface(props: ChatSurfaceProps): JSX.Element {
+  const isMobile = useIsMobile();
+
+  // --- streaming message store (per-sid) ----------------------------------
+  const stream = createStreamingMessages(props.client, () => props.sid);
+  onCleanup(() => stream.dispose());
+
+  // --- draft + CRDT share --------------------------------------------------
+  const [draft, setDraft] = createSignal("");
+  const [sharedKey, setSharedKey] = createSignal(0);
+  let shared: SharedText | null = null;
+
+  // Re-create shared text per sid.
+  createMemo(() => {
+    const sid = props.sid;
+    shared?.destroy();
+    const s = createSharedText(props.client, sid, "input-draft");
+    shared = s;
+    setDraft(s.getValue());
+    const off = s.observe((v) => setDraft(v));
+    onCleanup(() => {
+      off();
+      s.destroy();
+      if (shared === s) shared = null;
+    });
+    setSharedKey((k) => k + 1);
+  });
+  void sharedKey;
+
+  function onDraftChange(v: string): void {
+    setDraft(v);
+    shared?.setValue(v);
+  }
+
+  // --- voice snapshot ------------------------------------------------------
+  let voiceSnapshot = "";
+  function onVoiceStart(): void {
+    voiceSnapshot = draft();
+  }
+  function onVoiceTranscript(text: string, _isFinal: boolean): void {
+    const combined = voiceSnapshot ? `${voiceSnapshot} ${text}` : text;
+    onDraftChange(combined);
+  }
+  const [voiceError, setVoiceError] = createSignal<string | null>(null);
+
+  // --- send ----------------------------------------------------------------
+  function onSend(text: string): void {
+    if (!text) return;
+    props.client.write(props.sid, text + "\r");
+    shared?.setValue("");
+    setDraft("");
+  }
+
+  // --- slash palette -------------------------------------------------------
+  const [paletteOpen, setPaletteOpen] = createSignal(false);
+  const SLASH_PREFIX_RE = /^\/[a-z0-9:\-_]*$/i;
+
+  // Auto-open on slash-prefix draft, close otherwise.
+  const paletteShould = createMemo(() => SLASH_PREFIX_RE.test(draft()));
+  // Effect to reconcile open state.
+  createMemo(() => {
+    const want = paletteShould();
+    if (want !== paletteOpen()) setPaletteOpen(want);
+  });
+
+  function onPickCommand(name: string): void {
+    // Replace the entire slash fragment with `/<name> ` so the user can type args.
+    onDraftChange(`/${name} `);
+    setPaletteOpen(false);
+  }
+
+  // --- attach / context injector ------------------------------------------
+  const [injectOpen, setInjectOpen] = createSignal(false);
+
+  // --- JSX -----------------------------------------------------------------
+  return (
+    <>
+      <ChatPane
+        sid={props.sid}
+        session={props.session}
+        gitStatus={props.gitStatus ?? null}
+        viewMode={props.viewMode}
+        onToggleViewMode={props.onToggleViewMode}
+        onShare={props.onShare}
+        onToggleNotebook={props.onToggleNotebook}
+        notebookActive={props.notebookActive}
+        messagesSlot={
+          <MessageList
+            messages={stream.messages()}
+            onPinToNotebook={props.onPinToNotebook}
+          />
+        }
+        composerSlot={
+          <Composer
+            sid={props.sid}
+            client={props.client}
+            onSend={onSend}
+            initialDraft={draft()}
+            onDraftChange={onDraftChange}
+            placeholder="发送消息…"
+            attachSlot={<AttachButton onClick={() => setInjectOpen(true)} />}
+            voiceSlot={
+              <VoiceButton
+                onStart={onVoiceStart}
+                onTranscript={onVoiceTranscript}
+                onError={(m) => setVoiceError(m)}
+              />
+            }
+            slashPaletteSlot={
+              <Show when={paletteOpen()}>
+                <SlashPalette
+                  commands={toSlashCommands(props.commands)}
+                  draft={draft()}
+                  open={paletteOpen()}
+                  onOpenChange={setPaletteOpen}
+                  onPick={onPickCommand}
+                  isMobile={isMobile()}
+                />
+              </Show>
+            }
+          />
+        }
+      />
+
+      <Show when={voiceError()}>
+        <div class="fixed bottom-20 left-1/2 -translate-x-1/2 z-40 text-[11px] text-danger bg-bg-surface border border-border-subtle rounded-md px-3 py-1.5 shadow">
+          {voiceError()}
+        </div>
+      </Show>
+
+      <Show when={injectOpen()}>
+        <ContextInjector
+          client={props.client}
+          activeSid={props.sid}
+          sessions={props.sessions}
+          onClose={() => setInjectOpen(false)}
+        />
+      </Show>
+    </>
+  );
+}
+
+export default ChatSurface;
