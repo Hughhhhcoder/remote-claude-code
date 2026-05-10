@@ -84,8 +84,10 @@ import { PushService, type PushPayload } from "./push.ts";
 import { CrdtRelay, isUpdateTooLarge } from "./crdt.ts";
 import { WebAuthnService, rpIdFromHost, originFromReq } from "./webauthn.ts";
 import { installCrashHandler } from "./crash.ts";
+import { appendClientCrash } from "./crashes.ts";
 import { Watchdog } from "./watchdog.ts";
 import { checkForUpdates, versionSummary } from "./version.ts";
+import { buildLogsExport } from "./logs-export.ts";
 import { Updater } from "./updater.ts";
 import {
   fetchCatalogs,
@@ -3386,6 +3388,18 @@ function handle(ws: WebSocket, state: WsState, frame: Frame): void {
         });
       return;
     }
+    case "client.crash.report": {
+      // [B31] Web ErrorBoundary → ~/.rcc/crashes.log sink. Fire-and-forget,
+      // no ack, no broadcast: this is just a logging channel.
+      metrics.incr("crashes");
+      void appendClientCrash({
+        scope: frame.scope,
+        stack: frame.stack,
+        ua: frame.ua,
+        ts: frame.ts,
+      });
+      return;
+    }
     default:
       return;
   }
@@ -3770,6 +3784,42 @@ const httpServer = createServer(async (req, res) => {
       },
     })
   ) {
+    return;
+  }
+
+  // [B31-C] Sensitive-redacted log export. Bundles the last 1000 audit
+  // entries + 500 crash lines + version + ~/.rcc/config.json (with
+  // token/password/secret/key/credentials/cert/vapid fields replaced with
+  // "[REDACTED]") as a single JSON document. Handled here (above the
+  // generic REST dispatch) so the rest.ts 404 fallthrough doesn't catch
+  // it; authenticated the same as every other privileged endpoint.
+  if (req.url === "/api/v1/logs/export" && req.method === "GET") {
+    const auth = authenticate(req);
+    if (!auth.ok) {
+      res.writeHead(401, { "content-type": "application/json", "x-rcc-auth-reason": auth.reason });
+      res.end(JSON.stringify({ error: auth.reason }));
+      return;
+    }
+    try {
+      const bundle = await buildLogsExport();
+      audit.write({
+        kind: "logs.export",
+        deviceId: auth.device?.id,
+        ip: req.socket.remoteAddress ?? undefined,
+        details: {
+          auditLines: bundle.audit.entries.length,
+          crashLines: bundle.crashes.lines.length,
+        },
+      });
+      res.writeHead(200, {
+        "content-type": "application/json;charset=utf-8",
+        "cache-control": "no-store",
+      });
+      res.end(JSON.stringify(bundle));
+    } catch (err: any) {
+      res.writeHead(500, { "content-type": "application/json" });
+      res.end(JSON.stringify({ error: err?.message ?? String(err) }));
+    }
     return;
   }
 

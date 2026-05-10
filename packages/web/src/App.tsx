@@ -18,6 +18,7 @@ import { PermissionApproval } from "./PermissionApproval.tsx";
 import { PushPrompt } from "./PushPrompt.tsx";
 import { clearToken, loadToken } from "./auth.ts";
 import { SettingsModal } from "./SettingsModal.tsx";
+import { BugReportModal } from "./BugReportModal.tsx";
 import { createPrefsStore, DEFAULT_CUSTOM_KEYS } from "./prefs.ts";
 import { ShareModal } from "./ShareModal.tsx";
 import { SharedReadonlyView } from "./SharedReadonlyView.tsx";
@@ -460,12 +461,36 @@ export function App() {
     />
   );
 
+  // [B31] Client crash → host crashes.log. Called by each <ErrorBoundary>'s
+  // onError. Best-effort: swallow send errors so a broken ws never masks the
+  // original render error. Uses the same shape as buildCrashReport() but
+  // flattened to the frame schema.
+  function reportCrash(scope: string, err: unknown) {
+    const e = err as { name?: string; message?: string; stack?: string } | null;
+    const name = e?.name ?? "UnknownError";
+    const message = e?.message ?? String(err);
+    const stack = e?.stack ?? `${name}: ${message}`;
+    const ua = typeof navigator !== "undefined" ? navigator.userAgent : "n/a";
+    try {
+      client.send({
+        v: 1,
+        t: "client.crash.report",
+        scope,
+        stack,
+        ua,
+        ts: Date.now(),
+      });
+    } catch {
+      // ws closed or serialization failed — nothing else to do here.
+    }
+  }
+
   return (
     <Show
       when={status() !== "unauthorized"}
       fallback={<PairingView onPaired={(token) => client.setToken(token)} />}
     >
-      <ErrorBoundary scope="app">
+      <ErrorBoundary scope="app" onError={(err) => reportCrash("app", err)}>
       <AppShell
         sidebar={sidebarNode()}
         topBar={topBarNode()}
@@ -479,7 +504,7 @@ export function App() {
         }
         drawer={{ open: uiStore.drawerOpen(), onClose: () => uiStore.setDrawerOpen(false) }}
       >
-        <ErrorBoundary scope="chat">
+        <ErrorBoundary scope="chat" onError={(err) => reportCrash("chat", err)}>
         <MobileTabRouter
           tab={uiStore.mobileTab}
           client={client}
@@ -614,6 +639,15 @@ export function App() {
         store={prefsStore}
         client={client}
         onClose={() => uiStore.setSettingsOpen(false)}
+        onOpenBugReport={() => uiStore.setBugReportOpen(true)}
+      />
+      <BugReportModal
+        open={uiStore.bugReportOpen()}
+        client={client}
+        prefsStore={prefsStore}
+        sessionsStore={sessionsStore}
+        device={currentDevice()}
+        onClose={() => uiStore.setBugReportOpen(false)}
       />
       <ShareModal
         open={uiStore.shareOpen()}

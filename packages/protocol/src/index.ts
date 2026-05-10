@@ -1705,6 +1705,20 @@ export const HealthWarn = z.object({
   details: z.record(z.string(), z.unknown()).optional(),
 });
 
+// Client-side crash report (Batch 31). The web ErrorBoundary fires this when
+// a render error is caught; the host appends the record to ~/.rcc/crashes.log
+// alongside host-side crashes. Optional feature — no UI for viewing, and the
+// host must not crash if this frame is malformed. All fields are strings to
+// keep the write path trivial (no nested schemas).
+export const ClientCrashReport = z.object({
+  ...base,
+  t: z.literal("client.crash.report"),
+  scope: z.string(),
+  stack: z.string(),
+  ua: z.string(),
+  ts: z.number(),
+});
+
 // [metrics] — observability panel
 //
 // MetricsCollector on host keeps a 60-sample rolling window (1s resolution)
@@ -2672,6 +2686,7 @@ export const Frame = z.discriminatedUnion("t", [
   MarketPluginInstalled,
   HealthCrash,
   HealthWarn,
+  ClientCrashReport,
   PrefsRequest,
   Prefs,
   PrefsUpdate,

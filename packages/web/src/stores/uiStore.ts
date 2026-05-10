@@ -39,6 +39,8 @@ export interface UiStore {
   setShareOpen: (v: boolean) => void;
   inboxOpen: () => boolean;
   setInboxOpen: (v: boolean) => void;
+  bugReportOpen: () => boolean;
+  setBugReportOpen: (v: boolean) => void;
 
   // Main pane toggles
   fileBrowserOpen: () => boolean;
@@ -89,6 +91,7 @@ export function createUiStore(
   const [settingsOpen, setSettingsOpen] = createSignal(false);
   const [shareOpen, setShareOpen] = createSignal(false);
   const [inboxOpen, setInboxOpen] = createSignal(false);
+  const [bugReportOpen, setBugReportOpen] = createSignal(false);
 
   const [fileBrowserOpen, setFileBrowserOpen] = createSignal(false);
   const [notebookOpen, setNotebookOpen] = createSignal(false);
@@ -129,6 +132,8 @@ export function createUiStore(
     setShareOpen,
     inboxOpen,
     setInboxOpen,
+    bugReportOpen,
+    setBugReportOpen,
     fileBrowserOpen,
     setFileBrowserOpen,
     notebookOpen,

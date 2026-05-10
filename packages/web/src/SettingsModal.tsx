@@ -6,6 +6,7 @@ import { availableLocales, getLocale, setLocale, t } from "./i18n/index.ts";
 import { useTheme } from "./tokens/theme.ts";
 import { Toggle } from "./primitives/Toggle.tsx";
 import type { RccClient } from "./client.ts";
+import { loadToken } from "./auth.ts";
 import {
   defaultQuietHours,
   getQuietHours,
@@ -18,6 +19,10 @@ type Props = {
   store: PrefsStore;
   client: RccClient;
   onClose: () => void;
+  // [B31-B] Open the bug-report modal. Optional so tests / other call sites
+  // that don't wire this up (there are none today, but be defensive) still
+  // compile; when omitted, the entry is hidden.
+  onOpenBugReport?: () => void;
 };
 
 const ACCENT_SWATCH: Record<UiAccent, string> = {
@@ -108,6 +113,15 @@ export function SettingsModal(props: Props) {
             <FontScaleSection store={props.store} />
             <QuietHoursSection client={props.client} />
             <KeysSection store={props.store} />
+            <LogsExportSection />
+            <Show when={props.onOpenBugReport}>
+              <AboutSection
+                onOpenBugReport={() => {
+                  props.onOpenBugReport?.();
+                  props.onClose();
+                }}
+              />
+            </Show>
           </div>
 
           <div class="px-5 py-3 border-t border-zinc-900 flex items-center justify-between text-[11px] text-zinc-600">
@@ -605,5 +619,110 @@ function KeyRow(props: {
         ✕
       </button>
     </div>
+  );
+}
+
+/**
+ * [B31-B] About / diagnostics section — currently just the bug-report entry
+ * point. Kept minimal so future entries (version info, licenses, doc links)
+ * can slot in without disturbing the settings layout.
+ */
+function AboutSection(props: { onOpenBugReport: () => void }) {
+  return (
+    <section>
+      <div class="text-[10px] uppercase tracking-widest text-zinc-500 mb-2">
+        关于与诊断
+      </div>
+      <div class="flex items-center justify-between gap-3">
+        <div class="min-w-0">
+          <div class="text-sm text-zinc-200">报告 Bug</div>
+          <div class="text-[11px] text-zinc-500">
+            生成诊断快照(JSON),自动脱敏令牌与绝对路径。不会上传任何数据。
+          </div>
+        </div>
+        <button
+          class="shrink-0 px-3 py-1.5 rounded-lg text-xs border border-zinc-800 text-zinc-300 hover:bg-zinc-900 hover:border-zinc-700"
+          onClick={props.onOpenBugReport}
+        >
+          🐞 打开
+        </button>
+      </div>
+    </section>
+  );
+}
+
+/**
+ * [B31-C] Sensitive-redacted log export. Calls host endpoint
+ * GET /api/v1/logs/export which bundles the last 1000 audit entries,
+ * last 500 crash lines, version summary, and a redacted copy of
+ * ~/.rcc/config.json (token / password / secret / key / credentials /
+ * cert / vapid fields become "[REDACTED]"). The raw JSON is saved as
+ * rcc-logs-<ts>.json using an object-URL anchor; no upload, nothing
+ * leaves the device unless the user attaches the file themselves.
+ */
+function LogsExportSection() {
+  const [busy, setBusy] = createSignal(false);
+  const [err, setErr] = createSignal<string | null>(null);
+
+  async function run() {
+    if (busy()) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      const token = loadToken();
+      const headers: Record<string, string> = {};
+      if (token) headers["authorization"] = `Bearer ${token}`;
+      const resp = await fetch("/api/v1/logs/export", { headers });
+      if (!resp.ok) {
+        throw new Error(`导出失败 (HTTP ${resp.status})`);
+      }
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      const ts = new Date()
+        .toISOString()
+        .replace(/[:.]/g, "-")
+        .replace(/T/, "_")
+        .replace(/Z$/, "");
+      a.href = url;
+      a.download = `rcc-logs-${ts}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      // Release the object URL on the next tick — Safari needs the
+      // anchor to have fired its download before we revoke.
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (e: any) {
+      setErr(e?.message ?? String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section>
+      <div class="text-[10px] uppercase tracking-widest text-zinc-500 mb-2">
+        日志导出
+      </div>
+      <div class="flex items-center justify-between gap-3">
+        <div class="min-w-0">
+          <div class="text-sm text-zinc-200">导出诊断日志</div>
+          <div class="text-[11px] text-zinc-500">
+            打包最近 1000 条审计 + 500 行崩溃日志 + 版本与脱敏后的 config,
+            令牌/密钥/凭证字段自动替换为 [REDACTED]。
+          </div>
+          <Show when={err()}>
+            <div class="text-[11px] text-rose-400 mt-1">{err()}</div>
+          </Show>
+        </div>
+        <button
+          class="shrink-0 px-3 py-1.5 rounded-lg text-xs border border-zinc-800 text-zinc-300 hover:bg-zinc-900 hover:border-zinc-700 disabled:opacity-50 disabled:cursor-not-allowed"
+          onClick={run}
+          disabled={busy()}
+        >
+          {busy() ? "导出中…" : "📥 导出日志"}
+        </button>
+      </div>
+    </section>
   );
 }
