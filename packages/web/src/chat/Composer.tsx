@@ -178,6 +178,46 @@ export function Composer(props: ComposerProps): JSX.Element {
     queueMicrotask(resize);
   });
 
+  // [B26-A] Listen for `rcc:quote-into-composer` — fired by MessageRow when
+  // the user picks "Quote" from the message action menu. We prepend the
+  // quoted text (plus a trailing blank line) to the current draft so the
+  // user can type their reply underneath. Using a window CustomEvent avoids
+  // threading a callback through ChatSurface/MessageList/MessageRow and
+  // leaves the composer's @-mention state (B24-B) untouched.
+  onMount(() => {
+    if (typeof window === "undefined") return;
+    const onQuote = (ev: Event): void => {
+      const detail = (ev as CustomEvent<{ text?: string }>).detail;
+      const quoted = detail?.text;
+      if (!quoted) return;
+      const current = draft();
+      const sep = current.length === 0 ? "\n\n" : `\n\n${current}`;
+      const next = `${quoted}${sep}`;
+      // Route through the same path as user typing so CRDT + auto-resize
+      // stay in sync. updateDraft also triggers mention state refresh, but
+      // the caret-derived detector harmlessly no-ops for quote-prepended
+      // text (no `@` context).
+      updateDraft(next);
+      // Focus + place caret at the end so the user can type their reply.
+      queueMicrotask(() => {
+        const el = ref;
+        if (!el) return;
+        el.value = next;
+        el.focus();
+        const end = next.length;
+        el.setSelectionRange(end, end);
+        resize();
+      });
+    };
+    window.addEventListener("rcc:quote-into-composer", onQuote as EventListener);
+    onCleanup(() =>
+      window.removeEventListener(
+        "rcc:quote-into-composer",
+        onQuote as EventListener,
+      ),
+    );
+  });
+
   onCleanup(() => {
     if (fileDebounceTimer) clearTimeout(fileDebounceTimer);
   });

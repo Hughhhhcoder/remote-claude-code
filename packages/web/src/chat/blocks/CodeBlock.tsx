@@ -1,12 +1,20 @@
 import { createMemo, createSignal, createUniqueId, For, Show, type JSX } from "solid-js";
+import { detectLanguage } from "./detectLanguage";
 
 /**
- * CodeBlock — fenced code segment with a header strip (language + copy) and
+ * CodeBlock — fenced code segment with a header strip (language + actions) and
  * a tokenizer-lite syntax highlighter. No external deps; handles strings,
  * numbers, keywords, and comments for a small set of languages.
  *
  * Long content (>30 lines) is collapsed by default to 24 lines with a fade
  * overlay and a "展开全部" toggle. Boundary: exactly 30 lines stays expanded.
+ *
+ * Header actions (left → right):
+ *   [lang label]    [↗ open file?]  [# line numbers]  [copy]
+ *
+ * When `lang` is missing we call `detectLanguage` — conservative heuristics,
+ * fallback "text". When `filePath` is present a ↗ icon fires a `rcc:open-file`
+ * CustomEvent that a file browser can listen for.
  */
 
 const CODE_COLLAPSE_TRIGGER = 30;
@@ -19,6 +27,14 @@ export interface CodeBlockProps {
   copyable?: boolean;
   /** Force initial collapsed state. Default true if content exceeds threshold. */
   forceCollapsed?: boolean;
+  /**
+   * Optional file path associated with this block. When set, a small ↗ icon
+   * is rendered in the header; clicking fires `rcc:open-file` with the path
+   * so a file browser can open it. Kept optional to preserve existing callers.
+   */
+  filePath?: string;
+  /** When true, show line numbers by default. User can toggle via `#`. */
+  showLineNumbers?: boolean;
 }
 
 type TokKind = "text" | "str" | "num" | "kw" | "com" | "fn";
@@ -127,6 +143,36 @@ const COLOR: Record<TokKind, string> = {
   text: "",
 };
 
+/**
+ * Split the token stream along `\n` boundaries so we can render one visual
+ * line per source line. Tokens that themselves contain newlines (block
+ * comments, template strings) are split into per-line fragments preserving
+ * their token kind — the gutter still lines up.
+ */
+function splitTokensByLine(tokens: Tok[]): Tok[][] {
+  const lines: Tok[][] = [[]];
+  for (const tok of tokens) {
+    if (!tok.text.includes("\n")) {
+      lines[lines.length - 1].push(tok);
+      continue;
+    }
+    const parts = tok.text.split("\n");
+    for (let k = 0; k < parts.length; k++) {
+      if (parts[k]) lines[lines.length - 1].push({ kind: tok.kind, text: parts[k] });
+      if (k < parts.length - 1) lines.push([]);
+    }
+  }
+  return lines;
+}
+
+function emitOpenFile(path: string): void {
+  try {
+    window.dispatchEvent(new CustomEvent("rcc:open-file", { detail: { path } }));
+  } catch {
+    /* non-browser env — safe to ignore */
+  }
+}
+
 export function CodeBlock(props: CodeBlockProps): JSX.Element {
   const [copied, setCopied] = createSignal(false);
 
@@ -159,39 +205,116 @@ export function CodeBlock(props: CodeBlockProps): JSX.Element {
   const [collapsed, setCollapsed] = createSignal(initialCollapsed());
   const bodyId = createUniqueId();
 
+  // Resolved language: explicit prop wins, then heuristic detection, then "text".
+  const resolvedLang = createMemo<string>(() => {
+    if (props.lang && props.lang.trim().length > 0) return props.lang;
+    return detectLanguage(props.content);
+  });
+
+  const [lineNumbers, setLineNumbers] = createSignal(props.showLineNumbers === true);
+
   const visibleContent = () => {
     if (!collapsed()) return props.content;
     const lines = props.content.split("\n");
     return lines.slice(0, CODE_COLLAPSE_SHOW).join("\n");
   };
 
-  const tokens = () => tokenize(visibleContent(), props.lang ?? "");
+  // Tokens — produced once per (content, lang) pair; then split into rows so
+  // the gutter can render matching line numbers without a second pass.
+  const tokenLines = createMemo(() => splitTokensByLine(tokenize(visibleContent(), resolvedLang())));
+
+  // Width of the gutter — at least 1ch, scales with line count so collapsing /
+  // expanding a 100+ line block doesn't shift the code to the left.
+  const gutterDigits = createMemo(() => Math.max(1, String(totalLines()).length));
+
   const showCopy = () => props.copyable !== false;
+  const showFileLink = () => typeof props.filePath === "string" && props.filePath.length > 0;
 
   return (
     <div class="my-3 rounded-md border border-border-subtle bg-codeBg overflow-hidden">
-      <div class="flex items-center justify-between px-3 py-1.5 border-b border-border-subtle bg-bg-surface text-[11px] font-mono text-text-muted">
-        <span>{props.lang ?? "text"}</span>
-        <Show when={showCopy()}>
+      <div class="flex items-center justify-between gap-2 px-3 py-1.5 border-b border-border-subtle bg-bg-surface text-[11px] font-mono text-text-muted">
+        <span class="truncate">{resolvedLang()}</span>
+        <div class="flex items-center gap-1">
+          <Show when={showFileLink()}>
+            <button
+              type="button"
+              onClick={() => emitOpenFile(props.filePath as string)}
+              title={`打开 ${props.filePath}`}
+              aria-label={`打开 ${props.filePath}`}
+              class="font-sans text-[11px] px-1.5 py-0.5 rounded hover:bg-bg-surfaceStrong text-text-muted hover:text-text-primary transition duration-fast ease-rcc"
+            >
+              ↗
+            </button>
+          </Show>
           <button
             type="button"
-            onClick={copy}
-            class="font-sans text-[11px] px-2 py-0.5 rounded hover:bg-bg-surfaceStrong transition duration-fast ease-rcc"
+            onClick={() => setLineNumbers((v) => !v)}
+            title={lineNumbers() ? "隐藏行号" : "显示行号"}
+            aria-label={lineNumbers() ? "隐藏行号" : "显示行号"}
+            aria-pressed={lineNumbers()}
+            class="font-sans text-[11px] px-1.5 py-0.5 rounded hover:bg-bg-surfaceStrong transition duration-fast ease-rcc"
+            classList={{
+              "text-accent": lineNumbers(),
+              "text-text-muted hover:text-text-primary": !lineNumbers(),
+            }}
           >
-            {copied() ? "✓ 已复制" : "复制"}
+            #
           </button>
-        </Show>
+          <Show when={showCopy()}>
+            <button
+              type="button"
+              onClick={copy}
+              class="font-sans text-[11px] px-2 py-0.5 rounded hover:bg-bg-surfaceStrong transition duration-fast ease-rcc"
+            >
+              {copied() ? "✓ 已复制" : "复制"}
+            </button>
+          </Show>
+        </div>
       </div>
       <div class="relative" id={bodyId}>
         <pre class="overflow-x-auto p-3 text-[13px] leading-[1.6] font-mono">
           <code>
-            <For each={tokens()}>
-              {(tok) => (
-                <Show when={tok.kind !== "text"} fallback={<span>{tok.text}</span>}>
-                  <span class={COLOR[tok.kind]}>{tok.text}</span>
-                </Show>
-              )}
-            </For>
+            <Show
+              when={lineNumbers()}
+              fallback={
+                <For each={tokenLines()}>
+                  {(line, idx) => (
+                    <>
+                      <For each={line}>
+                        {(tok) => (
+                          <Show when={tok.kind !== "text"} fallback={<span>{tok.text}</span>}>
+                            <span class={COLOR[tok.kind]}>{tok.text}</span>
+                          </Show>
+                        )}
+                      </For>
+                      <Show when={idx() < tokenLines().length - 1}>{"\n"}</Show>
+                    </>
+                  )}
+                </For>
+              }
+            >
+              <For each={tokenLines()}>
+                {(line, idx) => (
+                  <>
+                    <span
+                      aria-hidden="true"
+                      class="inline-block select-none pr-3 text-right text-text-muted tabular-nums"
+                      style={{ "min-width": `${gutterDigits()}ch` }}
+                    >
+                      {idx() + 1}
+                    </span>
+                    <For each={line}>
+                      {(tok) => (
+                        <Show when={tok.kind !== "text"} fallback={<span>{tok.text}</span>}>
+                          <span class={COLOR[tok.kind]}>{tok.text}</span>
+                        </Show>
+                      )}
+                    </For>
+                    <Show when={idx() < tokenLines().length - 1}>{"\n"}</Show>
+                  </>
+                )}
+              </For>
+            </Show>
           </code>
         </pre>
         <Show when={collapsed() && shouldCollapse()}>
