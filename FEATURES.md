@@ -276,10 +276,24 @@
 ### Phase 7 · CLI session 真对话(batch 11-13 · 9 agent)
 把 CLI-driver 的 pty 输出从 xterm ANSI 流转成真实 chat 气泡 — 不依赖 SDK driver。
 
-**batch 11** · 解析强化:
-- B11-A host 新增 `packages/host/src/chat-parser.ts` v2(状态机替代 regex,支持 tool_use inline)
-- B11-B 协议 `chat.delta` frame(text delta + segment 流式)
-- B11-C host 端 pty→chat 流水线重写
+**batch 11** · 解析强化 ✅ (batch 11 · 2026-05-10):
+- B11-A `packages/host/src/chat-parser.ts` 状态机版 · 593 行(含 B11-C delta 叠加,原目标 400 行被放宽)
+  - 6 态状态机 `IDLE → TEXT → CODE_FENCE → DIFF_BLOCK → TOOL_USE → BOX_PANEL`,line-start 前缀驱动切换(fence / `●⏺ Tool(…)` / `╭…╰` / `diff --git` / `--- a/` / `+++ b/`)。
+  - tool_use 嵌入同消息:TEXT 态遇到 tool 标记先 flush text,追加 tool_use 段,随后 TEXT 再开新文本段(`activeSegmentIndex=-1` 在非 text 收尾时重置)。与 Claude.ai 的"回合内调用 tool"渲染一致。
+  - 增量 emit:`EMIT_DEBOUNCE_MS=50` 的 `scheduleFlush` + `IDLE_TIMEOUT_MS=1500` 的 idle timer 自动关 message(`streaming: false`)。
+  - 新 API:`beginNewMessage()` 强制切 + `dispose()` 清 timer + listener(session.ts 待调用点留注释标记,本批不动)。
+  - 公共 API 不破坏:`feedOutput/feedInput/appendMessage/updateSegment/finalizeMessage/list/onMessage/onUpdate/reset` 全部原签名保留;session.ts / sdk-session.ts / index.ts 零改动。
+  - ANSI 加宽覆盖 CR redraw(`\r\n?` → `\n`);cursor 定位 `CSI H/f/r` 走已有 `ANSI_CSI` 通吃;lone `\r` 转 `\n`(per-column terminal buffer 重建未做,本批不值)。
+  - 已识别遗留:user-prompt echo 自动检测仍是启发式(依赖 feedInput 正确调用或 idle 兜底);非文本段收尾后立即文本 run 的首次 delta 会把整段内容当 append 发(匹配 `prev.content="" → next` 的 startsWith 条件)。
+- B11-B 协议增 `chat.delta` frame · +20 行 `packages/protocol/src/index.ts`
+  - `{ v, t:"chat.delta", sid, messageId, segmentIndex, textDelta }`;已并入 Frame discriminated union。
+  - 接收语义:按 messageId 定位,`segments[segmentIndex]` 存在且 `kind==="text"` 则 append `textDelta`,否则静默忽略。`chat.update` 仍作权威兜底。
+- B11-C pipeline:parser 加 `onDelta` 监听 + `emitSegment(messageId, idx, prev, next)` 集中化 · chat-parser 内 +49 行
+  - `emitSegment` 无条件先 `emitUpdate`,满足 `next.kind==="text" && next.content.startsWith(prev.content) && next.content.length > prev.content.length` 时额外触发 delta;`closeBuf / flushLiveText / updateSegment` 三个 choke-point 全走 emitSegment,老 `chat.update` 兜底路径一处不丢。
+  - `packages/host/src/index.ts` `attachChatBroadcast` 订阅 `session.chat.onDelta` 广播 `chat.delta` frame;`session.onExit` 解订;`isFrameAllowedForShare` sid-gated 白名单加 `chat.delta`。
+  - **web 客户端本批不动**(`streaming.ts` 仍按 `chat.append + chat.update` 路径工作,deltas 暂不消费)—— Phase 10 batch 19 正式接入。
+
+**batch 11 验收**: 3 文件(`chat-parser.ts` / `protocol/index.ts` / `host/index.ts`)合计 +86 行核心;`pnpm -r typecheck` ✅(protocol / cli / host / web 全绿)。v0.2 arc 内首次动 host,批次内行为前向兼容。不打 tag。
 
 **batch 12** · 前端消费:
 - B12-A `chat/streaming.ts` 接 `chat.delta`

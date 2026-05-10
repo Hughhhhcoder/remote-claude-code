@@ -662,9 +662,25 @@ function attachChatBroadcast(session: AnySession): void {
       segment,
     });
   });
+  // [B11-C] Fine-grained text-append deltas. Fires in addition to chat.update
+  // for text segments that grow via pure append; lets future web-client
+  // coalescers apply byte-level patches without re-sending segment state.
+  // chat.update above remains the authoritative safety net for any client
+  // that hasn't yet been wired to consume chat.delta.
+  const unsubDelta = session.chat.onDelta((messageId, segmentIndex, textDelta) => {
+    broadcast({
+      v: 1,
+      t: "chat.delta",
+      sid: session.id,
+      messageId,
+      segmentIndex,
+      textDelta,
+    });
+  });
   session.onExit(() => {
     unsub();
     unsubUpdate();
+    unsubDelta();
   });
 }
 
@@ -1059,6 +1075,7 @@ function isFrameAllowedForShare(frame: Frame, sid: string): boolean {
       return true;
     case "chat.append":
     case "chat.update":
+    case "chat.delta":
     case "chat.list":
     case "chat.resetted":
     case "pty.out":

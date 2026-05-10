@@ -1223,6 +1223,25 @@ export const ChatUpdate = z.object({
   segment: ChatSegment,
 });
 
+// [B11-B] Incremental text append for an in-flight streaming text segment.
+// Unlike chat.update (which replaces the whole segment), chat.delta APPENDS
+// textDelta to segments[segmentIndex].content. Lets the web client coalesce a
+// flurry of tiny text_delta events without re-sending segment state every
+// token. Receiver semantics: locate message by messageId; if
+// segments[segmentIndex] exists and is kind:"text", append textDelta to its
+// content. If the segment is missing or a different kind, IGNORE silently
+// (no crash) — chat.update remains the authoritative safety net.
+export const ChatDelta = z.object({
+  ...base,
+  t: z.literal("chat.delta"),
+  sid: z.string(),
+  messageId: z.string(),
+  segmentIndex: z.number().int().nonnegative(),
+  /** New text bytes to APPEND to segments[segmentIndex].content. */
+  textDelta: z.string(),
+});
+export type ChatDelta = z.infer<typeof ChatDelta>;
+
 export const ChatReset = z.object({
   ...base,
   t: z.literal("chat.reset"),
@@ -2463,6 +2482,7 @@ export const Frame = z.discriminatedUnion("t", [
   ChatList,
   ChatAppend,
   ChatUpdate,
+  ChatDelta,
   ChatReset,
   ChatResetted,
   PushPublicKeyRequest,
