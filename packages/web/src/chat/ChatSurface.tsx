@@ -331,6 +331,7 @@ export function ChatSurface(props: ChatSurfaceProps): JSX.Element {
         onToggleNotebook={props.onToggleNotebook}
         notebookActive={props.notebookActive}
         messages={stream.messages()}
+        client={props.client}
         messagesSlot={
           <div class="relative">
             <MessageList

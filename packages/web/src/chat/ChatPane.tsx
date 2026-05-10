@@ -7,6 +7,7 @@ import {
   type JSX,
 } from "solid-js";
 import type { ChatMessage, GitStatusData, SessionMeta } from "@rcc/protocol";
+import type { RccClient } from "../client";
 import { EmptyState } from "../primitives/EmptyState";
 import { Textarea } from "../primitives/Textarea";
 import { ChatHeader } from "./ChatHeader";
@@ -71,6 +72,8 @@ export interface ChatPaneProps {
   /** [B28-A] Messages for the export dropdown in ChatHeader. Optional —
    *  callers that omit it lose the export button contents but keep chrome. */
   messages?: readonly ChatMessage[];
+  /** [B32-B] Forwarded to ChatHeader for the session-timeline dialog. */
+  client?: RccClient;
 }
 
 // ---------------------------------------------------------------------------
@@ -106,6 +109,7 @@ export function ChatPane(props: ChatPaneProps): JSX.Element {
           notebookActive={props.notebookActive}
           messages={props.messages}
           sid={props.sid}
+          client={props.client}
         />
 
         {/* Scroll region — the DIV itself scrolls; MessageList renders a */}

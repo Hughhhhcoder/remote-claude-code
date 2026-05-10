@@ -1,7 +1,9 @@
 import { Show, createSignal, type JSX } from "solid-js";
 import type { ChatMessage, GitStatusData, SessionMeta } from "@rcc/protocol";
+import type { RccClient } from "../client";
 import { IconButton } from "../primitives/IconButton";
 import { Popover } from "../primitives/Popover";
+import { Dialog } from "../primitives/Dialog";
 import {
   PermissionChip,
   DriverChip,
@@ -13,6 +15,7 @@ import {
   exportMarkdown,
   exportPrint,
 } from "./exportChat";
+import { SessionTimeline } from "./SessionTimeline";
 
 /**
  * ChatHeader — top chrome for the chat surface.
@@ -46,6 +49,8 @@ export interface ChatHeaderProps {
    *  writes a header-only file. */
   messages?: readonly ChatMessage[];
   sid?: string;
+  /** [B32-B] Required for the timeline button; when absent the button hides. */
+  client?: RccClient;
 }
 
 export function ChatHeader(props: ChatHeaderProps): JSX.Element {
@@ -61,6 +66,9 @@ export function ChatHeader(props: ChatHeaderProps): JSX.Element {
   // [B28-A] Export menu state + anchor ref.
   const [exportOpen, setExportOpen] = createSignal(false);
   let exportBtnRef: HTMLButtonElement | undefined;
+
+  // [B32-B] Session timeline dialog state.
+  const [timelineOpen, setTimelineOpen] = createSignal(false);
 
   function runExport(kind: "md" | "json" | "print"): void {
     const msgs = props.messages ?? [];
@@ -148,6 +156,20 @@ export function ChatHeader(props: ChatHeaderProps): JSX.Element {
           </IconButton>
         </Show>
 
+        {/* [B32-B] Session timeline — opens a Dialog bottom-sheet on mobile
+            showing messages + sid-scoped audit events in time order. Hidden
+            when no client wire is available (e.g. isolated tests). */}
+        <Show when={props.client}>
+          <IconButton
+            size="sm"
+            aria-label="会话时间线"
+            title="会话时间线"
+            onClick={() => setTimelineOpen(true)}
+          >
+            <span aria-hidden="true">🕐</span>
+          </IconButton>
+        </Show>
+
         {/* [B28-A] Export dropdown — always available so users can export
             empty sessions too (useful for templating). */}
         <IconButton
@@ -211,6 +233,23 @@ export function ChatHeader(props: ChatHeaderProps): JSX.Element {
           />
         </div>
       </Popover>
+
+      {/* [B32-B] Timeline dialog — mounted unconditionally in the tree; Dialog
+          short-circuits when `open` is false so there's no cost when closed. */}
+      <Show when={props.client}>
+        <Dialog
+          open={timelineOpen()}
+          onClose={() => setTimelineOpen(false)}
+          title="会话时间线"
+          size="md"
+        >
+          <SessionTimeline
+            client={props.client!}
+            sid={sid()}
+            messages={props.messages ?? []}
+          />
+        </Dialog>
+      </Show>
     </header>
   );
 }
