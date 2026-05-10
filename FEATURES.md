@@ -147,10 +147,30 @@
 **batch 4 验收**: 6 文件 1007 行;`pnpm -F @rcc/web typecheck` ✅;`pnpm -F @rcc/web build` ✅(monaco 4.3MB 大 chunk 已存在 → batch 18 定向拆分)。batch 4 完结,**不打 tag**;v0.1.6 留待 batch 6 收束。
 
 **batch 5** · 富内容 + 流式:
-- P4-E `chat/blocks/DiffBlock.tsx` + 语法着色集成
-- P4-F `chat/blocks/ToolCallBlock.tsx`(tool_use + result 成对折叠)
-- P4-G `chat/blocks/ApprovalBlock.tsx`(行内批准 + Face ID)
-- P4-H `chat/streaming.ts`(text_delta 平滑合并 + 闪烁光标)
+- P4-E `chat/blocks/DiffBlock.tsx` ✅ (batch 5 · 2026-05-10) · 142 行
+  - unified-diff 手解析(`@@` hunk / `+` add / `-` del / `---`/`+++`/`diff --git` 文件头折叠为小 italic)。+N/-M 计数 chip + 路径 chip(优先 `+++ b/<path>`,否则 `props.path`)。
+  - 行不加背景,仅 `text-success/danger + border-l-2 /50 pl-2`,Claude.ai 式柔调。`my-3 rounded-md border-border-subtle bg-codeBg` 外壳 + header `bg-bg-surface` 与 CodeBlock 一致。
+  - 未覆盖:combined/merge diff(`git diff --cc`,双列 `++`/`--`)、二进制补丁 (`GIT binary patch` 原样当 context 渲)、`\ No newline at end of file` 标记。
+- P4-F `chat/blocks/ToolCallBlock.tsx` ✅ (batch 5 · 2026-05-10) · 203 行
+  - 导出两个组件:`ToolCallBlock({use, result?})` 处理 paired/unpaired tool_use;`ToolResultBlock({result})` 处理孤儿 tool_result。MessageRow 后续按 `toolUseId` 配对后选择调用。
+  - 状态 pill: `✗ 错误` (danger) / `✓ 完成` (success) / `运行中` (warn + `animate-pulse`)。paired `isError` 时 default 展开,其它用 `use.collapsed ?? true`。
+  - 展开区分"输入 / 输出"两段,`<pre>` `max-h-[240px] overflow-auto whitespace-pre-wrap break-all`,375px 不吃 composer。每个 `<pre>` relative group 挂 Copy chip(`opacity-0 group-hover:opacity-100`)。
+  - 头部 `flex-shrink-0` 的 chevron/tool/pill + `min-w-0 truncate` 的 input preview,375 单行不挤爆。
+- P4-G `chat/blocks/ApprovalBlock.tsx` ✅ (batch 5 · 2026-05-10) · 187 行
+  - 行内审批卡,与全局 modal `PermissionApproval.tsx` 协议对齐:`approval` props 同时接 wire 的 `{id,sid,tool,risk,summary,raw,timestamp}` 与归一化后的 `{input,cwd}`,`describeRequest()` 在两种 shape 间优先级 fallback。
+  - 风险色:high `border-danger bg-danger/5` / medium `border-warn bg-warn/5` / low `border-accent bg-accent-bg` / resolved `opacity-70`。
+  - Button primitive 复用 `variant="primary|ghost|danger" size="sm"` + `h-11 sm:h-9`(mobile 44px 触达)。checkbox "始终允许此工具" `flex-wrap` 窄屏换行,按钮保持右对齐。
+  - high-risk + `device?.hasPasskey` 标签切 `🔐 Face ID 允许`;click 只调 `onApprove({allowAlways})`,passkey ceremony 留给父级(按 P4-G spec)。
+- P4-H `chat/streaming.ts` ✅ (batch 5 · 2026-05-10) · 266 行
+  - 纯 TS store 工厂 `createStreamingMessages(client, sidAccessor)`:监听 `chat.list/append/update`,按 sid 过滤(`client.on` 无预过滤)。
+  - rAF 合并 `chat.update` 突发:`pending: Map<messageId, Map<segmentIndex, ChatSegment>>` 同一帧内同坐标取 latest → 每帧一次 `setMessages` 批量。SSR/test 回退 16ms `setTimeout`。
+  - 孤儿更新:update 早于 append 时暂存 `orphanUpdates`,append 落地时 drain 应用。`stats.pendingOrphanUpdates` 可观测。
+  - `chat.append streaming:false` 合并尚未 flush 的 pending,再替换 final message,避免终帧赛过正在飞的 delta。
+  - 会话切换:sidAccessor 变化 → `clear()` + `chat.list.request`,与 `ChatView.tsx:52` 行为一致。
+  - 已识别遗留:后台 tab rAF 停转会无限暂存(量级小暂不修);scroll-to-bottom 留给 consumer(MessageList 已实现);`chat.list` 中途会清 pending 但保 orphan(极少数会话切回放竞态,后续再加时钟兜底)。
+  - 导出纯函数 `mergeSegments(existing, segmentIndex, incoming)` 方便未来单测 / 外部复用(不足位以空 text segment pad)。
+
+**batch 5 验收**: 6 文件 1126 行;`pnpm -F @rcc/web typecheck` ✅;`pnpm -F @rcc/web build` ✅(22s)。batch 5 完结,不打 tag;v0.1.6 留待 batch 6 收束。
 
 **batch 6** · Composer:
 - P4-I `chat/Composer.tsx`(pill 样式 + 自动展开 + 键盘跟随)
