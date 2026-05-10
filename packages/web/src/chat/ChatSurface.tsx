@@ -260,6 +260,8 @@ export function ChatSurface(props: ChatSurfaceProps): JSX.Element {
               remoteEditing={remoteEditActive()}
               getLastUserText={lastUserText}
               onToggleView={props.onToggleViewMode}
+              mentionSessions={props.sessions}
+              mentionCwd={props.session?.cwd}
               placeholder="发送消息…"
               attachSlot={<AttachButton onClick={() => setInjectOpen(true)} />}
               voiceSlot={

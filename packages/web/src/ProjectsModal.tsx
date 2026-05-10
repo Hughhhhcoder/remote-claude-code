@@ -15,7 +15,10 @@ interface EditState {
   name: string;
   cwd: string;
   color: ProjectColor | null;
+  systemPrompt: string;
 }
+
+const SYSTEM_PROMPT_MAX = 4000;
 
 export function ProjectsModal(props: Props) {
   const [editing, setEditing] = createSignal<EditState | null>(null);
@@ -33,6 +36,7 @@ export function ProjectsModal(props: Props) {
       name: p.name,
       cwd: p.cwd,
       color: p.color ?? null,
+      systemPrompt: p.systemPrompt ?? "",
     });
   }
 
@@ -51,13 +55,17 @@ export function ProjectsModal(props: Props) {
     const cwd = e.cwd.trim();
     const colorChanged = (e.color ?? undefined) !== original.color;
     const cwdChanged = cwd && cwd !== original.cwd;
-    if (cwdChanged || colorChanged) {
+    const nextSp = e.systemPrompt.trim();
+    const curSp = (original.systemPrompt ?? "").trim();
+    const spChanged = nextSp !== curSp;
+    if (cwdChanged || colorChanged || spChanged) {
       props.client.send({
         v: 1,
         t: "project.update",
         id: e.id,
         cwd: cwdChanged ? cwd : undefined,
         color: colorChanged ? e.color : undefined,
+        systemPrompt: spChanged ? (nextSp ? nextSp : null) : undefined,
       });
     }
     setEditing(null);
@@ -196,6 +204,33 @@ export function ProjectsModal(props: Props) {
                                 )}
                               </For>
                             </div>
+                          </div>
+                          <div>
+                            <div class="flex items-center justify-between mb-1">
+                              <label class="block text-[10px] uppercase tracking-widest text-zinc-500">
+                                System Prompt
+                                <span class="ml-1 normal-case tracking-normal text-zinc-600">(可选)</span>
+                              </label>
+                              <span
+                                class={`text-[10px] tabular-nums ${
+                                  e()!.systemPrompt.length > SYSTEM_PROMPT_MAX
+                                    ? "text-rose-400"
+                                    : "text-zinc-600"
+                                }`}
+                              >
+                                {e()!.systemPrompt.length}/{SYSTEM_PROMPT_MAX}
+                              </span>
+                            </div>
+                            <textarea
+                              value={e()!.systemPrompt}
+                              onInput={(ev) =>
+                                setEditing({ ...e()!, systemPrompt: ev.currentTarget.value })
+                              }
+                              placeholder="适用于此项目所有新会话"
+                              maxLength={SYSTEM_PROMPT_MAX}
+                              rows={3}
+                              class="w-full bg-zinc-900 border border-zinc-800 rounded px-2 py-1.5 text-xs text-zinc-100 outline-none focus:border-zinc-600 resize-y"
+                            />
                           </div>
                           <div class="flex items-center justify-end gap-2 pt-1">
                             <button

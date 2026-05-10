@@ -234,6 +234,13 @@ export const ProjectMeta = z.object({
   cwd: z.string(),
   color: ProjectColor.optional(),
   isDefault: z.boolean().optional(),
+  /**
+   * Added in B24-C: per-project system prompt. When a session is created for
+   * this project WITHOUT a starter, the client injects this prompt as the
+   * first user message (same mechanism as Starter.systemPrompt). Optional for
+   * back-compat — old hosts / persisted configs omit the field.
+   */
+  systemPrompt: z.string().max(4000).optional(),
 });
 export type ProjectMeta = z.infer<typeof ProjectMeta>;
 
@@ -254,6 +261,7 @@ export const ProjectAdd = z.object({
   name: z.string().min(1).max(64),
   cwd: z.string().min(1).max(1024),
   color: ProjectColor.optional(),
+  systemPrompt: z.string().max(4000).optional(),
 });
 
 export const ProjectAdded = z.object({
@@ -293,6 +301,11 @@ export const ProjectUpdate = z.object({
   id: z.string(),
   cwd: z.string().min(1).max(1024).optional(),
   color: ProjectColor.nullable().optional(),
+  /**
+   * B24-C: set to a string to replace, or null to clear. Omitted leaves the
+   * current value untouched (same pattern as `color`).
+   */
+  systemPrompt: z.string().max(4000).nullable().optional(),
 });
 
 export const ProjectUpdated = z.object({

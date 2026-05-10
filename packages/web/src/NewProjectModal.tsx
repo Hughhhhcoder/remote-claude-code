@@ -4,7 +4,12 @@ import { PROJECT_COLORS, type ProjectColor } from "@rcc/protocol";
 interface Props {
   open: boolean;
   onCancel: () => void;
-  onConfirm: (opts: { name: string; cwd: string; color: ProjectColor }) => void;
+  onConfirm: (opts: {
+    name: string;
+    cwd: string;
+    color: ProjectColor;
+    systemPrompt?: string;
+  }) => void;
 }
 
 const COLOR_DOT: Record<ProjectColor, string> = {
@@ -15,19 +20,29 @@ const COLOR_DOT: Record<ProjectColor, string> = {
   green: "bg-emerald-400",
 };
 
+const SYSTEM_PROMPT_MAX = 4000;
+
 export function NewProjectModal(props: Props) {
   const [name, setName] = createSignal("");
   const [cwd, setCwd] = createSignal("");
   const [color, setColor] = createSignal<ProjectColor>("orange");
+  const [systemPrompt, setSystemPrompt] = createSignal("");
 
   function confirm() {
     const n = name().trim();
     const c = cwd().trim();
     if (!n || !c) return;
-    props.onConfirm({ name: n, cwd: c, color: color() });
+    const sp = systemPrompt().trim();
+    props.onConfirm({
+      name: n,
+      cwd: c,
+      color: color(),
+      systemPrompt: sp ? sp : undefined,
+    });
     setName("");
     setCwd("");
     setColor("orange");
+    setSystemPrompt("");
   }
 
   return (
@@ -36,13 +51,13 @@ export function NewProjectModal(props: Props) {
         class="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm grid place-items-center"
         onClick={(e) => e.target === e.currentTarget && props.onCancel()}
       >
-        <div class="w-[480px] max-w-[calc(100vw-32px)] rounded-2xl border border-zinc-800 bg-zinc-950 shadow-2xl overflow-hidden">
+        <div class="w-[480px] max-w-[calc(100vw-32px)] rounded-2xl border border-zinc-800 bg-zinc-950 shadow-2xl overflow-hidden max-h-[90vh] flex flex-col">
           <div class="px-5 py-4 border-b border-zinc-900">
             <div class="text-sm font-semibold">新建项目</div>
             <div class="text-xs text-zinc-500 mt-0.5">命名一个工作区，绑定它的 cwd</div>
           </div>
 
-          <div class="p-5 space-y-4">
+          <div class="p-5 space-y-4 overflow-y-auto scrollbar">
             <div>
               <label class="block text-[11px] uppercase tracking-widest text-zinc-500 mb-1.5">
                 项目名
@@ -89,6 +104,30 @@ export function NewProjectModal(props: Props) {
                   )}
                 </For>
               </div>
+            </div>
+
+            <div>
+              <div class="flex items-center justify-between mb-1.5">
+                <label class="block text-[11px] uppercase tracking-widest text-zinc-500">
+                  System Prompt
+                  <span class="ml-1 normal-case tracking-normal text-zinc-600">(可选)</span>
+                </label>
+                <span
+                  class={`text-[10px] tabular-nums ${
+                    systemPrompt().length > SYSTEM_PROMPT_MAX ? "text-rose-400" : "text-zinc-600"
+                  }`}
+                >
+                  {systemPrompt().length}/{SYSTEM_PROMPT_MAX}
+                </span>
+              </div>
+              <textarea
+                value={systemPrompt()}
+                onInput={(e) => setSystemPrompt(e.currentTarget.value)}
+                placeholder="适用于此项目所有新会话。例: 你是 rcc 仓库维护者，所有回答使用中文…"
+                maxLength={SYSTEM_PROMPT_MAX}
+                rows={4}
+                class="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-xs text-zinc-100 outline-none focus:border-zinc-700 resize-y"
+              />
             </div>
           </div>
 

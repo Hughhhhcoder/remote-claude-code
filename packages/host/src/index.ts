@@ -1963,7 +1963,7 @@ function handle(ws: WebSocket, state: WsState, frame: Frame): void {
     }
     case "project.add": {
       projects
-        .create({ name: frame.name, cwd: frame.cwd, color: frame.color })
+        .create({ name: frame.name, cwd: frame.cwd, color: frame.color, systemPrompt: frame.systemPrompt })
         .then((p) => {
           send(ws, { v: 1, t: "project.added", project: p });
           broadcastProjectList();
@@ -2018,7 +2018,11 @@ function handle(ws: WebSocket, state: WsState, frame: Frame): void {
     }
     case "project.update": {
       projects
-        .update(frame.id, { cwd: frame.cwd, color: frame.color ?? undefined })
+        .update(frame.id, {
+          cwd: frame.cwd,
+          color: frame.color ?? undefined,
+          systemPrompt: frame.systemPrompt,
+        })
         .then((p) => {
           send(ws, { v: 1, t: "project.updated", project: p });
           broadcastProjectList();

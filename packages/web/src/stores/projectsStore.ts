@@ -8,6 +8,14 @@ export interface AddProjectOpts {
   name: string;
   cwd: string;
   color?: ProjectColor;
+  systemPrompt?: string;
+}
+
+export interface UpdateProjectPatch {
+  cwd?: string;
+  color?: ProjectColor | null;
+  /** string sets, null clears, undefined leaves untouched */
+  systemPrompt?: string | null;
 }
 
 /**
@@ -45,6 +53,11 @@ export function createProjectsStore(client: RccClient) {
     return (ps.find((p) => p.isDefault) ?? ps[0]!).id;
   }
 
+  function getById(id: string | null | undefined): ProjectMeta | undefined {
+    if (!id) return undefined;
+    return projects().find((p) => p.id === id);
+  }
+
   function addProject(opts: AddProjectOpts): void {
     client.send({
       v: 1,
@@ -52,13 +65,27 @@ export function createProjectsStore(client: RccClient) {
       name: opts.name,
       cwd: opts.cwd,
       color: opts.color,
+      systemPrompt: opts.systemPrompt,
+    });
+  }
+
+  function updateProject(id: string, patch: UpdateProjectPatch): void {
+    client.send({
+      v: 1,
+      t: "project.update",
+      id,
+      cwd: patch.cwd,
+      color: patch.color,
+      systemPrompt: patch.systemPrompt,
     });
   }
 
   return {
     projects,
     defaultProjectId,
+    getById,
     addProject,
+    updateProject,
     dispose: () => {
       unsubFrame();
     },

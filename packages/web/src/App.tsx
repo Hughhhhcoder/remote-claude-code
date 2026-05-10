@@ -161,6 +161,14 @@ export function App() {
         sessionsStore.setPendingStarter(null);
         const starter = commandsStore.starters().find((x) => x.id === psid);
         if (starter) runStarterBootstrap(frame.session.id, starter);
+      } else {
+        // B24-C: no starter chosen — fall back to the project's
+        // systemPrompt if one is configured. Starter always wins when
+        // both are present.
+        const proj = projectsStore.getById(frame.session.projectId ?? null);
+        if (proj?.systemPrompt && proj.systemPrompt.trim()) {
+          runProjectBootstrap(frame.session.id, proj.systemPrompt);
+        }
       }
     }
   });
@@ -194,6 +202,17 @@ export function App() {
           sid,
         });
       }
+    }, 300);
+  }
+
+  /**
+   * B24-C: Inject a project-level systemPrompt on session create when no
+   * starter was selected. Shares the 300ms attach-settle delay with
+   * runStarterBootstrap so the prompt lands in a live pty / SDK session.
+   */
+  function runProjectBootstrap(sid: string, systemPrompt: string) {
+    setTimeout(() => {
+      client.write(sid, systemPrompt + "\r");
     }, 300);
   }
 
@@ -305,7 +324,7 @@ export function App() {
     });
   }
 
-  function onCreateProject(opts: { name: string; cwd: string; color: ProjectColor }) {
+  function onCreateProject(opts: { name: string; cwd: string; color: ProjectColor; systemPrompt?: string }) {
     projectsStore.addProject(opts);
     uiStore.setNewProjectOpen(false);
   }

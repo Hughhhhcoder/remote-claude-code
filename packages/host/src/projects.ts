@@ -52,6 +52,10 @@ function sanitize(raw: unknown): ProjectMeta | null {
   const out: ProjectMeta = { id, name, cwd };
   if (isColor(r.color)) out.color = r.color;
   if (r.isDefault === true) out.isDefault = true;
+  if (typeof r.systemPrompt === "string") {
+    const sp = r.systemPrompt.trim();
+    if (sp) out.systemPrompt = sp.slice(0, 4000);
+  }
   return out;
 }
 
@@ -117,7 +121,7 @@ export class ProjectStore {
     return p ? { ...p } : undefined;
   }
 
-  async create(input: { name: string; cwd: string; color?: ProjectColor }): Promise<ProjectMeta> {
+  async create(input: { name: string; cwd: string; color?: ProjectColor; systemPrompt?: string }): Promise<ProjectMeta> {
     const name = input.name.trim();
     if (!name) throw new Error("name is required");
     const cwd = resolve(input.cwd);
@@ -127,6 +131,10 @@ export class ProjectStore {
       cwd,
     };
     if (input.color) project.color = input.color;
+    if (input.systemPrompt !== undefined) {
+      const sp = input.systemPrompt.trim();
+      if (sp) project.systemPrompt = sp.slice(0, 4000);
+    }
     this.projects.push(project);
     await this.persist();
     this.emit();
@@ -157,7 +165,7 @@ export class ProjectStore {
 
   async update(
     id: string,
-    patch: { cwd?: string; color?: ProjectColor | null },
+    patch: { cwd?: string; color?: ProjectColor | null; systemPrompt?: string | null },
   ): Promise<ProjectMeta> {
     const p = this.projects.find((x) => x.id === id);
     if (!p) throw new Error("unknown project");
@@ -169,6 +177,15 @@ export class ProjectStore {
     if (patch.color !== undefined) {
       if (patch.color === null) delete p.color;
       else p.color = patch.color;
+    }
+    if (patch.systemPrompt !== undefined) {
+      if (patch.systemPrompt === null) {
+        delete p.systemPrompt;
+      } else {
+        const sp = patch.systemPrompt.trim();
+        if (sp) p.systemPrompt = sp.slice(0, 4000);
+        else delete p.systemPrompt;
+      }
     }
     await this.persist();
     this.emit();
