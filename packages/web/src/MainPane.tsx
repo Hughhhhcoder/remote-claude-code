@@ -230,7 +230,7 @@ function CommandBar(props: MainPaneProps): JSX.Element {
 // Small chips. Phase 4 moves these into chat/ChatHeader.tsx.
 // ---------------------------------------------------------------------------
 
-function PermissionChip(props: { mode: PermissionMode }) {
+export function PermissionChip(props: { mode: PermissionMode }) {
   const { info, cls } = permissionChip(props.mode);
   return (
     <span
@@ -242,7 +242,7 @@ function PermissionChip(props: { mode: PermissionMode }) {
   );
 }
 
-function DriverChip(props: { driver: SessionDriver }) {
+export function DriverChip(props: { driver: SessionDriver }) {
   const isSdk = () => props.driver === "sdk";
   return (
     <span
@@ -262,7 +262,7 @@ function DriverChip(props: { driver: SessionDriver }) {
   );
 }
 
-function UsageChip(props: { usage: SessionUsage }) {
+export function UsageChip(props: { usage: SessionUsage }) {
   const u = () => props.usage;
   const tip = () =>
     [
@@ -294,7 +294,7 @@ function formatTokensShort(n: number): string {
   return `${(n / 1_000_000).toFixed(1)}M`;
 }
 
-function BranchChip(props: { status: GitStatusData }) {
+export function BranchChip(props: { status: GitStatusData }) {
   const label = () => props.status.branch ?? props.status.head?.slice(0, 7) ?? "detached";
   const tooltip = () => {
     const s = props.status;

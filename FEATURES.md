@@ -122,10 +122,29 @@
 
 ### Phase 4 · Chat 表面重写(batch 4-6 · 12 agent 跨 3 批)
 **batch 4** · 阅读渲染:
-- P4-A `chat/ChatPane.tsx` + `ChatHeader.tsx`
-- P4-B `chat/MessageList.tsx`(虚拟化 + autoscroll)
-- P4-C `chat/MessageRow.tsx`(role gutter + actions)
-- P4-D `chat/blocks/TextBlock.tsx` + `CodeBlock.tsx`(内置 highlight)
+- P4-A `chat/ChatPane.tsx` + `ChatHeader.tsx` ✅ (batch 4 · 2026-05-09)
+  - `chat/ChatPane.tsx` (154 行):header + scroll + composer 三槽容器;`ChatPaneContext` 暴露 `sid()` + `scrollEl()` 供 MessageList (P4-B) autoscroll 消费;`max-w-[760px]` 居中 + `mx-auto`,375px 直接铺满无溢出;`messagesSlot` 缺省渲染 `EmptyState("暂无消息")`,`composerSlot` 缺省渲染 Textarea placeholder 以便 QA。
+  - `chat/ChatHeader.tsx` (148 行):`h-14 sm:h-12`(移动 56 / 桌面 48),`border-b border-border-subtle bg-bg-page`;title `font-serif text-[15px]`;sid slice + DriverChip + UsageChip + BranchChip + cols×rows + view-mode toggle 全部 `hidden sm:inline-flex`,375 只保留 title + PermissionChip + notebook + share,无横向溢出。
+  - `MainPane.tsx` 中 `PermissionChip` / `DriverChip` / `UsageChip` / `BranchChip` 4 个 chip 从 `function` 提升为 `export function`,batch 5/6 的 ChatHeader + 任何 chat 子组件复用。
+  - 典型边界:SessionMeta 字段是 `id` 不是 `sid`(协议层),props `sid: string` 保持对外语义一致。
+- P4-B `chat/MessageList.tsx`(虚拟化 + autoscroll)✅ (batch 4 · 2026-05-10)
+  - 171 行。消费 `ChatPaneContext` 的 `scrollEl()` 做 autoscroll(不自建 scroll div),阈值 32px 判"在底部"。用户滚开后新消息显示 `bg-accent text-bg-page` "N 条新消息 ↓" pill(`right-3 bottom-3 sm:right-4 sm:bottom-4`,375 不溢出)。
+  - 轻量化虚拟化:≤200 条全渲染,>200 渲染最近 200 + "显示更早消息 (N)"按钮递增 200。不引 react-virtual / tanstack-virtual。
+  - `<For>` 以 `msg.id` 为 key(Solid 按值 identity),保证 `chat.update` 流式 segment 原地替换不抖。
+  - 额外引入 `isFollowup?: boolean` prop 给 MessageRow(同 role + <60s):P4-C 已接。
+  - 已知遗留:"显示更早"的 scroll-anchor(pin scrollTop)与 mobile 软键盘下 pill 偏移未处理,batch 18 性能批再收。
+- P4-C `chat/MessageRow.tsx`(role gutter + actions)✅ (batch 4 · 2026-05-10)
+  - 206 行。三分支:system(muted italic 居中)/ user(右气泡 `rounded-lg bg-userBubble`,`max-w-[88%] sm:max-w-[80%]`)/ assistant(全宽 serif prose,左侧 20/24px gutter,`bg-accent rotate-45` 菱形 avatar,`isFollowup` 时隐藏 gutter 与时间戳)。
+  - segment dispatcher 调 P4-D 的 TextBlock / CodeBlock;diff / tool_use / tool_result / thinking 用 `[{kind}] {120 char}` 占位(batch 5 替换)。
+  - 桌面悬停 action bar(`hidden sm:flex opacity-0 group-hover:opacity-100`):复制(1.5s ✓)+ 引用(`onPin`)+ 再生成(disabled,title"批次 7 提供")。移动端不显示,由 batch 6 bottom-sheet 承接。
+  - streaming 时 `pulse-soft` `▍`;assistant 下方时间戳(今天 `HH:mm` 否则 `MM月DD日 HH:mm`)。
+- P4-D `chat/blocks/TextBlock.tsx` + `CodeBlock.tsx`(内置 highlight)✅ (batch 4 · 2026-05-10)
+  - `TextBlock.tsx` 149 行:手写极简 markdown(段落 / 内联 \`code\` / `**bold**` / `*italic*` / `[text](url)`)+ `\n → <br/>`。http(s) URL 白名单,非法链接降级为纯文本;全程 JSX 节点拼装无 `innerHTML`,XSS 硬门槛。
+  - `CodeBlock.tsx` 179 行:外层 `rounded-md border-border-subtle bg-codeBg`,header `bg-bg-surface text-[11px] font-mono text-text-muted` 放 lang + 复制按钮(1.5s ✓ 已复制)。
+  - 内嵌 tokenizer-lite 覆盖 ts/tsx/js/jsx/json/py/go/rs/sh/bash:字符串 / 数字 / 关键字 / 注释,四色映射 `text-success / text-warn / text-accent / text-text-muted`(温米色系 vs Claude.ai 的静默高亮一致);不在列表的语言降级单 span 纯文本。
+  - 最佳努力:模板字符串 `${}` 插值不递归 token,保留在 string span 内;数字仅识别科学记数 `e+/-`。
+
+**batch 4 验收**: 6 文件 1007 行;`pnpm -F @rcc/web typecheck` ✅;`pnpm -F @rcc/web build` ✅(monaco 4.3MB 大 chunk 已存在 → batch 18 定向拆分)。batch 4 完结,**不打 tag**;v0.1.6 留待 batch 6 收束。
 
 **batch 5** · 富内容 + 流式:
 - P4-E `chat/blocks/DiffBlock.tsx` + 语法着色集成
