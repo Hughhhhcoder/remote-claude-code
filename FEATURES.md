@@ -296,9 +296,26 @@
 **batch 11 验收**: 3 文件(`chat-parser.ts` / `protocol/index.ts` / `host/index.ts`)合计 +86 行核心;`pnpm -r typecheck` ✅(protocol / cli / host / web 全绿)。v0.2 arc 内首次动 host,批次内行为前向兼容。不打 tag。
 
 **batch 12** · 前端消费:
-- B12-A `chat/streaming.ts` 接 `chat.delta`
-- B12-B CLI session Composer 行为修复(/command 识别,/clear 确认)
-- B12-C 长输出自动折叠 + "展开全部"
+- B12-A `chat/streaming.ts` 接 `chat.delta` ✅
+  - pending map 改为 per-(messageId, segmentIndex) `PendingEntry = { override?: ChatSegment; textAccum: string }`;`chat.update` 写 `override` 并清 `textAccum`,`chat.delta` 仅追加 `textAccum`。flush/append/orphan-drain 均走新增内部 `applyEntry()`:先 `mergeSegments(override)`,再 `applyTextDelta(textAccum)` —— **update-wins 语义**(同 tick 内 update 胜过之前的 delta,但后续 delta 仍在 update 内容上追加)。
+  - 新增 pure helper `applyTextDelta(existing, segmentIndex, textDelta)`:`segmentIndex` 越界 / 非 text / 空 delta 均返回原数组(按协议规范静默忽略)。已 export(B13+ 可复用)。
+  - `orphanUpdates` 由 `Map<string, Map<number, ChatSegment>>` 扩为 `Map<string, Map<number, OrphanEntry>>`,`OrphanEntry = { kind:"segment"; segment } | { kind:"delta"; textAccum }`;`parkOrphan` 在落 orphan 时合并同槽先前条目(update+delta 折叠为单 segment,delta+delta 连接 textAccum,非 text orphan + delta 按规范丢弃 delta)。`chat.append` / `chat.list` drain 时对两种 entry 分别走 `mergeSegments` / `applyTextDelta`。
+  - `StreamingStats.pendingOrphanUpdates` 语义扩为"任意类型 orphan 帧 count",字段名保留;**未新增 stats 字段**(本批不加)。back-compat:未发 `chat.delta` 的 host 仍走 update 老路径,无回归。
+  - 1 文件:`packages/web/src/chat/streaming.ts` 266 → 360 行(+94)。`pnpm -F @rcc/web typecheck` ✅。未动 `MessageList.tsx` / `MessageRow.tsx` / 任何 consumer。
+- B12-B CLI session Composer 行为修复(/command 识别,/clear 确认) ✅
+  - `ChatSurface.tsx` 增加 `onSend?: (text: string) => void` prop;`MainPane.tsx` 透传 `props.sendCommand` — chat 视图里键入的 `/git:status` 等命令现在走 `App.sendCommand` 同一拦截层(`git.exec.request` 路径),不再原样 `client.write` 给 claude pty。
+  - 销毁性 slash 命令白名单 `DESTRUCTIVE_SLASH = {clear, resume, reset, exit}`:发送时用 `^\/(\w[\w:-]*)\b` 匹配首 token,命中则 `window.confirm("清空当前对话上下文? (/<name>)")`,取消则恢复 draft 并在 composer 下方闪现 `已取消 /<name>` 2s 提示(`text-text-muted text-[11px]`)。
+  - `Composer.tsx` / `App.tsx` / `SlashPalette.tsx` / `streaming.ts` 未改;`SlashPalette` 在 slash-prefix 正则生效期间已自动关闭,确认对话框仅在发送瞬间(palette 关闭后)触发。
+  - 2 文件:`chat/ChatSurface.tsx` 194 → 239(+45);`MainPane.tsx` 398 → 399(+1)。`pnpm -F @rcc/web typecheck` ✅。
+  - Mobile 注意:`window.confirm` 在 iOS Safari 会阻塞主线程并短暂关闭软键盘 — 可接受,Dialog 原语留给后续批次。
+- B12-C 长输出自动折叠 + "展开全部" ✅ (batch 12 · 2026-05-10)
+  - `TextBlock` / `CodeBlock` / `DiffBlock` 各加 `collapsed` internal signal + `forceCollapsed?: boolean` override。触发阈值 20 / 30 / 40 行(严格 `>`,等于阈值保持展开);折叠时只渲 16 / 24 / 32 行 + 底部 24px 渐变遮罩 + `展开全部 (共 M 行)` 按钮。
+  - 按钮 `py-2 sm:py-1.5`(mobile 44px 触达)+ `aria-expanded` + `aria-controls={bodyId}`(`createUniqueId`)。
+  - 渐变用 inline `style={{ background: "linear-gradient(to top, rgb(var(--code-bg/bg-page)) 0%, transparent 100%)" }}`(不走 Tailwind `from-codeBg`,因 token 含 `<alpha-value>` 插值,inline 跨主题更稳)。
+  - DiffBlock 按已解析行数计(`parsedLines.length`)而非原始 content 行数。
+  - 3 文件:TextBlock 149→209(+60)、CodeBlock 179→222(+43)、DiffBlock 142→187(+45);全在 +80 预算内。`pnpm -F @rcc/web typecheck` ✅。
+
+**batch 12 验收**: 5 文件合计 +287 行;`pnpm -r typecheck` ✅;`pnpm -F @rcc/web build` ✅。CLI 会话 chat 消费路径完整(delta + confirm + collapse),视觉与 SDK 路径一致。不打 tag。
 
 **batch 13** · 边界 case:
 - B13-A ANSI escape / cursor control 残留剥离测试

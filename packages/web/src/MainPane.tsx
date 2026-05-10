@@ -91,6 +91,7 @@ export function MainPane(props: MainPaneProps): JSX.Element {
                 gitStatus={props.gitBySid()[props.activeSid()!] ?? null}
                 commands={props.allCommands()}
                 viewMode={props.viewMode()}
+                onSend={props.sendCommand}
                 onToggleViewMode={
                   props.activeSession()?.driver === "sdk"
                     ? undefined

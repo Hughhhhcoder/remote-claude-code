@@ -1,16 +1,24 @@
-import { createSignal, For, Show, type JSX } from "solid-js";
+import { createMemo, createSignal, createUniqueId, For, Show, type JSX } from "solid-js";
 
 /**
  * CodeBlock — fenced code segment with a header strip (language + copy) and
  * a tokenizer-lite syntax highlighter. No external deps; handles strings,
  * numbers, keywords, and comments for a small set of languages.
+ *
+ * Long content (>30 lines) is collapsed by default to 24 lines with a fade
+ * overlay and a "展开全部" toggle. Boundary: exactly 30 lines stays expanded.
  */
+
+const CODE_COLLAPSE_TRIGGER = 30;
+const CODE_COLLAPSE_SHOW = 24;
 
 export interface CodeBlockProps {
   content: string;
   lang?: string;
   /** When true, show a copy button in the block header. Default true. */
   copyable?: boolean;
+  /** Force initial collapsed state. Default true if content exceeds threshold. */
+  forceCollapsed?: boolean;
 }
 
 type TokKind = "text" | "str" | "num" | "kw" | "com" | "fn";
@@ -144,7 +152,20 @@ export function CodeBlock(props: CodeBlockProps): JSX.Element {
     } catch { fallback(); }
   }
 
-  const tokens = () => tokenize(props.content, props.lang ?? "");
+  const totalLines = createMemo(() => props.content.split("\n").length);
+  const shouldCollapse = () => totalLines() > CODE_COLLAPSE_TRIGGER;
+  const initialCollapsed = () =>
+    props.forceCollapsed !== undefined ? props.forceCollapsed : shouldCollapse();
+  const [collapsed, setCollapsed] = createSignal(initialCollapsed());
+  const bodyId = createUniqueId();
+
+  const visibleContent = () => {
+    if (!collapsed()) return props.content;
+    const lines = props.content.split("\n");
+    return lines.slice(0, CODE_COLLAPSE_SHOW).join("\n");
+  };
+
+  const tokens = () => tokenize(visibleContent(), props.lang ?? "");
   const showCopy = () => props.copyable !== false;
 
   return (
@@ -161,17 +182,39 @@ export function CodeBlock(props: CodeBlockProps): JSX.Element {
           </button>
         </Show>
       </div>
-      <pre class="overflow-x-auto p-3 text-[13px] leading-[1.6] font-mono">
-        <code>
-          <For each={tokens()}>
-            {(tok) => (
-              <Show when={tok.kind !== "text"} fallback={<span>{tok.text}</span>}>
-                <span class={COLOR[tok.kind]}>{tok.text}</span>
-              </Show>
-            )}
-          </For>
-        </code>
-      </pre>
+      <div class="relative" id={bodyId}>
+        <pre class="overflow-x-auto p-3 text-[13px] leading-[1.6] font-mono">
+          <code>
+            <For each={tokens()}>
+              {(tok) => (
+                <Show when={tok.kind !== "text"} fallback={<span>{tok.text}</span>}>
+                  <span class={COLOR[tok.kind]}>{tok.text}</span>
+                </Show>
+              )}
+            </For>
+          </code>
+        </pre>
+        <Show when={collapsed() && shouldCollapse()}>
+          <div
+            class="absolute inset-x-0 bottom-0 h-6 pointer-events-none"
+            style={{
+              background:
+                "linear-gradient(to top, rgb(var(--code-bg)) 0%, rgb(var(--code-bg) / 0) 100%)",
+            }}
+          />
+        </Show>
+      </div>
+      <Show when={shouldCollapse()}>
+        <button
+          type="button"
+          onClick={() => setCollapsed((v) => !v)}
+          aria-expanded={!collapsed()}
+          aria-controls={bodyId}
+          class="w-full text-center py-2 sm:py-1.5 border-t border-border-subtle bg-bg-page hover:bg-bg-surface text-[12px] font-sans text-accent hover:text-accent-hover transition"
+        >
+          {collapsed() ? `展开全部 (共 ${totalLines()} 行)` : "折叠"}
+        </button>
+      </Show>
     </div>
   );
 }

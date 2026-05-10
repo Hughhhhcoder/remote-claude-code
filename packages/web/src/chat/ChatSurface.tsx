@@ -37,7 +37,20 @@ export interface ChatSurfaceProps {
   notebookActive?: boolean;
   viewMode?: "chat" | "terminal";
   onToggleViewMode?: () => void;
+  /**
+   * Optional override for send. When provided, ChatSurface delegates to this
+   * instead of calling `client.write` directly — used by MainPane to route
+   * through App.sendCommand (which intercepts `/git:<sub>` etc.).
+   */
+  onSend?: (text: string) => void;
 }
+
+/**
+ * Slash commands that mutate or destroy conversation state. Intercepted at
+ * SEND time (after SlashPalette closes) and gated by a confirm dialog.
+ */
+const DESTRUCTIVE_SLASH = new Set(["clear", "resume", "reset", "exit"]);
+const SLASH_CMD_RE = /^\/(\w[\w:-]*)\b/;
 
 function toSlashCommands(cmds: readonly CommandSummary[]): SlashCommand[] {
   return cmds.map((c) => ({
@@ -94,9 +107,35 @@ export function ChatSurface(props: ChatSurfaceProps): JSX.Element {
   const [voiceError, setVoiceError] = createSignal<string | null>(null);
 
   // --- send ----------------------------------------------------------------
+  // Inline cancel notice shown briefly after a destructive command is aborted.
+  const [cancelNotice, setCancelNotice] = createSignal<string | null>(null);
+  let noticeTimer: ReturnType<typeof setTimeout> | null = null;
+  function flashCancelNotice(msg: string): void {
+    setCancelNotice(msg);
+    if (noticeTimer) clearTimeout(noticeTimer);
+    noticeTimer = setTimeout(() => {
+      setCancelNotice(null);
+      noticeTimer = null;
+    }, 2000);
+  }
+  onCleanup(() => {
+    if (noticeTimer) clearTimeout(noticeTimer);
+  });
+
   function onSend(text: string): void {
     if (!text) return;
-    props.client.write(props.sid, text + "\r");
+    const match = SLASH_CMD_RE.exec(text);
+    if (match && DESTRUCTIVE_SLASH.has(match[1].toLowerCase())) {
+      const name = match[1].toLowerCase();
+      // Native confirm is acceptable for this batch; future batch swaps in a Dialog.
+      if (!window.confirm(`清空当前对话上下文? (/${name})`)) {
+        onDraftChange(text); // restore draft so user can edit without re-typing
+        flashCancelNotice(`已取消 /${name}`);
+        return;
+      }
+    }
+    if (props.onSend) props.onSend(text);
+    else props.client.write(props.sid, text + "\r");
     shared?.setValue("");
     setDraft("");
   }
@@ -141,34 +180,41 @@ export function ChatSurface(props: ChatSurfaceProps): JSX.Element {
           />
         }
         composerSlot={
-          <Composer
-            sid={props.sid}
-            client={props.client}
-            onSend={onSend}
-            initialDraft={draft()}
-            onDraftChange={onDraftChange}
-            placeholder="发送消息…"
-            attachSlot={<AttachButton onClick={() => setInjectOpen(true)} />}
-            voiceSlot={
-              <VoiceButton
-                onStart={onVoiceStart}
-                onTranscript={onVoiceTranscript}
-                onError={(m) => setVoiceError(m)}
-              />
-            }
-            slashPaletteSlot={
-              <Show when={paletteOpen()}>
-                <SlashPalette
-                  commands={toSlashCommands(props.commands)}
-                  draft={draft()}
-                  open={paletteOpen()}
-                  onOpenChange={setPaletteOpen}
-                  onPick={onPickCommand}
-                  isMobile={isMobile()}
+          <div class="flex flex-col">
+            <Composer
+              sid={props.sid}
+              client={props.client}
+              onSend={onSend}
+              initialDraft={draft()}
+              onDraftChange={onDraftChange}
+              placeholder="发送消息…"
+              attachSlot={<AttachButton onClick={() => setInjectOpen(true)} />}
+              voiceSlot={
+                <VoiceButton
+                  onStart={onVoiceStart}
+                  onTranscript={onVoiceTranscript}
+                  onError={(m) => setVoiceError(m)}
                 />
-              </Show>
-            }
-          />
+              }
+              slashPaletteSlot={
+                <Show when={paletteOpen()}>
+                  <SlashPalette
+                    commands={toSlashCommands(props.commands)}
+                    draft={draft()}
+                    open={paletteOpen()}
+                    onOpenChange={setPaletteOpen}
+                    onPick={onPickCommand}
+                    isMobile={isMobile()}
+                  />
+                </Show>
+              }
+            />
+            <Show when={cancelNotice()}>
+              <div class="px-3 pb-1 text-text-muted text-[11px]">
+                {cancelNotice()}
+              </div>
+            </Show>
+          </div>
         }
       />
 

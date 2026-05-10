@@ -1,4 +1,4 @@
-import { For, type JSX } from "solid-js";
+import { createMemo, createSignal, createUniqueId, For, Show, type JSX } from "solid-js";
 
 /**
  * TextBlock — renders a "text" segment of a ChatMessage as lightly-formatted
@@ -6,12 +6,21 @@ import { For, type JSX } from "solid-js";
  * links. No markdown library, no innerHTML — JSX nodes are built by hand.
  *
  * Typography is inherited from the parent MessageRow (font-serif, 15px).
+ *
+ * Long content (>20 lines) is collapsed by default to 16 lines with a fade
+ * overlay and a "展开全部" toggle. Boundary: content exactly at threshold
+ * stays expanded (strictly greater triggers collapse).
  */
+
+const TEXT_COLLAPSE_TRIGGER = 20;
+const TEXT_COLLAPSE_SHOW = 16;
 
 export interface TextBlockProps {
   content: string;
   /** Role of the parent message — reserved for future role-specific styling. */
   role?: "user" | "assistant" | "system";
+  /** Force initial collapsed state. Default true if content exceeds threshold. */
+  forceCollapsed?: boolean;
 }
 
 type Inline =
@@ -126,23 +135,74 @@ function renderInline(node: Inline): JSX.Element {
 }
 
 export function TextBlock(props: TextBlockProps): JSX.Element {
+  const totalLines = createMemo(() => props.content.split("\n").length);
+  const shouldCollapse = () => totalLines() > TEXT_COLLAPSE_TRIGGER;
+  const initialCollapsed = () =>
+    props.forceCollapsed !== undefined ? props.forceCollapsed : shouldCollapse();
+  const [collapsed, setCollapsed] = createSignal(initialCollapsed());
+  const bodyId = createUniqueId();
+
+  const visibleContent = () => {
+    if (!collapsed()) return props.content;
+    const lines = props.content.replace(/\r\n/g, "\n").split("\n");
+    return lines.slice(0, TEXT_COLLAPSE_SHOW).join("\n");
+  };
+
   const paragraphs = () =>
-    props.content
+    visibleContent()
       .replace(/\r\n/g, "\n")
       .split(/\n{2,}/)
       .filter((p) => p.length > 0);
 
   return (
-    <For each={paragraphs()}>
-      {(para) => {
-        const nodes = tokenizeInline(para);
-        return (
-          <p class="mb-3 last:mb-0">
-            <For each={nodes}>{(n) => renderInline(n)}</For>
-          </p>
-        );
-      }}
-    </For>
+    <Show
+      when={shouldCollapse()}
+      fallback={
+        <For each={paragraphs()}>
+          {(para) => {
+            const nodes = tokenizeInline(para);
+            return (
+              <p class="mb-3 last:mb-0">
+                <For each={nodes}>{(n) => renderInline(n)}</For>
+              </p>
+            );
+          }}
+        </For>
+      }
+    >
+      <>
+        <div class="relative" id={bodyId}>
+          <For each={paragraphs()}>
+            {(para) => {
+              const nodes = tokenizeInline(para);
+              return (
+                <p class="mb-3 last:mb-0">
+                  <For each={nodes}>{(n) => renderInline(n)}</For>
+                </p>
+              );
+            }}
+          </For>
+          <Show when={collapsed()}>
+            <div
+              class="absolute inset-x-0 bottom-0 h-6 pointer-events-none"
+              style={{
+                background:
+                  "linear-gradient(to top, rgb(var(--bg-page)) 0%, rgb(var(--bg-page) / 0) 100%)",
+              }}
+            />
+          </Show>
+        </div>
+        <button
+          type="button"
+          onClick={() => setCollapsed((v) => !v)}
+          aria-expanded={!collapsed()}
+          aria-controls={bodyId}
+          class="w-full text-center py-2 sm:py-1.5 border-t border-border-subtle bg-bg-page hover:bg-bg-surface text-[12px] font-sans text-accent hover:text-accent-hover transition"
+        >
+          {collapsed() ? `展开全部 (共 ${totalLines()} 行)` : "折叠"}
+        </button>
+      </>
+    </Show>
   );
 }
 

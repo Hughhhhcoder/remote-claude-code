@@ -1,16 +1,24 @@
-import { createSignal, createMemo, For, Show, type JSX } from "solid-js";
+import { createSignal, createMemo, createUniqueId, For, Show, type JSX } from "solid-js";
 
 /**
  * DiffBlock — unified-diff renderer with a header strip (path + counts + copy)
  * and a claude.ai-style body: colored gutter + text, no banner backgrounds.
  * Best-effort parser: not a full patch-utils replacement.
+ *
+ * Long diffs (>40 lines) collapse by default to 32 lines with a fade overlay
+ * and a "展开全部" toggle. Boundary: exactly 40 lines stays expanded.
  */
+
+const DIFF_COLLAPSE_TRIGGER = 40;
+const DIFF_COLLAPSE_SHOW = 32;
 
 export interface DiffBlockProps {
   content: string;
   path?: string;
   /** When true, show copy button in header. Default true. */
   copyable?: boolean;
+  /** Force initial collapsed state. Default true if content exceeds threshold. */
+  forceCollapsed?: boolean;
 }
 
 type LineKind = "add" | "del" | "ctx" | "hunk" | "meta";
@@ -89,6 +97,21 @@ export function DiffBlock(props: DiffBlockProps): JSX.Element {
     return parseDiff(props.content);
   });
 
+  const totalLines = createMemo(() => {
+    const p = parsed();
+    return p ? p.lines.length : 0;
+  });
+  const shouldCollapse = () => totalLines() > DIFF_COLLAPSE_TRIGGER;
+  const initialCollapsed = () =>
+    props.forceCollapsed !== undefined ? props.forceCollapsed : shouldCollapse();
+  const [collapsed, setCollapsed] = createSignal(initialCollapsed());
+  const bodyId = createUniqueId();
+
+  const visibleLines = (p: Parsed): DLine[] => {
+    if (!collapsed()) return p.lines;
+    return p.lines.slice(0, DIFF_COLLAPSE_SHOW);
+  };
+
   const displayPath = () => {
     const p = parsed();
     if (!p) return null;
@@ -124,15 +147,37 @@ export function DiffBlock(props: DiffBlockProps): JSX.Element {
               </Show>
             </div>
           </div>
-          <div class="overflow-x-auto text-[13px] leading-[1.6] font-mono py-1">
-            <For each={p().lines}>
-              {(ln) => (
-                <div class={LINE_CLASS[ln.kind]}>
-                  <span class="whitespace-pre">{ln.text || " "}</span>
-                </div>
-              )}
-            </For>
+          <div class="relative" id={bodyId}>
+            <div class="overflow-x-auto text-[13px] leading-[1.6] font-mono py-1">
+              <For each={visibleLines(p())}>
+                {(ln) => (
+                  <div class={LINE_CLASS[ln.kind]}>
+                    <span class="whitespace-pre">{ln.text || " "}</span>
+                  </div>
+                )}
+              </For>
+            </div>
+            <Show when={collapsed() && shouldCollapse()}>
+              <div
+                class="absolute inset-x-0 bottom-0 h-6 pointer-events-none"
+                style={{
+                  background:
+                    "linear-gradient(to top, rgb(var(--code-bg)) 0%, rgb(var(--code-bg) / 0) 100%)",
+                }}
+              />
+            </Show>
           </div>
+          <Show when={shouldCollapse()}>
+            <button
+              type="button"
+              onClick={() => setCollapsed((v) => !v)}
+              aria-expanded={!collapsed()}
+              aria-controls={bodyId}
+              class="w-full text-center py-2 sm:py-1.5 border-t border-border-subtle bg-bg-page hover:bg-bg-surface text-[12px] font-sans text-accent hover:text-accent-hover transition"
+            >
+              {collapsed() ? `展开全部 (共 ${totalLines()} 行)` : "折叠"}
+            </button>
+          </Show>
         </div>
       )}
     </Show>

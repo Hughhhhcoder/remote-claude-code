@@ -1,12 +1,16 @@
 // [P4-H] rAF-coalesced streaming buffer for SDK chat messages.
 //
-// Background: the SDK driver appends one `chat.append` (streaming:true) when a
-// new assistant message starts, then emits a burst of `chat.update` frames as
-// text_delta / tool_use blocks arrive, then a final `chat.append`
-// (streaming:false) with the completed message. The naive handler in
-// ChatView.tsx re-renders on every frame. Here we coalesce updates per
-// animation frame, keeping only the latest segment for each
-// (messageId, segmentIndex) pair before flushing into a Solid signal.
+// Background: the SDK driver sends one `chat.append` (streaming:true) when a
+// new assistant message starts, then a burst of `chat.update` / `chat.delta`
+// frames as content arrives, then a final `chat.append` (streaming:false)
+// with the completed message. Here we coalesce per animation frame, keeping
+// only the latest state for each (messageId, segmentIndex) before flushing
+// into a Solid signal.
+//
+// [B12-A] Consumes `chat.delta` (B11-B) which APPENDs textDelta to an
+// existing text segment rather than replacing it. Within a flush tick a
+// chat.update is an "override" that wins over previous content; deltas
+// queued in the same tick still apply on top of it.
 //
 // This module is pure data reactivity — no JSX. MessageRow handles the
 // blinking-cursor affordance based on `ChatMessage.streaming`.
@@ -15,11 +19,9 @@ import { createSignal, createEffect, onCleanup, type Accessor } from "solid-js";
 import type { RccClient } from "../client";
 
 export interface StreamingStats {
-  /** Total messages currently in buffer. */
   count: number;
-  /** True if any message has streaming === true. */
   streaming: boolean;
-  /** Number of queued-but-not-applied updates (frames arriving ahead of append). */
+  /** Orphan frames (updates or deltas) still waiting for a parent message. */
   pendingOrphanUpdates: number;
 }
 
@@ -51,6 +53,38 @@ export function mergeSegments(
   return next;
 }
 
+/**
+ * [B12-A] Pure: append `textDelta` to segments[segmentIndex].content iff that
+ * segment exists and is kind:"text". Per `chat.delta` spec missing/non-text
+ * targets are silently ignored. Exported for reuse (tests, replay tools).
+ */
+export function applyTextDelta(
+  existing: ChatSegment[],
+  segmentIndex: number,
+  textDelta: string,
+): ChatSegment[] {
+  if (segmentIndex < 0 || segmentIndex >= existing.length) return existing;
+  const seg = existing[segmentIndex]!;
+  if (seg.kind !== "text" || textDelta === "") return existing;
+  const next = existing.slice();
+  next[segmentIndex] = { ...seg, content: seg.content + textDelta };
+  return next;
+}
+
+/** Per-(messageId, segmentIndex) pending entry. override (from chat.update)
+ * replaces content; textAccum (coalesced chat.delta strings in arrival order)
+ * is applied on top of override OR the existing segment. See flush(). */
+interface PendingEntry {
+  override?: ChatSegment;
+  textAccum: string;
+}
+
+/** Union stored in orphanUpdates — full-segment replacement or delta accum.
+ * Both drain when the parent chat.append arrives. */
+type OrphanEntry =
+  | { kind: "segment"; segment: ChatSegment }
+  | { kind: "delta"; textAccum: string };
+
 function rafSchedule(cb: () => void): { cancel: () => void } {
   if (typeof requestAnimationFrame === "function") {
     const id = requestAnimationFrame(cb);
@@ -71,10 +105,10 @@ export function createStreamingMessages(
 ): StreamingMessagesStore {
   const [messages, setMessages] = createSignal<ChatMessage[]>([]);
 
-  // messageId → segmentIndex → latest segment (pending flush on next rAF).
-  const pending = new Map<string, Map<number, ChatSegment>>();
-  // Updates that arrived before their chat.append — apply on insert.
-  const orphanUpdates = new Map<string, Map<number, ChatSegment>>();
+  // messageId → segmentIndex → pending entry (flush on next rAF).
+  const pending = new Map<string, Map<number, PendingEntry>>();
+  // Frames that arrived before their chat.append — apply on insert.
+  const orphanUpdates = new Map<string, Map<number, OrphanEntry>>();
 
   let rafHandle: { cancel: () => void } | null = null;
 
@@ -84,6 +118,63 @@ export function createStreamingMessages(
     let n = 0;
     for (const m of orphanUpdates.values()) n += m.size;
     setOrphanCount(n);
+  }
+
+  function getPendingEntry(messageId: string, segmentIndex: number): PendingEntry {
+    let bucket = pending.get(messageId);
+    if (!bucket) {
+      bucket = new Map();
+      pending.set(messageId, bucket);
+    }
+    let entry = bucket.get(segmentIndex);
+    if (!entry) {
+      entry = { textAccum: "" };
+      bucket.set(segmentIndex, entry);
+    }
+    return entry;
+  }
+
+  function parkOrphan(messageId: string, segmentIndex: number, entry: PendingEntry): void {
+    let bucket = orphanUpdates.get(messageId);
+    if (!bucket) {
+      bucket = new Map();
+      orphanUpdates.set(messageId, bucket);
+    }
+    const existing = bucket.get(segmentIndex);
+    if (entry.override) {
+      // Full replacement wins; fold textAccum onto it so drain emits one seg.
+      let seg = entry.override;
+      if (entry.textAccum && seg.kind === "text") {
+        seg = { ...seg, content: seg.content + entry.textAccum };
+      }
+      bucket.set(segmentIndex, { kind: "segment", segment: seg });
+    } else if (entry.textAccum) {
+      if (existing?.kind === "segment") {
+        const seg = existing.segment;
+        if (seg.kind === "text") {
+          bucket.set(segmentIndex, {
+            kind: "segment",
+            segment: { ...seg, content: seg.content + entry.textAccum },
+          });
+        }
+        // Non-text parked segment + delta: spec says ignore the delta.
+      } else if (existing?.kind === "delta") {
+        bucket.set(segmentIndex, {
+          kind: "delta",
+          textAccum: existing.textAccum + entry.textAccum,
+        });
+      } else {
+        bucket.set(segmentIndex, { kind: "delta", textAccum: entry.textAccum });
+      }
+    }
+  }
+
+  /** Apply a pending entry onto a segments array (update-then-delta order). */
+  function applyEntry(segments: ChatSegment[], sIdx: number, entry: PendingEntry): ChatSegment[] {
+    let out = segments;
+    if (entry.override) out = mergeSegments(out, sIdx, entry.override);
+    if (entry.textAccum) out = applyTextDelta(out, sIdx, entry.textAccum);
+    return out;
   }
 
   function scheduleFlush(): void {
@@ -97,9 +188,7 @@ export function createStreamingMessages(
   function flush(): void {
     if (pending.size === 0) return;
     // Snapshot + clear before setMessages so any re-entrant frame during the
-    // Solid update goes onto a fresh rAF batch. In practice setMessages is
-    // synchronous and the scheduler is rAF-driven, so re-entry is unlikely —
-    // but the swap is cheap insurance.
+    // Solid update goes onto a fresh rAF batch.
     const drained = new Map(pending);
     pending.clear();
 
@@ -109,20 +198,16 @@ export function createStreamingMessages(
       for (const [messageId, segmentMap] of drained) {
         const idx = next.findIndex((m) => m.id === messageId);
         if (idx < 0) {
-          // Message not present — re-park as orphan. This can happen if
-          // chat.update arrived before chat.append.
-          let bucket = orphanUpdates.get(messageId);
-          if (!bucket) {
-            bucket = new Map();
-            orphanUpdates.set(messageId, bucket);
+          // Message not present — re-park each entry as an orphan.
+          for (const [sIdx, entry] of segmentMap) {
+            parkOrphan(messageId, sIdx, entry);
           }
-          for (const [sIdx, seg] of segmentMap) bucket.set(sIdx, seg);
           continue;
         }
         const msg = next[idx]!;
         let segments = msg.segments;
-        for (const [sIdx, seg] of segmentMap) {
-          segments = mergeSegments(segments, sIdx, seg);
+        for (const [sIdx, entry] of segmentMap) {
+          segments = applyEntry(segments, sIdx, entry);
         }
         if (segments !== msg.segments) {
           if (!changed) {
@@ -152,8 +237,12 @@ export function createStreamingMessages(
     const bucket = orphanUpdates.get(message.id);
     if (!bucket || bucket.size === 0) return message;
     let segments = message.segments;
-    for (const [sIdx, seg] of bucket) {
-      segments = mergeSegments(segments, sIdx, seg);
+    for (const [sIdx, entry] of bucket) {
+      if (entry.kind === "segment") {
+        segments = mergeSegments(segments, sIdx, entry.segment);
+      } else {
+        segments = applyTextDelta(segments, sIdx, entry.textAccum);
+      }
     }
     orphanUpdates.delete(message.id);
     recomputeOrphanCount();
@@ -183,14 +272,14 @@ export function createStreamingMessages(
         const idx = ms.findIndex((m) => m.id === incoming.id);
         if (idx >= 0) {
           // Finalizing a streaming message we already have — swap in place.
-          // Also merge any pending updates that haven't flushed yet so the
+          // Also merge any pending entries that haven't flushed yet so the
           // final frame doesn't race past them.
           const pendingForMsg = pending.get(incoming.id);
           let finalized = incoming;
           if (pendingForMsg) {
             let segments = incoming.segments;
-            for (const [sIdx, seg] of pendingForMsg) {
-              segments = mergeSegments(segments, sIdx, seg);
+            for (const [sIdx, entry] of pendingForMsg) {
+              segments = applyEntry(segments, sIdx, entry);
             }
             finalized = { ...incoming, segments };
             pending.delete(incoming.id);
@@ -208,13 +297,18 @@ export function createStreamingMessages(
     }
 
     if (frame.t === "chat.update" && frame.sid === sid) {
-      // Stash into pending map; flush on next animation frame.
-      let bucket = pending.get(frame.messageId);
-      if (!bucket) {
-        bucket = new Map();
-        pending.set(frame.messageId, bucket);
-      }
-      bucket.set(frame.segmentIndex, frame.segment);
+      const entry = getPendingEntry(frame.messageId, frame.segmentIndex);
+      // New override wins over any previously accumulated delta text for this
+      // slot; later deltas in the same tick append on top.
+      entry.override = frame.segment;
+      entry.textAccum = "";
+      scheduleFlush();
+      return;
+    }
+
+    if (frame.t === "chat.delta" && frame.sid === sid) {
+      if (frame.textDelta === "") return;
+      getPendingEntry(frame.messageId, frame.segmentIndex).textAccum += frame.textDelta;
       scheduleFlush();
       return;
     }
