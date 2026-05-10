@@ -257,11 +257,21 @@
 **Phase 5 不打独立 tag**,留给 Phase 6 batch 10 做一键清理与接线后一起 tag `v0.1.7`。
 
 ### Phase 6 · 首轮清理(batch 10 · 3 agent)
-- **B10-A** 删 `mobile/` 7 文件 + `MobileKeyBar` + `useIsMobile` + 旧 `ChatView.tsx` 残件;`App.tsx` 彻底清掉桌面硬分支
-- **B10-B** `PairingView.tsx` 重设计(卡片居中,6 位码 mono 大字体,暖底)
-- **B10-C** `CommandPalette.tsx` 视觉升级(serif / accent)+ 跨平台快捷键提示
+- **B10-A** ✅ (batch 10 · 2026-05-10) · 保守清理(非全量)
+  - 删除 `packages/web/src/mobile/` 7 文件 + `MobileKeyBar.tsx`(零外部引用);`MobileTab` 类型从 `mobile/MobileTabNav.tsx` 内联到 `stores/uiStore.ts`(维持 `mobileTab` / `setMobileTab` 持久化不破坏)。
+  - **未删 `useIsMobile`**(`chat/ChatSurface.tsx` + `shell/AppShell.tsx` 还在用),留原位。
+  - **未删 `ChatView.tsx`**:`SharedReadonlyView.tsx` 仍 fallback 到它渲染只读分享。迁移 SharedReadonlyView 到 ChatSurface 需要 store-adapter(ChatSurface 期望 commands/sessions 已在 scope),复杂度独立一个 batch 更稳。登记到 batch 11 后待清理。
+  - grep 确认:`from ".*mobile/` 全仓 0 处(除已删 `/mobile/` 内部)、`MobileKeyBar` 0 处、`MobileTab` 仅 `uiStore.ts` + `App.tsx:305` 合法使用。
+- **B10-B** ✅ (batch 10 · 2026-05-10) · 258 行
+  - `PairingView.tsx` 重写:serif "rcc" + terra-cotta 菱形 logo + `bg-bg-page / bg-bg-surface` 暖卡片;6 格数字输入(`w-12 h-14 sm:w-14 sm:h-16 font-mono text-[28px]` + `border-accent ring-accent/30` focus),auto-advance / Backspace 回退 / 粘贴分布 / ArrowLeft-Right 导航 / Enter 提交。
+  - 行为保真:`onPaired` + 600ms delay / `requestPairingCode` / `claimPairing` / `saveToken/saveDevice/saveE2EKey` / 全部 `pair.*` i18n key 不动;`entered` 单 signal 为 source-of-truth,6 格仅视觉。
+  - `motion-safe:` Tailwind variant 承接 prefers-reduced-motion;触达 44px+(数字格 56/64;CTA `size="lg"` h-12)。
+- **B10-C** ✅ (batch 10 · 2026-05-10) · 309 行
+  - `CommandPalette.tsx` 视觉升级:serif 搜索输入 `text-[16px]` + sans list + mono footer;active row `bg-accent-bg text-accent`;panel shadow `0_20px_60px_-20px rgba(0,0,0,0.25)` rounded-lg;mobile 走 `Portal` bottom-sheet `rounded-t-xl max-h-[80vh]` + grabber + `env(safe-area-inset-bottom)`。
+  - 跨平台 kbd hint:`IS_MAC` 通过 `navigator.platform || userAgent` 检测,`⌘+K`/`Ctrl+K` header badge + footer strip 自适应;keydown listener 仍 `metaKey || ctrlKey` Mac-agnostic。
+  - 行为保真:所有 `skill.list.request` / `cmd.list.request` / `subagent.list.request` / `git.exec.request` 帧与 `/${name}\r`、`@${name} `、`请使用 skill: ${s.name}\r` 输出,60s TTL 缓存,前缀路由 `>/:@#`、fuzzy score + consecutive 全部不动。
 
-**验收**: `grep -r "useIsMobile\|MobileKey\|mobile/" src/` 为空。`pnpm build` 体积降低。tag `v0.1.7`。
+**batch 10 验收**: `pnpm -F @rcc/web typecheck` ✅;`pnpm -F @rcc/web build` ✅(14s)。**打 tag `v0.1.7`**(Phase 5 panes + Phase 6 首轮清理合并成果)。`grep -r "useIsMobile\|MobileKey\|mobile/" src/` = 仅 `useIsMobile`(留用) + `uiStore` 的 `MobileTab` 内联定义 + `App.tsx:305` `mobileTab`,`mobile/` 目录已 0。PairingView / CommandPalette 视觉全面 Claude 化。
 
 ### Phase 7 · CLI session 真对话(batch 11-13 · 9 agent)
 把 CLI-driver 的 pty 输出从 xterm ANSI 流转成真实 chat 气泡 — 不依赖 SDK driver。

@@ -1,6 +1,13 @@
 import { createSignal } from "solid-js";
 import type { RccClient } from "../client.ts";
-import type { MobileTab } from "../mobile/MobileTabNav.tsx";
+
+/**
+ * Mobile bottom-nav tab id. Was in `mobile/MobileTabNav.tsx`; inlined so
+ * the whole `mobile/` directory can be deleted in Phase 6 batch 10. The
+ * new `shell/TabNav.tsx` manages its own visuals; this type is still the
+ * source of truth for persisted tab selection.
+ */
+export type MobileTab = "chat" | "files" | "approvals" | "settings";
 
 /**
  * UI-layer signals (modals, drawers, panes, active mobile tab, view mode).
