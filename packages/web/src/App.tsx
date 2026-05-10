@@ -44,6 +44,7 @@ import { createCommandsStore } from "./stores/commandsStore.ts";
 import { createSearchStore } from "./stores/searchStore.ts";
 import { createTunnelStore } from "./stores/tunnelStore.ts";
 import { MainPane, WorkflowRunBar } from "./MainPane.tsx";
+import { MobileTabRouter } from "./shell/MobileTabRouter.tsx";
 import { ShortcutHelp } from "./shell/ShortcutHelp.tsx";
 import { initShortcutSystem, registerShortcut } from "./hooks/useKeyboardShortcuts.ts";
 import { createSharedText } from "./crdt.ts";
@@ -421,48 +422,70 @@ export function App() {
         drawer={{ open: uiStore.drawerOpen(), onClose: () => uiStore.setDrawerOpen(false) }}
       >
         <ErrorBoundary scope="chat">
-        <Show
-          when={activeSid()}
-          fallback={
-            <EmptyState
-              icon="💬"
-              title={t("main.emptyHint")}
-              action={
-                <button
-                  class="px-4 py-2 rounded-md bg-accent text-bg-page text-sm font-medium hover:bg-accent-hover"
-                  onClick={() => onNewSession()}
-                >
-                  {t("sidebar.newSession")}
-                </button>
-              }
-            />
+        <MobileTabRouter
+          tab={uiStore.mobileTab}
+          client={client}
+          activeSessionCwd={() => activeSession()?.cwd}
+          fallbackCwd={uiStore.fileBrowserRoot}
+          prefs={prefsStore}
+          onOpenConfig={() => uiStore.setConfigOpen(true)}
+          onOpenDevices={() => uiStore.setDevicesOpen(true)}
+          onOpenPeers={() => uiStore.setPeersModalOpen(true)}
+          onOpenInbox={() => uiStore.setInboxOpen(true)}
+          onSignOut={() => {
+            clearToken();
+            client.setToken(null);
+          }}
+          currentDeviceName={() => currentDevice()?.name ?? null}
+          tunnelUrl={() => tunnelStore.tunnel()?.url ?? null}
+          pendingApprovals={() =>
+            inboxStore.items().filter((it) => it.kind === "approval" && it.status === "pending").length
           }
-        >
-          <MainPane
-            client={client}
-            isCompact={isCompact()}
-            sendCommand={sendCommand}
-            customKeys={customKeys}
-            pinnedCommands={commandsStore.pinnedCommands}
-            allCommands={() => Object.values(commandsStore.commandsById())}
-            sessions={sessionsStore.sessions}
-            viewMode={uiStore.viewMode}
-            setViewMode={uiStore.setViewMode}
-            fileBrowserOpen={uiStore.fileBrowserOpen}
-            setFileBrowserOpen={uiStore.setFileBrowserOpen}
-            notebookOpen={uiStore.notebookOpen}
-            setNotebookOpen={uiStore.setNotebookOpen}
-            fileBrowserRoot={uiStore.fileBrowserRoot}
-            workflowRunner={workflowRunner}
-            activeSid={activeSid}
-            activeSession={activeSession}
-            gitBySid={sessionsStore.gitBySid}
-            onShareSession={uiStore.openShare}
-            onForkSession={(sid, messageId) =>
-              client.send({ v: 1, t: "session.fork", sid, uptoMessageId: messageId })
-            }
-          />
-        </Show>
+          chat={
+            <Show
+              when={activeSid()}
+              fallback={
+                <EmptyState
+                  icon="💬"
+                  title={t("main.emptyHint")}
+                  action={
+                    <button
+                      class="px-4 py-2 rounded-md bg-accent text-bg-page text-sm font-medium hover:bg-accent-hover"
+                      onClick={() => onNewSession()}
+                    >
+                      {t("sidebar.newSession")}
+                    </button>
+                  }
+                />
+              }
+            >
+              <MainPane
+                client={client}
+                isCompact={isCompact()}
+                sendCommand={sendCommand}
+                customKeys={customKeys}
+                pinnedCommands={commandsStore.pinnedCommands}
+                allCommands={() => Object.values(commandsStore.commandsById())}
+                sessions={sessionsStore.sessions}
+                viewMode={uiStore.viewMode}
+                setViewMode={uiStore.setViewMode}
+                fileBrowserOpen={uiStore.fileBrowserOpen}
+                setFileBrowserOpen={uiStore.setFileBrowserOpen}
+                notebookOpen={uiStore.notebookOpen}
+                setNotebookOpen={uiStore.setNotebookOpen}
+                fileBrowserRoot={uiStore.fileBrowserRoot}
+                workflowRunner={workflowRunner}
+                activeSid={activeSid}
+                activeSession={activeSession}
+                gitBySid={sessionsStore.gitBySid}
+                onShareSession={uiStore.openShare}
+                onForkSession={(sid, messageId) =>
+                  client.send({ v: 1, t: "session.fork", sid, uptoMessageId: messageId })
+                }
+              />
+            </Show>
+          }
+        />
         </ErrorBoundary>
       </AppShell>
       </ErrorBoundary>

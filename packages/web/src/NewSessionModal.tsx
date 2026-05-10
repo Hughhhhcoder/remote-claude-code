@@ -85,8 +85,8 @@ export function NewSessionModal(props: Props) {
         class="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm grid place-items-center"
         onClick={(e) => e.target === e.currentTarget && props.onCancel()}
       >
-        <div class="w-[560px] max-w-[calc(100vw-32px)] max-h-[calc(100vh-32px)] rounded-2xl border border-zinc-800 bg-zinc-950 shadow-2xl overflow-hidden flex flex-col">
-          <div class="px-5 py-4 border-b border-zinc-900">
+        <div class="w-[560px] max-w-[calc(100vw-16px)] max-h-[calc(100svh-16px)] rounded-2xl border border-zinc-800 bg-zinc-950 shadow-2xl overflow-hidden flex flex-col">
+          <div class="px-5 py-4 border-b border-zinc-900 shrink-0">
             <div class="text-sm font-semibold">{t("newSession.title")}</div>
             <div class="text-xs text-zinc-500 mt-0.5">{t("newSession.subtitle")}</div>
           </div>
@@ -285,11 +285,11 @@ export function NewSessionModal(props: Props) {
             </div>
           </div>
 
-          <div class="px-5 py-3 border-t border-zinc-900 flex items-center justify-end gap-2">
+          <div class="px-5 py-3 border-t border-zinc-900 flex items-center justify-end gap-2 bg-zinc-950 sticky bottom-0 pb-[calc(12px+env(safe-area-inset-bottom))] sm:pb-3">
             <button
               type="button"
               onClick={props.onCancel}
-              class="px-3 py-1.5 rounded-lg border border-zinc-800 text-xs text-zinc-300 hover:border-zinc-700"
+              class="px-3 py-2 min-h-[44px] rounded-lg border border-zinc-800 text-xs text-zinc-300 hover:border-zinc-700"
             >
               {t("newSession.cancel")}
             </button>
@@ -304,7 +304,7 @@ export function NewSessionModal(props: Props) {
                   starterId: starterId(),
                 })
               }
-              class="px-4 py-1.5 rounded-lg bg-gradient-to-r from-orange-500 to-rose-500 text-white text-xs font-medium"
+              class="px-4 py-2 min-h-[44px] rounded-lg bg-gradient-to-r from-orange-500 to-rose-500 text-white text-xs font-medium"
             >
               {t("newSession.create")}
             </button>
