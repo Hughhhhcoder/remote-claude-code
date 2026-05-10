@@ -11,6 +11,8 @@ import { SlashPalette, type SlashCommand } from "./SlashPalette";
 import { VoiceButton } from "./VoiceButton";
 import { AttachButton } from "./AttachButton";
 import { createStreamingMessages } from "./streaming";
+import { registerOfflineHtmlWindowHook } from "./exportOfflineHtml";
+import { loadCachedMessages } from "../hooks/useOfflineHydrate";
 
 /**
  * ChatSurface — wires Phase-4 components into a single drop-in replacement
@@ -46,6 +48,18 @@ export interface ChatSurfaceProps {
    * through App.sendCommand (which intercepts `/git:<sub>` etc.).
    */
   onSend?: (text: string) => void;
+  /**
+   * [B28-C] If set, MessageList scrolls + flashes the row with this id. Pass
+   * the same string multiple times to re-trigger the flash (the list effect
+   * guards against no-op re-renders). Undefined: no-op.
+   */
+  scrollTargetId?: string;
+  /**
+   * [B28-C] Active search query, lowered in the owner. When trimmed-non-empty,
+   * a "N / M" overlay with prev/next arrows is rendered inside the chat
+   * viewport so the user can step through hits within the active session.
+   */
+  searchQuery?: string;
 }
 
 /**
@@ -70,6 +84,19 @@ export function ChatSurface(props: ChatSurfaceProps): JSX.Element {
   // --- streaming message store (per-sid) ----------------------------------
   const stream = createStreamingMessages(props.client, () => props.sid, () => props.sessions);
   onCleanup(() => stream.dispose());
+
+  // [B28-B] Offline HTML export — expose a window hook so ChatHeader's export
+  // menu (B28-A) can invoke it without a direct import. For the active sid we
+  // serve live messages from the stream; for any other sid we fall back to
+  // the localStorage offline cache.
+  onMount(() => {
+    const unregister = registerOfflineHtmlWindowHook({
+      getMessages: (sid) =>
+        sid === props.sid ? stream.messages() : loadCachedMessages(sid),
+      getSession: (sid) => props.sessions.find((s) => s.id === sid),
+    });
+    onCleanup(unregister);
+  });
 
   // --- draft + CRDT share --------------------------------------------------
   const [draft, setDraft] = createSignal("");
@@ -225,6 +252,72 @@ export function ChatSurface(props: ChatSurfaceProps): JSX.Element {
     onCleanup(() => window.removeEventListener("keydown", onKeyDown));
   });
 
+  // --- Scroll target + in-session search nav (B28-C) ----------------------
+  // `localTarget` is a ChatSurface-internal signal driven by prev/next arrows
+  // on the search overlay. It's suffixed with `#<n>` to disambiguate repeat
+  // clicks on the same message id so MessageList's effect re-fires. External
+  // `props.scrollTargetId` (from searchStore) flows through when set; the
+  // local signal takes over once the user starts stepping.
+  const [localTarget, setLocalTarget] = createSignal<string | null>(null);
+  const [navBump, setNavBump] = createSignal(0);
+
+  // Clear local nav whenever the active sid or query changes — stale nav
+  // state from one session shouldn't carry into the next.
+  createMemo(() => {
+    props.sid;
+    props.searchQuery;
+    setLocalTarget(null);
+    setNavBump(0);
+  });
+
+  // Collect message ids that contain the current searchQuery (case-insensitive
+  // plain substring over flattened segment text). Skips tool_use/tool_result
+  // content — excerpts on the host side don't include those either.
+  const matchingIds = createMemo<string[]>(() => {
+    const q = (props.searchQuery ?? "").trim().toLowerCase();
+    if (!q) return [];
+    const out: string[] = [];
+    const msgs = stream.messages();
+    for (const m of msgs) {
+      for (const seg of m.segments) {
+        const content =
+          seg.kind === "text" || seg.kind === "code" || seg.kind === "diff" || seg.kind === "thinking"
+            ? (seg as { content: string }).content
+            : "";
+        if (content && content.toLowerCase().includes(q)) {
+          out.push(m.id);
+          break;
+        }
+      }
+    }
+    return out;
+  });
+
+  const currentMatchIndex = createMemo<number>(() => {
+    const id = effectiveScrollMessageId_lookup();
+    if (!id) return -1;
+    const i = matchingIds().indexOf(id);
+    return i;
+  });
+
+  function stepMatch(delta: 1 | -1): void {
+    const ids = matchingIds();
+    if (ids.length === 0) return;
+    const cur = currentMatchIndex();
+    // If no match currently focused, start from either end.
+    const start = cur >= 0 ? cur : delta > 0 ? -1 : ids.length;
+    const next = (start + delta + ids.length) % ids.length;
+    setLocalTarget(ids[next]);
+    setNavBump((n) => n + 1);
+  }
+
+  // Helper for computing the currently-focused match id without creating a
+  // circular memo (`currentMatchIndex` depends on the resolved id).
+  function effectiveScrollMessageId_lookup(): string | undefined {
+    const l = localTarget();
+    return l ?? props.scrollTargetId;
+  }
+
   // --- JSX -----------------------------------------------------------------
   return (
     <>
@@ -237,12 +330,56 @@ export function ChatSurface(props: ChatSurfaceProps): JSX.Element {
         onShare={props.onShare}
         onToggleNotebook={props.onToggleNotebook}
         notebookActive={props.notebookActive}
+        messages={stream.messages()}
         messagesSlot={
-          <MessageList
-            messages={stream.messages()}
-            onPinToNotebook={props.onPinToNotebook}
-            onFork={props.onForkFromMessage}
-          />
+          <div class="relative">
+            <MessageList
+              messages={stream.messages()}
+              onPinToNotebook={props.onPinToNotebook}
+              onFork={props.onForkFromMessage}
+              scrollTargetId={
+                localTarget()
+                  ? `${localTarget()!}#${navBump()}`
+                  : props.scrollTargetId
+              }
+            />
+            <Show when={(props.searchQuery ?? "").trim().length > 0}>
+              <div
+                class={[
+                  "sticky top-2 z-10 mx-auto flex items-center gap-2",
+                  "w-fit rounded-full border border-border-subtle",
+                  "bg-bg-surface/90 backdrop-blur px-3 py-1",
+                  "text-[11px] text-text-secondary font-sans shadow-sm",
+                ].join(" ")}
+                role="status"
+                aria-label="会话内搜索结果"
+              >
+                <button
+                  type="button"
+                  class="px-1 text-text-muted hover:text-text-primary disabled:opacity-40"
+                  onClick={() => stepMatch(-1)}
+                  disabled={matchingIds().length === 0}
+                  aria-label="上一个匹配"
+                >
+                  ‹
+                </button>
+                <span class="tabular-nums">
+                  {matchingIds().length === 0
+                    ? "0 / 0"
+                    : `${currentMatchIndex() >= 0 ? currentMatchIndex() + 1 : 0} / ${matchingIds().length}`}
+                </span>
+                <button
+                  type="button"
+                  class="px-1 text-text-muted hover:text-text-primary disabled:opacity-40"
+                  onClick={() => stepMatch(1)}
+                  disabled={matchingIds().length === 0}
+                  aria-label="下一个匹配"
+                >
+                  ›
+                </button>
+              </div>
+            </Show>
+          </div>
         }
         composerSlot={
           <div class="flex flex-col">

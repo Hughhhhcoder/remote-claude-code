@@ -6,6 +6,20 @@ export type SearchHit = SearchMatch;
 
 export type SearchMode = "idle" | "searching" | "results";
 
+/**
+ * [B28-C] When a search result is clicked we remember the (sid, messageId?)
+ * target so the chat surface can scroll to it after the session is activated.
+ * `messageId` is optional — today's `search.result` frames only carry `sid`
+ * so jumpTo degrades to "just scroll into the active session" when the id is
+ * absent. Consumed once by `consumeScrollTarget(sid)`: that caller reads the
+ * pending target only if its sid matches and then clears it, so the same
+ * jump doesn't re-fire on every re-render.
+ */
+export interface ScrollTarget {
+  sid: string;
+  messageId?: string;
+}
+
 export interface SearchStore {
   query: () => string;
   results: () => SearchHit[] | null;
@@ -14,6 +28,16 @@ export interface SearchStore {
   setQuery: (q: string) => void;
   /** Clear results without touching the query text. */
   clearResults: () => void;
+  /** [B28-C] Request a jump into a session at a specific message. */
+  jumpTo: (sid: string, messageId?: string) => void;
+  /**
+   * [B28-C] If the pending scroll target matches `sid`, return its messageId
+   * (possibly undefined) and clear the pending state. Otherwise returns null
+   * — the caller should not scroll.
+   */
+  consumeScrollTarget: (sid: string) => string | undefined | null;
+  /** [B28-C] Current pending target, if any (read-only accessor). */
+  pendingScrollTarget: () => ScrollTarget | null;
   dispose: () => void;
 }
 
@@ -28,6 +52,7 @@ export interface SearchStore {
 export function createSearchStore(client: RccClient): SearchStore {
   const [query, setQueryInternal] = createSignal("");
   const [results, setResults] = createSignal<SearchHit[] | null>(null);
+  const [pending, setPending] = createSignal<ScrollTarget | null>(null);
 
   const unsub = client.on((frame) => {
     if (frame.t === "search.result") {
@@ -48,6 +73,17 @@ export function createSearchStore(client: RccClient): SearchStore {
     setResults(null);
   }
 
+  function jumpTo(sid: string, messageId?: string): void {
+    setPending({ sid, messageId });
+  }
+
+  function consumeScrollTarget(sid: string): string | undefined | null {
+    const p = pending();
+    if (!p || p.sid !== sid) return null;
+    setPending(null);
+    return p.messageId;
+  }
+
   const mode = createMemo<SearchMode>(() => {
     if (!query().trim()) return "idle";
     if (results() === null) return "searching";
@@ -60,6 +96,9 @@ export function createSearchStore(client: RccClient): SearchStore {
     mode,
     setQuery,
     clearResults,
+    jumpTo,
+    consumeScrollTarget,
+    pendingScrollTarget: pending,
     dispose: unsub,
   };
 }

@@ -6,7 +6,7 @@ import {
   type Accessor,
   type JSX,
 } from "solid-js";
-import type { GitStatusData, SessionMeta } from "@rcc/protocol";
+import type { ChatMessage, GitStatusData, SessionMeta } from "@rcc/protocol";
 import { EmptyState } from "../primitives/EmptyState";
 import { Textarea } from "../primitives/Textarea";
 import { ChatHeader } from "./ChatHeader";
@@ -68,6 +68,9 @@ export interface ChatPaneProps {
   /** Desktop-only chat/terminal toggle. */
   onToggleViewMode?: () => void;
   viewMode?: "chat" | "terminal";
+  /** [B28-A] Messages for the export dropdown in ChatHeader. Optional —
+   *  callers that omit it lose the export button contents but keep chrome. */
+  messages?: readonly ChatMessage[];
 }
 
 // ---------------------------------------------------------------------------
@@ -101,6 +104,8 @@ export function ChatPane(props: ChatPaneProps): JSX.Element {
           onShare={props.onShare}
           onToggleNotebook={props.onToggleNotebook}
           notebookActive={props.notebookActive}
+          messages={props.messages}
+          sid={props.sid}
         />
 
         {/* Scroll region — the DIV itself scrolls; MessageList renders a */}

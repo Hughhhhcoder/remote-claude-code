@@ -46,6 +46,13 @@ export interface SidebarProps {
   collapsedProjects: Set<string>;
   onToggleProject: (id: string) => void;
   onActivateSession: (sid: string) => void;
+  /**
+   * [B28-C] Invoked when a search result is clicked, in addition to
+   * `onActivateSession`. The caller can use this to request the chat scroll
+   * to the matched message (when the host surfaces a `messageId`) and to
+   * stop clearing the search query on activation if desired.
+   */
+  onSearchResultClick?: (sid: string, messageId?: string) => void;
   onCloseSession: (sid: string) => void;
   onResumeSession: (sid: string) => void;
   onShareSession: (sid: string) => void;
@@ -428,8 +435,14 @@ export function Sidebar(props: SidebarProps): JSX.Element {
                       "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent",
                     ].join(" ")}
                     onClick={() => {
+                      // [B28-C] Notify the app so it can stash a scroll
+                      // target before the session activates. SearchMatch
+                      // doesn't carry a messageId today — fine, jumpTo
+                      // degrades to "jump to session" in that case.
+                      props.onSearchResultClick?.(m.sid);
                       props.onActivateSession(m.sid);
-                      props.search.onChange("");
+                      // Keep the query so the in-chat N/M overlay stays
+                      // visible; users can clear it explicitly if desired.
                     }}
                   >
                     <div class="font-serif text-[14px] text-text-primary truncate">

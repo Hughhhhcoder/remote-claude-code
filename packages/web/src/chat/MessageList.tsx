@@ -28,6 +28,13 @@ export interface MessageListProps {
   onFork?: (messageId: string) => void;
   /** When true, autoscroll is disabled (e.g. user scrolled up). Defaults to auto-detect. */
   pinnedToBottom?: boolean;
+  /**
+   * [B28-C] When set, the list scrolls the row with the matching
+   * `data-message-id` into view and flashes it for 2s. Setting this to the
+   * same value twice only fires once (effect is memoized on the string).
+   * Undefined / null: no-op.
+   */
+  scrollTargetId?: string;
 }
 
 const WINDOW_STEP = 200;
@@ -147,6 +154,59 @@ export function MessageList(props: MessageListProps): JSX.Element {
   onMount(() => {
     // Initial snap-to-bottom so a freshly attached session lands at newest.
     scrollToBottom();
+  });
+
+  // --- Scroll-to-message (B28-C) -----------------------------------------
+  // When a search result is clicked, `scrollTargetId` is set to a chat
+  // message id. We find the corresponding `[data-message-id]` element,
+  // expand the window if the target is older than the visible range,
+  // scroll into view, and flash a highlight class for 2s.
+  //
+  // Callers may suffix the id with `#<n>` to force a re-trigger on the same
+  // message (e.g. prev/next arrows on the in-chat search overlay). The
+  // suffix is stripped before the DOM lookup.
+  let lastScrollTarget: string | undefined;
+  let flashTimer: ReturnType<typeof setTimeout> | null = null;
+  createEffect(() => {
+    const raw = props.scrollTargetId;
+    if (!raw || raw === lastScrollTarget) return;
+    lastScrollTarget = raw;
+    const hashAt = raw.indexOf("#");
+    const target = hashAt >= 0 ? raw.slice(0, hashAt) : raw;
+    if (!target) return;
+
+    // Ensure the target is inside the visible window. If the message
+    // exists but is older than what we currently render, grow the window.
+    const all = props.messages;
+    const idx = all.findIndex((m) => m.id === target);
+    if (idx < 0) return; // message not in this session — nothing to do
+    const currentWindow = windowSize();
+    if (all.length - idx > currentWindow) {
+      setWindowSize(all.length - idx + WINDOW_STEP);
+    }
+
+    // Wait for Solid to render any newly-included rows, then scroll.
+    queueMicrotask(() => {
+      if (typeof document === "undefined") return;
+      const el = document.querySelector<HTMLElement>(
+        `[data-message-id="${CSS.escape(target)}"]`,
+      );
+      if (!el) return;
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      // Remove any existing flash so re-triggering restarts the animation.
+      el.classList.remove("flash-message");
+      // Force reflow so re-adding the class restarts the keyframes.
+      void el.offsetWidth;
+      el.classList.add("flash-message");
+      if (flashTimer) clearTimeout(flashTimer);
+      flashTimer = setTimeout(() => {
+        el.classList.remove("flash-message");
+        flashTimer = null;
+      }, 2000);
+    });
+  });
+  onCleanup(() => {
+    if (flashTimer) clearTimeout(flashTimer);
   });
 
   const onPillClick = (): void => {

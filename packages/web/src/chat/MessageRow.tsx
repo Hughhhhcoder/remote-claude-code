@@ -379,6 +379,7 @@ export function MessageRow(props: MessageRowProps): JSX.Element {
                 aria-roledescription="消息"
                 aria-busy={props.msg.streaming ? "true" : "false"}
                 tabIndex={0}
+                data-message-id={props.msg.id}
                 onKeyDown={onRowKeyDown}
                 onPointerDown={onPointerDown}
                 onPointerMove={onPointerMove}
@@ -429,6 +430,7 @@ export function MessageRow(props: MessageRowProps): JSX.Element {
               aria-roledescription="消息"
               aria-busy={props.msg.streaming ? "true" : "false"}
               tabIndex={0}
+              data-message-id={props.msg.id}
               onKeyDown={onRowKeyDown}
               onPointerDown={onPointerDown}
               onPointerMove={onPointerMove}
@@ -458,7 +460,12 @@ export function MessageRow(props: MessageRowProps): JSX.Element {
           </Show>
         }
       >
-        <div class="my-2 text-center" role="article" aria-roledescription="系统消息">
+        <div
+          class="my-2 text-center"
+          role="article"
+          aria-roledescription="系统消息"
+          data-message-id={props.msg.id}
+        >
           <SrRoleHeader />
           <span class="font-sans text-xs italic text-text-muted">
             {concatText(segments())}

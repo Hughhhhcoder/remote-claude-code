@@ -1,12 +1,18 @@
-import { Show, type JSX } from "solid-js";
-import type { GitStatusData, SessionMeta } from "@rcc/protocol";
+import { Show, createSignal, type JSX } from "solid-js";
+import type { ChatMessage, GitStatusData, SessionMeta } from "@rcc/protocol";
 import { IconButton } from "../primitives/IconButton";
+import { Popover } from "../primitives/Popover";
 import {
   PermissionChip,
   DriverChip,
   UsageChip,
   BranchChip,
 } from "../MainPane.tsx";
+import {
+  exportJson,
+  exportMarkdown,
+  exportPrint,
+} from "./exportChat";
 
 /**
  * ChatHeader — top chrome for the chat surface.
@@ -20,6 +26,10 @@ import {
  *     Hide sid slice, UsageChip, BranchChip, cols×rows, view-mode toggle.
  *   - sm+ (>= 640px): show everything.
  *   - Height: 56px on mobile, 48px on desktop (`h-14 sm:h-12`).
+ *
+ * [B28-A] Export dropdown: Markdown / JSON / Print-to-PDF. Messages and
+ * session meta flow in via props (wired from ChatSurface); the dropdown
+ * lives in a Popover anchored to the "↓" IconButton.
  */
 
 export interface ChatHeaderProps {
@@ -31,10 +41,15 @@ export interface ChatHeaderProps {
   onShare?: () => void;
   onToggleNotebook?: () => void;
   notebookActive?: boolean;
+  /** [B28-A] Messages for export. When undefined/empty the export button
+   *  still appears (users may want an empty skeleton) but Markdown/JSON
+   *  writes a header-only file. */
+  messages?: readonly ChatMessage[];
+  sid?: string;
 }
 
 export function ChatHeader(props: ChatHeaderProps): JSX.Element {
-  const sid = () => props.session?.id ?? "";
+  const sid = () => props.sid ?? props.session?.id ?? "";
   const title = () => props.session?.title ?? sid();
   const sidSlice = () => {
     const s = sid();
@@ -43,11 +58,24 @@ export function ChatHeader(props: ChatHeaderProps): JSX.Element {
   const canToggleView = () =>
     !!props.onToggleViewMode && props.session?.driver !== "sdk";
 
+  // [B28-A] Export menu state + anchor ref.
+  const [exportOpen, setExportOpen] = createSignal(false);
+  let exportBtnRef: HTMLButtonElement | undefined;
+
+  function runExport(kind: "md" | "json" | "print"): void {
+    const msgs = props.messages ?? [];
+    const s = sid();
+    setExportOpen(false);
+    if (kind === "md") exportMarkdown(msgs, props.session, s);
+    else if (kind === "json") exportJson(msgs, props.session, s);
+    else exportPrint();
+  }
+
   return (
     <header
       class={
         "h-14 sm:h-12 shrink-0 border-b border-border-subtle bg-bg-page " +
-        "px-3 sm:px-5 flex items-center gap-2 sm:gap-3"
+        "px-3 sm:px-5 flex items-center gap-2 sm:gap-3 rcc-chat-header"
       }
     >
       {/* Left cluster: title + chips. `min-w-0` enables truncation. */}
@@ -120,6 +148,20 @@ export function ChatHeader(props: ChatHeaderProps): JSX.Element {
           </IconButton>
         </Show>
 
+        {/* [B28-A] Export dropdown — always available so users can export
+            empty sessions too (useful for templating). */}
+        <IconButton
+          size="sm"
+          ref={(el) => (exportBtnRef = el)}
+          aria-label="导出对话"
+          title="导出对话"
+          aria-haspopup="menu"
+          aria-expanded={exportOpen() ? "true" : "false"}
+          onClick={() => setExportOpen((v) => !v)}
+        >
+          <span aria-hidden="true">↓</span>
+        </IconButton>
+
         <Show when={props.onShare}>
           <IconButton
             size="sm"
@@ -141,7 +183,58 @@ export function ChatHeader(props: ChatHeaderProps): JSX.Element {
           </span>
         </Show>
       </div>
+
+      {/* Export popover lives outside the right cluster so its Portal render
+          isn't a layout descendant, but logically it's anchored to the btn. */}
+      <Popover
+        open={exportOpen()}
+        onClose={() => setExportOpen(false)}
+        anchor={() => exportBtnRef}
+        placement="bottom-end"
+        class="min-w-[180px] py-1"
+      >
+        <div role="menu" aria-label="导出对话">
+          <ExportMenuItem
+            label="Markdown (.md)"
+            hint="可读格式，保留代码块"
+            onSelect={() => runExport("md")}
+          />
+          <ExportMenuItem
+            label="JSON (.json)"
+            hint="原始结构化数据"
+            onSelect={() => runExport("json")}
+          />
+          <ExportMenuItem
+            label="打印 / PDF"
+            hint="使用系统打印对话框"
+            onSelect={() => runExport("print")}
+          />
+        </div>
+      </Popover>
     </header>
+  );
+}
+
+function ExportMenuItem(props: {
+  label: string;
+  hint: string;
+  onSelect: () => void;
+}): JSX.Element {
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      class={
+        "w-full text-left px-3 py-2 text-[13px] " +
+        "text-text-primary hover:bg-bg-subtle " +
+        "focus:bg-bg-subtle focus:outline-none " +
+        "transition-colors duration-fast"
+      }
+      onClick={() => props.onSelect()}
+    >
+      <div class="font-medium">{props.label}</div>
+      <div class="text-[11px] text-text-muted mt-0.5">{props.hint}</div>
+    </button>
   );
 }
 

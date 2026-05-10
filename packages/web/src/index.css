@@ -109,3 +109,115 @@ body,
 .animate-fade-in {
   animation: fadeIn 180ms ease-out;
 }
+
+/* [B28-C] Search-result jump highlight. Applied by MessageList when a
+   scrollTargetId is threaded in — the class is added post-scroll and removed
+   after the animation completes so re-flashing the same row is possible. */
+@keyframes flash-message {
+  0% {
+    background-color: rgb(var(--rcc-accent-rgb, 234 128 64) / 0);
+  }
+  15% {
+    background-color: rgb(var(--rcc-accent-rgb, 234 128 64) / 0.25);
+  }
+  100% {
+    background-color: rgb(var(--rcc-accent-rgb, 234 128 64) / 0);
+  }
+}
+.flash-message {
+  animation: flash-message 2s ease-out;
+  border-radius: 6px;
+}
+
+/*
+ * [B28-A] Print styles — scoped to window.print() (or user Ctrl+P) so the
+ * chat transcript prints clean. Rules:
+ *   - Hide sidebar, top bar, chat header, composer, action bars, toasts,
+ *     notebook pane — anything that isn't the message scroll region.
+ *   - Expand the scroll region to flow with the page (no viewport height,
+ *     no overflow clip).
+ *   - Force serif + black-on-white for ink savings + legibility.
+ *   - Preserve code fences inside messages but neutralize the dark bg.
+ *
+ * We key off structural selectors that already exist in the tree:
+ *   - [data-chat-scroll] on ChatPane's scroll DIV.
+ *   - .rcc-chat-header on ChatHeader (added in B28-A).
+ *   - aria-label="消息输入" on ChatPane's composer region.
+ *   - role="region" aria-label="对话内容" on the scroll region.
+ *
+ * Anything outside those rules we hide with structural selectors + the
+ * print page root. `nav`/`aside` cover the app shell; any future chrome
+ * should add `data-rcc-print-hide` to opt in.
+ */
+@media print {
+  html,
+  body,
+  #root {
+    height: auto !important;
+    overflow: visible !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+  }
+
+  /* Hide global chrome: top bar, sidebar, notebook, toasts, popovers,
+     dialogs, the composer, the chat header, any action sheet. */
+  header.rcc-chat-header,
+  nav,
+  aside,
+  [role="region"][aria-label="消息输入"],
+  [role="dialog"],
+  [data-rcc-print-hide],
+  [data-rcc-toast],
+  [data-rcc-overlay],
+  [data-rcc-sidebar],
+  [data-rcc-topbar],
+  [data-rcc-notebook] {
+    display: none !important;
+  }
+
+  /* Flatten the scroll region so content flows. */
+  [data-chat-scroll="true"] {
+    overflow: visible !important;
+    height: auto !important;
+    max-height: none !important;
+  }
+
+  [data-chat-scroll="true"],
+  [data-chat-scroll="true"] * {
+    box-shadow: none !important;
+  }
+
+  /* Typography: serif black-on-white. */
+  body,
+  [data-chat-scroll="true"] {
+    font-family: var(--font-serif, Georgia, serif) !important;
+    color: #000000 !important;
+    background: #ffffff !important;
+  }
+
+  a {
+    color: #000000 !important;
+    text-decoration: none !important;
+  }
+
+  /* Code blocks: light bg + dark text for paper readability. */
+  pre,
+  code {
+    background: #f4f4f4 !important;
+    color: #111111 !important;
+    border: 1px solid #dddddd !important;
+  }
+
+  /* Avoid awkward page breaks inside a single message / code block. */
+  pre,
+  blockquote,
+  [data-message-row] {
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+
+  @page {
+    margin: 18mm 16mm;
+  }
+}
+

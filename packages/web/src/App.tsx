@@ -370,6 +370,11 @@ export function App() {
         sessionsStore.setActiveSid(sid);
         uiStore.setDrawerOpen(false);
       }}
+      onSearchResultClick={(sid, messageId) => {
+        // [B28-C] Stash a pending scroll target so MainPane → ChatSurface
+        // can pick it up once the session activates.
+        searchStore.jumpTo(sid, messageId);
+      }}
       onCloseSession={onCloseSession}
       onResumeSession={sessionsStore.resumeSession}
       onShareSession={uiStore.openShare}
@@ -501,6 +506,13 @@ export function App() {
                 onForkSession={(sid, messageId) =>
                   client.send({ v: 1, t: "session.fork", sid, uptoMessageId: messageId })
                 }
+                searchQuery={searchStore.query}
+                scrollTargetId={() => {
+                  const p = searchStore.pendingScrollTarget();
+                  const sid = activeSid();
+                  if (!p || !sid || p.sid !== sid) return undefined;
+                  return p.messageId;
+                }}
               />
             </Show>
           }

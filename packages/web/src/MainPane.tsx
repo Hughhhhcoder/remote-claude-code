@@ -63,6 +63,10 @@ export interface MainPaneProps {
   onPinToNotebook?: (messageId: string) => void;
   /** [B23-A] Fork active session from a given message. */
   onForkSession?: (sid: string, messageId: string) => void;
+  /** [B28-C] Current sidebar search query (for the in-chat N/M overlay). */
+  searchQuery?: () => string;
+  /** [B28-C] Pending scroll target for the active session. */
+  scrollTargetId?: () => string | undefined;
 }
 
 export function MainPane(props: MainPaneProps): JSX.Element {
@@ -98,6 +102,8 @@ export function MainPane(props: MainPaneProps): JSX.Element {
                 commands={props.allCommands()}
                 viewMode={props.viewMode()}
                 onSend={props.sendCommand}
+                searchQuery={props.searchQuery?.()}
+                scrollTargetId={props.scrollTargetId?.()}
                 onToggleViewMode={
                   props.activeSession()?.driver === "sdk"
                     ? undefined
