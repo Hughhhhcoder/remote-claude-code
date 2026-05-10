@@ -132,8 +132,34 @@ export const SessionMeta = z.object({
   peerId: z.string().optional(),
   peerLabel: z.string().optional(),
   peerColor: z.string().optional(),
+  /**
+   * Added in B23-B: user-editable session organization. All optional — old
+   * hosts/clients omit the fields entirely. `pinned` floats sessions to the
+   * top of the sidebar; `archived` hides them behind a toggle; `tags` render
+   * as small chips next to the title. Mutated via `session.meta.set`.
+   */
+  pinned: z.boolean().optional(),
+  archived: z.boolean().optional(),
+  tags: z.array(z.string().min(1).max(32)).max(16).optional(),
 });
 export type SessionMeta = z.infer<typeof SessionMeta>;
+
+// [B23-B] Partial-update frame for user-editable session metadata. Only the
+// keys present in the frame are changed; omitted keys leave the current value
+// alone. `tags` is a full-replace array (null would clear) — client sends the
+// whole list.
+// [B23-C] Extended with `title`: a non-empty string overrides cwd-display /
+// auto-title; `null` clears any stored title so the sidebar falls back to the
+// cwd-display again; omitted leaves the current title untouched.
+export const SessionMetaSet = z.object({
+  ...base,
+  t: z.literal("session.meta.set"),
+  sid: z.string(),
+  pinned: z.boolean().optional(),
+  archived: z.boolean().optional(),
+  tags: z.array(z.string().min(1).max(32)).max(16).optional(),
+  title: z.string().max(200).nullable().optional(),
+});
 
 // [federation] — M8
 //
@@ -398,6 +424,19 @@ export const SessionResumed = z.object({
   ...base,
   t: z.literal("session.resumed"),
   session: SessionMeta,
+});
+
+// [B23-A] Fork a session from a given message: the new session is seeded with
+// the source's chat messages up to and INCLUDING `uptoMessageId`. Inherits
+// cwd / project / permissionMode / driver from the source unless inheritCwd
+// is explicitly false. Host replies with `session.created`.
+export const SessionFork = z.object({
+  ...base,
+  t: z.literal("session.fork"),
+  sid: z.string(),
+  uptoMessageId: z.string(),
+  inheritCwd: z.boolean().optional(),
+  title: z.string().optional(),
 });
 
 export const PtyIn = z.object({
@@ -2465,6 +2504,8 @@ export const Frame = z.discriminatedUnion("t", [
   SessionExited,
   SessionResume,
   SessionResumed,
+  SessionFork,
+  SessionMetaSet,
   PtyIn,
   PtyOut,
   PtyResize,

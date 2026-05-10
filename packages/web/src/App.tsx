@@ -353,6 +353,10 @@ export function App() {
       onCloseSession={onCloseSession}
       onResumeSession={sessionsStore.resumeSession}
       onShareSession={uiStore.openShare}
+      onSetSessionMeta={(sid, patch) =>
+        client.send({ v: 1, t: "session.meta.set", sid, ...patch })
+      }
+      onRenameSession={sessionsStore.renameSession}
       onNewSession={(projectId) => {
         uiStore.setDrawerOpen(false);
         onNewSession(projectId);
@@ -454,6 +458,9 @@ export function App() {
             activeSession={activeSession}
             gitBySid={sessionsStore.gitBySid}
             onShareSession={uiStore.openShare}
+            onForkSession={(sid, messageId) =>
+              client.send({ v: 1, t: "session.fork", sid, uptoMessageId: messageId })
+            }
           />
         </Show>
         </ErrorBoundary>

@@ -768,6 +768,23 @@ function attachChatBroadcast(session: AnySession): void {
   const unsub = session.chat.onMessage((message) => {
     metrics.incr("chat.msgs");
     indexChatAppend(session, message);
+    // [B23-C] Auto-title from the very first user message on sessions that
+    // don't have a manual title yet. Only runs for live sessions (DeadSession
+    // never emits chat frames anyway) and only once per session — subsequent
+    // user messages leave the title alone so edits stick.
+    if (
+      message.role === "user" &&
+      !(session instanceof DeadSession) &&
+      session.title === null
+    ) {
+      const derived = deriveAutoTitle(message);
+      if (derived) {
+        session.title = derived;
+        scheduleSave(session);
+        // Refresh the sidebar: title now differs from cwd-display.
+        broadcast({ v: 1, t: "session.list", sessions: mergedSessionList() });
+      }
+    }
     const seq = session.nextChatFrameSeq();
     const frame: import("@rcc/protocol").ChatAppend = {
       v: 1,
@@ -923,6 +940,13 @@ function buildRestCtx() {
         throw err;
       }
       registry.add(live);
+      // [B23-B/C] Preserve user-editable metadata (pinned/archived/tags/title)
+      // across REST-initiated resume. The ws-side resume handler does this
+      // inline; mirror it here so both paths behave identically.
+      live.pinned = s.pinned;
+      live.archived = s.archived;
+      live.tags = [...s.tags];
+      live.title = s.title;
       attachApprovalWatcher(live);
       attachChatBroadcast(live);
       attachMetricsTap(live);
@@ -959,6 +983,34 @@ async function generateAndBroadcastSummary(sid: string): Promise<void> {
   }
 }
 
+
+/**
+ * [B23-C] Derive a placeholder session title from the first user message.
+ * Flattens the text segments, collapses whitespace, strips trailing sentence
+ * punctuation, truncates at ~50 chars on a word boundary when possible, and
+ * caps at 60 chars hard. Returns null when the message has no usable text.
+ */
+function deriveAutoTitle(message: import("@rcc/protocol").ChatMessage): string | null {
+  const TARGET = 50;
+  const HARD_CAP = 60;
+  const text = message.segments
+    .map((s) => {
+      if (s.kind === "text" || s.kind === "thinking") return s.content;
+      return "";
+    })
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!text) return null;
+  if (text.length <= TARGET) return text.slice(0, HARD_CAP);
+  const slice = text.slice(0, TARGET);
+  // Prefer cutting at the last word boundary so we don't split a word mid-way.
+  // Fallback to a punctuation boundary, else a hard truncate with ellipsis.
+  const ws = slice.lastIndexOf(" ");
+  const trimmed = ws > TARGET * 0.6 ? slice.slice(0, ws) : slice;
+  // Strip trailing punctuation the heuristic left behind (e.g. "help, ", "fix.").
+  return trimmed.replace(/[\s,.;:!?·—–-]+$/u, "").slice(0, HARD_CAP) || null;
+}
 
 function gitLangFor(sub: string): string {
   if (sub === "diff" || sub === "show") return "diff";
@@ -1506,6 +1558,13 @@ function handle(ws: WebSocket, state: WsState, frame: Frame): void {
         return;
       }
       registry.add(live);
+      // [B23-B] Preserve user-editable metadata across resume.
+      live.pinned = s.pinned;
+      live.archived = s.archived;
+      live.tags = [...s.tags];
+      // [B23-C] Carry over the custom title (manual rename / auto-title)
+      // across resume so the sidebar stays stable.
+      live.title = s.title;
       attachApprovalWatcher(live);
       attachChatBroadcast(live);
       attachMetricsTap(live);
@@ -1536,6 +1595,71 @@ function handle(ws: WebSocket, state: WsState, frame: Frame): void {
       }
       return;
     }
+    case "session.fork": {
+      // [B23-A] Fork: create a new session seeded with the source's chat
+      // messages up to and including `uptoMessageId`. Inherits cwd / project /
+      // permissionMode / driver from the source. Falls back to default cwd
+      // when inheritCwd === false.
+      const src = registry.get(frame.sid);
+      if (!src) {
+        send(ws, { v: 1, t: "error", code: "no_such_session", message: frame.sid, sid: frame.sid });
+        return;
+      }
+      const all = src.chat.list();
+      const idx = all.findIndex((m) => m.id === frame.uptoMessageId);
+      if (idx < 0) {
+        send(ws, {
+          v: 1,
+          t: "error",
+          code: "no_such_message",
+          message: frame.uptoMessageId,
+          sid: frame.sid,
+        });
+        return;
+      }
+      const sliced = all.slice(0, idx + 1);
+      const inheritCwd = frame.inheritCwd !== false;
+      const driver = src.driver;
+      const forkCwd = inheritCwd ? src.cwd : projects.getDefault().cwd;
+      const s = registry.create({
+        driver,
+        command: driver === "cli" ? CLAUDE_COMMAND : undefined,
+        args: driver === "cli" ? CLAUDE_ARGS : undefined,
+        cwd: forkCwd,
+        cols: src.cols,
+        rows: src.rows,
+        permissionMode: src.permissionMode,
+        projectId: inheritCwd ? src.projectId : null,
+        initialChat: sliced,
+      });
+      attachApprovalWatcher(s);
+      attachChatBroadcast(s);
+      attachMetricsTap(s);
+      attachGitWatcher(s);
+      attachSummaryOnExit(s);
+      wirePersistence(s);
+      notifyPluginSessionCreated(s);
+      broadcast({ v: 1, t: "session.created", session: s.meta() });
+      broadcast({ v: 1, t: "session.list", sessions: mergedSessionList() });
+      attach(ws, state, s, null);
+      audit.write({
+        kind: "session.fork",
+        ...auditCtx(ws, state),
+        details: { sid: s.id, sourceSid: frame.sid, uptoMessageId: frame.uptoMessageId, count: sliced.length },
+      });
+      if (s instanceof SdkSession) {
+        s.start().catch((err: Error) => {
+          send(ws, {
+            v: 1,
+            t: "error",
+            code: "sdk_start_failed",
+            message: err.message,
+            sid: s.id,
+          });
+        });
+      }
+      return;
+    }
     case "session.close": {
       registry.close(frame.sid);
       crdt.dropSession(frame.sid);
@@ -1553,6 +1677,36 @@ function handle(ws: WebSocket, state: WsState, frame: Frame): void {
       void deleteSnapshot(frame.sid).catch(() => {});
       send(ws, { v: 1, t: "session.list", sessions: mergedSessionList() });
       audit.write({ kind: "session.close", ...auditCtx(ws, state), details: { sid: frame.sid } });
+      return;
+    }
+    case "session.meta.set": {
+      // [B23-B] Partial update of user-editable session metadata (pinned /
+      // archived / tags). Silently ignores unknown sids so stale clients don't
+      // blow up the host; broadcasts the refreshed session.list on success.
+      // [B23-C] Also accepts `title`: a non-empty string becomes the new
+      // display title; `null` clears any custom title so the sidebar falls
+      // back to the cwd-display.
+      const s = registry.get(frame.sid);
+      if (!s) return;
+      if (frame.pinned !== undefined) s.pinned = frame.pinned;
+      if (frame.archived !== undefined) s.archived = frame.archived;
+      if (frame.tags !== undefined) {
+        // Normalize: trim, drop empties, dedupe.
+        const seen = new Set<string>();
+        s.tags = frame.tags
+          .map((t) => t.trim())
+          .filter((t) => t.length > 0 && !seen.has(t) && seen.add(t));
+      }
+      if (frame.title !== undefined) {
+        if (frame.title === null) {
+          s.title = null;
+        } else {
+          const trimmed = frame.title.trim().slice(0, 200);
+          s.title = trimmed.length > 0 ? trimmed : null;
+        }
+      }
+      scheduleSave(s);
+      broadcast({ v: 1, t: "session.list", sessions: mergedSessionList() });
       return;
     }
     case "pty.in": {

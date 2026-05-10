@@ -1,4 +1,4 @@
-import { Show, createMemo, type JSX } from "solid-js";
+import { Show, createMemo, createSignal, For, type JSX } from "solid-js";
 import type { SessionMeta, GitStatusData } from "@rcc/protocol";
 import { Chip } from "../primitives/Chip.tsx";
 
@@ -28,6 +28,14 @@ export interface SessionRowProps {
   onClose: () => void;
   onResume: () => void;
   onShare: () => void;
+  /** [B23-B] Optional — when omitted the pin/archive/tag menu is hidden. */
+  onSetMeta?: (patch: { pinned?: boolean; archived?: boolean; tags?: string[] }) => void;
+  /**
+   * [B23-C] Optional — when omitted the inline-rename UI is hidden. Called
+   * with the trimmed title, or `null` to clear any custom title and fall
+   * back to the cwd-display / auto-title.
+   */
+  onRename?: (title: string | null) => void;
 }
 
 const REMOTE_TINT: Record<string, string> = {
@@ -45,6 +53,9 @@ function remoteTint(color: string | undefined): string {
 export function SessionRow(props: SessionRowProps): JSX.Element {
   const isExited = createMemo(() => props.session.status === "exited");
   const isRemote = createMemo(() => !!props.session.peerId);
+  const isPinned = createMemo(() => !!props.session.pinned);
+  const tags = createMemo(() => props.session.tags ?? []);
+  const [menuOpen, setMenuOpen] = createSignal(false);
   const displayTitle = createMemo(
     () =>
       props.session.summary?.title ??
@@ -58,6 +69,62 @@ export function SessionRow(props: SessionRowProps): JSX.Element {
       ? props.session.summary.bullets.map((b) => `• ${b}`).join("\n")
       : displayTitle(),
   );
+  // [B23-C] Inline rename state. `editing` flips the title row into an
+  // <input>; `draft` tracks the in-progress text. Commit on Enter / blur,
+  // cancel on Esc. Host broadcast of `session.list` will overwrite the
+  // optimistic title if it was rejected.
+  const [editing, setEditing] = createSignal(false);
+  const [draft, setDraft] = createSignal("");
+
+  function startRename(): void {
+    if (!props.onRename) return;
+    setMenuOpen(false);
+    setDraft(displayTitle());
+    setEditing(true);
+  }
+
+  function commitRename(): void {
+    if (!editing()) return;
+    setEditing(false);
+    if (!props.onRename) return;
+    const raw = draft().trim();
+    // Empty string clears the custom title so sidebar falls back to cwd /
+    // auto-title. A string matching the current display is a no-op.
+    const next = raw.length === 0 ? null : raw.slice(0, 200);
+    if (next !== null && next === displayTitle()) return;
+    props.onRename(next);
+  }
+
+  function cancelRename(): void {
+    setEditing(false);
+  }
+
+  function onPromptTags(e: Event) {
+    e.stopPropagation();
+    setMenuOpen(false);
+    if (!props.onSetMeta) return;
+    const current = tags().join(", ");
+    const next = window.prompt("标签（英文逗号分隔）", current);
+    if (next === null) return;
+    const list = next
+      .split(",")
+      .map((t) => t.trim())
+      .filter((t) => t.length > 0)
+      .slice(0, 16);
+    props.onSetMeta({ tags: list });
+  }
+
+  function togglePinned(e: Event) {
+    e.stopPropagation();
+    setMenuOpen(false);
+    props.onSetMeta?.({ pinned: !isPinned() });
+  }
+
+  function toggleArchived(e: Event) {
+    e.stopPropagation();
+    setMenuOpen(false);
+    props.onSetMeta?.({ archived: !props.session.archived });
+  }
 
   return (
     <div
@@ -68,8 +135,14 @@ export function SessionRow(props: SessionRowProps): JSX.Element {
         props.active
           ? "bg-accent-bg"
           : "hover:bg-bg-surfaceStrong",
+        isPinned() ? "ring-1 ring-accent/30" : "",
       ].join(" ")}
       onClick={props.onActivate}
+      onContextMenu={(e) => {
+        if (!props.onSetMeta) return;
+        e.preventDefault();
+        setMenuOpen((v) => !v);
+      }}
       role="button"
       tabIndex={0}
       onKeyDown={(e) => {
@@ -106,19 +179,63 @@ export function SessionRow(props: SessionRowProps): JSX.Element {
         />
 
         <div class="min-w-0 flex-1">
-          <div
-            class={[
-              "font-serif text-[14px] leading-tight truncate",
-              isExited()
-                ? "text-text-muted"
-                : props.active
-                  ? "text-text-primary"
-                  : "text-text-primary/90",
-            ].join(" ")}
-            title={titleTooltip()}
+          <Show
+            when={editing()}
+            fallback={
+              <div
+                class={[
+                  "font-serif text-[14px] leading-tight truncate",
+                  isExited()
+                    ? "text-text-muted"
+                    : props.active
+                      ? "text-text-primary"
+                      : "text-text-primary/90",
+                ].join(" ")}
+                title={titleTooltip()}
+                onDblClick={(e) => {
+                  if (!props.onRename) return;
+                  e.stopPropagation();
+                  startRename();
+                }}
+              >
+                <Show when={isPinned()}>
+                  <span class="text-accent mr-1" aria-label="置顶" title="已置顶">
+                    ★
+                  </span>
+                </Show>
+                {displayTitle()}
+              </div>
+            }
           >
-            {displayTitle()}
-          </div>
+            {/* [B23-C] Inline rename input. Autofocus + select so touch users
+                can immediately start typing. Blur commits, Enter commits,
+                Escape cancels (rolls back to the displayed title). */}
+            <input
+              type="text"
+              class={[
+                "w-full font-serif text-[14px] leading-tight",
+                "bg-bg-surface rounded-sm px-1 py-0.5",
+                "border border-accent/40 outline-none",
+                "focus:ring-2 focus:ring-accent/40",
+              ].join(" ")}
+              value={draft()}
+              maxlength={200}
+              autofocus
+              onClick={(e) => e.stopPropagation()}
+              onInput={(e) => setDraft(e.currentTarget.value)}
+              onBlur={commitRename}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  commitRename();
+                } else if (e.key === "Escape") {
+                  e.preventDefault();
+                  cancelRename();
+                }
+              }}
+              aria-label="重命名会话"
+            />
+          </Show>
           <div class="flex items-center gap-1.5 mt-0.5 flex-wrap">
             <span class="font-sans text-[11px] text-text-muted truncate max-w-[180px]">
               {props.session.cwd}
@@ -145,6 +262,18 @@ export function SessionRow(props: SessionRowProps): JSX.Element {
                 已退出
               </Chip>
             </Show>
+            <Show when={props.session.archived}>
+              <Chip tone="neutral" size="xs">
+                归档
+              </Chip>
+            </Show>
+            <For each={tags()}>
+              {(tag) => (
+                <Chip tone="accent" size="xs">
+                  {tag}
+                </Chip>
+              )}
+            </For>
           </div>
         </div>
 
@@ -173,6 +302,26 @@ export function SessionRow(props: SessionRowProps): JSX.Element {
               title="恢复会话"
             >
               恢复
+            </button>
+          </Show>
+          <Show when={props.onSetMeta}>
+            <button
+              type="button"
+              class={[
+                "inline-flex items-center justify-center w-8 h-8 rounded-sm",
+                "font-sans text-[14px] leading-none text-text-muted",
+                "hover:text-accent hover:bg-accent-bg",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent",
+              ].join(" ")}
+              onClick={(e) => {
+                e.stopPropagation();
+                setMenuOpen((v) => !v);
+              }}
+              title="更多"
+              aria-label="更多操作"
+              aria-expanded={menuOpen()}
+            >
+              <span aria-hidden="true">⋯</span>
             </button>
           </Show>
           <button
@@ -212,6 +361,58 @@ export function SessionRow(props: SessionRowProps): JSX.Element {
           </button>
         </div>
       </div>
+      {/* [B23-B] Contextual menu — pin / archive / tag. Rename placeholder is
+          owned by B23-C. Shown as a small floating panel that overlays the
+          right edge of the row. */}
+      <Show when={menuOpen() && props.onSetMeta}>
+        <div
+          class={[
+            "absolute right-2 top-full z-10 mt-0.5 min-w-[140px]",
+            "rounded-md border border-border-subtle bg-bg-surface shadow-md",
+            "py-1 font-sans text-[12px] text-text-primary",
+          ].join(" ")}
+          onClick={(e) => e.stopPropagation()}
+          role="menu"
+        >
+          <button
+            type="button"
+            class="w-full text-left px-3 py-1.5 hover:bg-bg-surfaceStrong"
+            onClick={togglePinned}
+            role="menuitem"
+          >
+            {isPinned() ? "取消置顶" : "置顶"}
+          </button>
+          <button
+            type="button"
+            class="w-full text-left px-3 py-1.5 hover:bg-bg-surfaceStrong"
+            onClick={toggleArchived}
+            role="menuitem"
+          >
+            {props.session.archived ? "取消归档" : "归档"}
+          </button>
+          <button
+            type="button"
+            class="w-full text-left px-3 py-1.5 hover:bg-bg-surfaceStrong"
+            onClick={onPromptTags}
+            role="menuitem"
+          >
+            添加标签
+          </button>
+          <Show when={props.onRename}>
+            <button
+              type="button"
+              class="w-full text-left px-3 py-1.5 hover:bg-bg-surfaceStrong"
+              onClick={(e) => {
+                e.stopPropagation();
+                startRename();
+              }}
+              role="menuitem"
+            >
+              重命名
+            </button>
+          </Show>
+        </div>
+      </Show>
     </div>
   );
 }

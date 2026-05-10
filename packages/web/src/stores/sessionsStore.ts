@@ -250,6 +250,32 @@ export function createSessionsStore(
     return sid;
   }
 
+  /**
+   * [B23-C] Manually rename a session. Optimistically swaps the local title
+   * so the sidebar updates instantly; the host echoes a fresh `session.list`
+   * which reconciles. `title === null` clears any custom title so the sidebar
+   * falls back to cwd-display / auto-title. Empty strings are treated as null.
+   */
+  function renameSession(sid: string, title: string | null): void {
+    const normalized =
+      typeof title === "string" ? title.trim().slice(0, 200) : "";
+    const next: string | null = normalized.length > 0 ? normalized : null;
+    // Optimistic local update — the next `session.list` from the host is
+    // authoritative and will overwrite. If the host rejects, the rollback
+    // happens naturally on the next list.
+    setSessions((s) =>
+      s.map((x) =>
+        x.id === sid ? { ...x, title: next ?? undefined } : x,
+      ),
+    );
+    client.send({
+      v: 1,
+      t: "session.meta.set",
+      sid,
+      title: next,
+    });
+  }
+
   function toggleProjectCollapsed(id: string): void {
     setCollapsedProjects((prev) => {
       const next = new Set(prev);
@@ -327,6 +353,7 @@ export function createSessionsStore(
     newSession,
     closeSession,
     resumeSession,
+    renameSession,
     shareSession,
     toggleProjectCollapsed,
 

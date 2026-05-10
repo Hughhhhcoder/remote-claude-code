@@ -23,6 +23,9 @@ import { CodeBlock } from "./blocks/CodeBlock";
 export interface MessageRowProps {
   msg: ChatMessage;
   onPin?: (messageId: string) => void;
+  /** [B23-A] Fork a new session from this message (copies messages up to and
+   *  including this one into the new session's chat buffer). */
+  onFork?: (messageId: string) => void;
   /** Suppress avatar/timestamp when this message continues a prior turn. */
   isFollowup?: boolean;
   /** Last message — reserved for streaming cursor placement hints. */
@@ -91,6 +94,7 @@ function SegmentView(props: { seg: ChatSegment }): JSX.Element {
 function ActionsBar(props: {
   onCopy: () => void;
   onQuote: () => void;
+  onFork?: () => void;
 }): JSX.Element {
   return (
     <div
@@ -108,6 +112,11 @@ function ActionsBar(props: {
       <IconButton size="sm" aria-label="引用回复" title="引用" onClick={props.onQuote}>
         ❝
       </IconButton>
+      <Show when={props.onFork}>
+        <IconButton size="sm" aria-label="从此分叉" title="从此分叉" onClick={props.onFork}>
+          🍴
+        </IconButton>
+      </Show>
       <IconButton
         size="sm"
         aria-label="重新生成 (批次 7 提供)"
@@ -138,6 +147,11 @@ export function MessageRow(props: MessageRowProps): JSX.Element {
     }
   }
   const handleQuote = () => props.onPin?.(props.msg.id);
+  const handleFork = (): void => {
+    if (!props.onFork) return;
+    if (typeof window !== "undefined" && !window.confirm("创建新会话,复制到此消息为止的所有对话?")) return;
+    props.onFork(props.msg.id);
+  };
 
   const role = () => props.msg.role;
   const roleLabel = (): string =>
@@ -171,7 +185,7 @@ export function MessageRow(props: MessageRowProps): JSX.Element {
               </Show>
             </div>
             <div class="relative flex-1 min-w-0">
-              <ActionsBar onCopy={handleCopy} onQuote={handleQuote} />
+              <ActionsBar onCopy={handleCopy} onQuote={handleQuote} onFork={props.onFork ? handleFork : undefined} />
               <div class="font-serif text-[15px] leading-[1.65] text-text-primary">
                 <For each={segments()}>{(seg) => <SegmentView seg={seg} />}</For>
                 <Show when={props.msg.streaming}>
@@ -199,7 +213,7 @@ export function MessageRow(props: MessageRowProps): JSX.Element {
           >
             <SrRoleHeader />
             <div class="relative max-w-[88%] sm:max-w-[80%] ml-auto">
-              <ActionsBar onCopy={handleCopy} onQuote={handleQuote} />
+              <ActionsBar onCopy={handleCopy} onQuote={handleQuote} onFork={props.onFork ? handleFork : undefined} />
               <div class="rounded-lg bg-userBubble text-text-primary px-4 py-3 font-serif text-[15px] leading-[1.6]">
                 <For each={segments()}>{(seg) => <SegmentView seg={seg} />}</For>
                 <Show when={props.msg.streaming}>

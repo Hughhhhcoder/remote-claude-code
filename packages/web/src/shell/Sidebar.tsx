@@ -1,4 +1,4 @@
-import { For, Show, createMemo, type JSX } from "solid-js";
+import { For, Show, createMemo, createSignal, type JSX } from "solid-js";
 import type {
   SessionMeta,
   ProjectMeta,
@@ -49,6 +49,10 @@ export interface SidebarProps {
   onCloseSession: (sid: string) => void;
   onResumeSession: (sid: string) => void;
   onShareSession: (sid: string) => void;
+  /** [B23-B] Apply a partial update of user-editable session metadata. */
+  onSetSessionMeta?: (sid: string, patch: { pinned?: boolean; archived?: boolean; tags?: string[] }) => void;
+  /** [B23-C] Manually rename a session. `null` clears any custom title. */
+  onRenameSession?: (sid: string, title: string | null) => void;
   onNewSession: (projectId?: string) => void;
   onNewProject: () => void;
   onOpenConfig: () => void;
@@ -102,6 +106,21 @@ function FooterAction(props: {
 }
 
 export function Sidebar(props: SidebarProps): JSX.Element {
+  // [B23-B] Archived sessions hidden by default; toggled by footer button.
+  const [showArchived, setShowArchived] = createSignal(false);
+
+  // Pinned first, then running/exited by original order. Archived filtered
+  // out unless `showArchived()` is true.
+  function orderSessions(list: SessionMeta[]): SessionMeta[] {
+    const visible = list.filter((s) => showArchived() || !s.archived);
+    return visible.slice().sort((a, b) => {
+      const ap = a.pinned ? 1 : 0;
+      const bp = b.pinned ? 1 : 0;
+      if (ap !== bp) return bp - ap;
+      return 0;
+    });
+  }
+
   // Group sessions by local project id — peer sessions handled separately.
   const sessionsByProject = createMemo<Map<string, SessionMeta[]>>(() => {
     const m = new Map<string, SessionMeta[]>();
@@ -112,6 +131,8 @@ export function Sidebar(props: SidebarProps): JSX.Element {
       list.push(s);
       m.set(key, list);
     }
+    // Apply ordering per project.
+    for (const [k, v] of m) m.set(k, orderSessions(v));
     return m;
   });
 
@@ -123,8 +144,13 @@ export function Sidebar(props: SidebarProps): JSX.Element {
       list.push(s);
       m.set(s.peerId, list);
     }
+    for (const [k, v] of m) m.set(k, orderSessions(v));
     return m;
   });
+
+  const archivedCount = createMemo(
+    () => props.sessions.filter((s) => s.archived).length,
+  );
 
   const hasSearch = () => !!props.search.results;
 
@@ -238,6 +264,18 @@ export function Sidebar(props: SidebarProps): JSX.Element {
                                     onClose={() => props.onCloseSession(s.id)}
                                     onResume={() => props.onResumeSession(s.id)}
                                     onShare={() => props.onShareSession(s.id)}
+                                    onSetMeta={
+                                      props.onSetSessionMeta
+                                        ? (patch) =>
+                                            props.onSetSessionMeta!(s.id, patch)
+                                        : undefined
+                                    }
+                                    onRename={
+                                      props.onRenameSession
+                                        ? (title) =>
+                                            props.onRenameSession!(s.id, title)
+                                        : undefined
+                                    }
                                   />
                                 )}
                               </For>
@@ -327,6 +365,18 @@ export function Sidebar(props: SidebarProps): JSX.Element {
                                   onClose={() => props.onCloseSession(s.id)}
                                   onResume={() => props.onResumeSession(s.id)}
                                   onShare={() => props.onShareSession(s.id)}
+                                  onSetMeta={
+                                    props.onSetSessionMeta
+                                      ? (patch) =>
+                                          props.onSetSessionMeta!(s.id, patch)
+                                      : undefined
+                                  }
+                                  onRename={
+                                    props.onRenameSession
+                                      ? (title) =>
+                                          props.onRenameSession!(s.id, title)
+                                      : undefined
+                                  }
                                 />
                               )}
                             </For>
@@ -336,6 +386,21 @@ export function Sidebar(props: SidebarProps): JSX.Element {
                     );
                   }}
                 </For>
+              </Show>
+              {/* [B23-B] Archived toggle — only shown when any session is archived. */}
+              <Show when={archivedCount() > 0}>
+                <button
+                  type="button"
+                  onClick={() => setShowArchived((v) => !v)}
+                  class={[
+                    "mt-3 w-full text-left px-2 py-2 rounded-md",
+                    "font-sans text-[12px] text-text-muted",
+                    "hover:text-text-primary hover:bg-bg-surfaceStrong",
+                  ].join(" ")}
+                  title="切换归档会话可见"
+                >
+                  {showArchived() ? "隐藏归档" : `显示归档 (${archivedCount()})`}
+                </button>
               </Show>
             </>
           }

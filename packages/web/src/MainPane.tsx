@@ -60,6 +60,8 @@ export interface MainPaneProps {
   gitBySid: () => Record<string, GitStatusData | null>;
   onShareSession: (sid: string) => void;
   onPinToNotebook?: (messageId: string) => void;
+  /** [B23-A] Fork active session from a given message. */
+  onForkSession?: (sid: string, messageId: string) => void;
 }
 
 export function MainPane(props: MainPaneProps): JSX.Element {
@@ -106,6 +108,11 @@ export function MainPane(props: MainPaneProps): JSX.Element {
                 onShare={() => props.onShareSession(props.activeSid()!)}
                 onToggleNotebook={() => props.setNotebookOpen((v) => !v)}
                 notebookActive={props.notebookOpen()}
+                onForkFromMessage={
+                  props.onForkSession
+                    ? (messageId) => props.onForkSession!(props.activeSid()!, messageId)
+                    : undefined
+                }
                 onPinToNotebook={(messageId) => {
                   props.setNotebookOpen(true);
                   const cid =

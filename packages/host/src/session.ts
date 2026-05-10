@@ -63,6 +63,20 @@ export class Session {
   status: "running" | "exited" = "running";
   exitCode: number | null = null;
   /**
+   * [B23-B] User-editable session organization. Mutated host-side via the
+   * `session.meta.set` handler; persisted on the snapshot.
+   */
+  pinned: boolean = false;
+  archived: boolean = false;
+  tags: string[] = [];
+  /**
+   * [B23-C] User-chosen or host-auto-generated title. `null` means "no custom
+   * title" — `meta()` falls back to `displayCwd(cwd)` so legacy clients see
+   * the same label they always did. Host writes via `session.meta.set` (manual
+   * rename) or the first-user-message auto-title hook in attachChatBroadcast.
+   */
+  title: string | null = null;
+  /**
    * Added in M6 batch 9: most recently generated AI summary, mirrored into
    * meta() so clients see it inline. Mutable; host writes via setSummary().
    */
@@ -306,7 +320,7 @@ export class Session {
     return {
       id: this.id,
       cwd: this.cwd,
-      title: displayCwd(this.cwd),
+      title: this.title ?? displayCwd(this.cwd),
       cols: this.cols,
       rows: this.rows,
       createdAt: this.createdAt,
@@ -314,6 +328,9 @@ export class Session {
       permissionMode: this.permissionMode,
       driver: "cli",
       projectId: this.projectId ?? undefined,
+      ...(this.pinned ? { pinned: true } : {}),
+      ...(this.archived ? { archived: true } : {}),
+      ...(this.tags.length > 0 ? { tags: [...this.tags] } : {}),
     };
   }
 }
@@ -362,6 +379,11 @@ export class DeadSession {
   readonly exitCode: number | null = null;
   readonly chat: ChatParser;
   private readonly _ringTail: string;
+  pinned: boolean;
+  archived: boolean;
+  tags: string[];
+  // [B23-C] see Session.title
+  title: string | null;
 
   constructor(h: SessionHydration) {
     this.id = h.id;
@@ -376,6 +398,18 @@ export class DeadSession {
     this.chat = new ChatParser(this.id);
     for (const m of h.chat) this.chat.appendMessage({ ...m, sid: this.id });
     this._ringTail = h.ringTail ?? "";
+    this.pinned = h.meta.pinned ?? false;
+    this.archived = h.meta.archived ?? false;
+    this.tags = h.meta.tags ? [...h.meta.tags] : [];
+    // [B23-C] A snapshot's meta.title may be either a user-set/auto-title
+    // string or the old cwd-display fallback. Treat values that match the
+    // current displayCwd(cwd) as "no custom title" so old snapshots don't
+    // appear as if they were manually renamed.
+    const rawTitle = h.meta.title;
+    this.title =
+      typeof rawTitle === "string" && rawTitle && rawTitle !== displayCwd(h.meta.cwd)
+        ? rawTitle
+        : null;
   }
 
   write(_data: string): void {
@@ -431,7 +465,7 @@ export class DeadSession {
     return {
       id: this.id,
       cwd: this.cwd,
-      title: displayCwd(this.cwd),
+      title: this.title ?? displayCwd(this.cwd),
       cols: this.cols,
       rows: this.rows,
       createdAt: this.createdAt,
@@ -439,6 +473,9 @@ export class DeadSession {
       permissionMode: this.permissionMode,
       driver: this.driver,
       projectId: this.projectId ?? undefined,
+      ...(this.pinned ? { pinned: true } : {}),
+      ...(this.archived ? { archived: true } : {}),
+      ...(this.tags.length > 0 ? { tags: [...this.tags] } : {}),
     };
   }
 }

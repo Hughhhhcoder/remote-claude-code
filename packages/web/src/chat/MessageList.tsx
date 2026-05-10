@@ -24,6 +24,8 @@ import { estimateMessageSize, HEAVY_MESSAGE_BYTES } from "./MessageList.perf";
 export interface MessageListProps {
   messages: ChatMessage[];
   onPinToNotebook?: (id: string) => void;
+  /** [B23-A] Fork a new session from a specific message. */
+  onFork?: (messageId: string) => void;
   /** When true, autoscroll is disabled (e.g. user scrolled up). Defaults to auto-detect. */
   pinnedToBottom?: boolean;
 }
@@ -250,6 +252,7 @@ export function MessageList(props: MessageListProps): JSX.Element {
               <MessageRow
                 msg={msg}
                 onPin={props.onPinToNotebook}
+                onFork={props.onFork}
                 isLast={last}
                 {...extra}
               />

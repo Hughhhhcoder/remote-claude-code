@@ -32,6 +32,9 @@ export interface ChatSurfaceProps {
   gitStatus?: GitStatusData | null;
   commands: readonly CommandSummary[];
   onPinToNotebook?: (messageId: string) => void;
+  /** [B23-A] Fork a new session from a message (copies messages up to and
+   *  including that one). */
+  onForkFromMessage?: (messageId: string) => void;
   onShare?: () => void;
   onToggleNotebook?: () => void;
   notebookActive?: boolean;
@@ -238,6 +241,7 @@ export function ChatSurface(props: ChatSurfaceProps): JSX.Element {
           <MessageList
             messages={stream.messages()}
             onPinToNotebook={props.onPinToNotebook}
+            onFork={props.onForkFromMessage}
           />
         }
         composerSlot={

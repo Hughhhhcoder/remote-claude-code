@@ -49,6 +49,12 @@ export class SdkSession {
   rows: number;
   status: "running" | "exited" = "running";
   exitCode: number | null = null;
+  /** [B23-B] User-editable session organization. Mirrors Session.ts. */
+  pinned: boolean = false;
+  archived: boolean = false;
+  tags: string[] = [];
+  // [B23-C] see Session.title — null means "no custom title, fall back to cwd".
+  title: string | null = null;
 
   readonly chat: ChatParser;
 
@@ -256,7 +262,7 @@ export class SdkSession {
     return {
       id: this.id,
       cwd: this.cwd,
-      title: displayCwd(this.cwd),
+      title: this.title ?? displayCwd(this.cwd),
       cols: this.cols,
       rows: this.rows,
       createdAt: this.createdAt,
@@ -265,6 +271,9 @@ export class SdkSession {
       driver: "sdk",
       projectId: this.projectId ?? undefined,
       ...(u ? { usage: u } : {}),
+      ...(this.pinned ? { pinned: true } : {}),
+      ...(this.archived ? { archived: true } : {}),
+      ...(this.tags.length > 0 ? { tags: [...this.tags] } : {}),
     };
   }
 
