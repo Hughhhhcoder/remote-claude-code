@@ -1,4 +1,4 @@
-import { createSignal, createMemo } from "solid-js";
+import { createSignal, createMemo, createEffect } from "solid-js";
 import type {
   GitStatusData,
   PermissionMode,
@@ -7,6 +7,11 @@ import type {
 } from "@rcc/protocol";
 import type { RccClient } from "../client.ts";
 import { toast } from "../primitives/Toast.tsx";
+import {
+  createDebouncer,
+  loadCachedSessions,
+  saveSessions,
+} from "../hooks/useOfflineHydrate.ts";
 
 export type SessionsStore = ReturnType<typeof createSessionsStore>;
 
@@ -52,7 +57,7 @@ export function createSessionsStore(
   client: RccClient,
   options: SessionsStoreOptions = {},
 ) {
-  const [sessions, setSessions] = createSignal<SessionMeta[]>([]);
+  const [sessions, setSessions] = createSignal<SessionMeta[]>(loadCachedSessions());
   const [activeSid, setActiveSid] = createSignal<string | null>(null);
   const [gitBySid, setGitBySid] = createSignal<
     Record<string, GitStatusData | null>
@@ -256,6 +261,16 @@ export function createSessionsStore(
 
   // --- Derived ---------------------------------------------------------
 
+  // [B20-C] Persist session list to localStorage (debounced) so offline
+  // sessions can render a last-known list. Online flow is unaffected —
+  // the next `session.list` frame overwrites the signal which retriggers
+  // this effect.
+  const persistSessions = createDebouncer(() => saveSessions(sessions()));
+  createEffect(() => {
+    sessions(); // track
+    persistSessions.schedule();
+  });
+
   /**
    * Sessions bucketed by projectId. Local sessions with no projectId (or a
    * projectId that doesn't map to a known project) fall under the
@@ -324,6 +339,8 @@ export function createSessionsStore(
     dispose: () => {
       for (const snap of pendingCloses.values()) clearTimeout(snap.timer);
       pendingCloses.clear();
+      persistSessions.flush();
+      persistSessions.dispose();
       unsubFrame();
     },
   };

@@ -2,6 +2,7 @@ import { Show, createSignal, onCleanup, onMount, type JSX } from "solid-js";
 import type { ConnStatus } from "../client";
 import { Button } from "../primitives/Button";
 import { Spinner } from "../primitives/Spinner";
+import { hasOfflineCache } from "../hooks/useOfflineHydrate";
 
 /**
  * ConnectionBanner — user-visible strip that replaces the tiny TopBar status
@@ -60,6 +61,12 @@ export function ConnectionBanner(props: ConnectionBannerProps): JSX.Element {
 
   const attempt = (): number => props.reconnect?.()?.attempt ?? 0;
 
+  // [B20-C] Append a subtle "offline mode · showing recent cache" badge to
+  // the reconnecting/failed banners when we actually have cached state to
+  // display (sessions or messages). Purely informational.
+  const showOfflineHint = (): boolean =>
+    (kind() === "reconnecting" || kind() === "failed") && hasOfflineCache();
+
   return (
     <Show when={kind() !== "hidden"}>
       <Show when={kind() === "connecting"}>
@@ -87,6 +94,11 @@ export function ConnectionBanner(props: ConnectionBannerProps): JSX.Element {
               连接已断开 · {secondsLeft()} 秒后重连 (第 {attempt()} 次尝试)
             </Show>
           </span>
+          <Show when={showOfflineHint()}>
+            <span class="shrink-0 text-[11px] text-text-muted font-normal hidden sm:inline">
+              🔌 离线模式 · 显示最近缓存
+            </span>
+          </Show>
           <Show when={props.onReconnectNow}>
             <Button
               variant="secondary"
@@ -109,6 +121,11 @@ export function ConnectionBanner(props: ConnectionBannerProps): JSX.Element {
           <span class="truncate flex-1 min-w-0">
             无法连接到 host · 请检查网络
           </span>
+          <Show when={showOfflineHint()}>
+            <span class="shrink-0 text-[11px] text-text-muted font-normal hidden sm:inline">
+              🔌 离线模式 · 显示最近缓存
+            </span>
+          </Show>
           <Show when={props.onReconnectNow}>
             <Button
               variant="secondary"

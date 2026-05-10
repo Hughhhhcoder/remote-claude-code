@@ -22,6 +22,11 @@ import type { ChatMessage, ChatSegment, Frame, SessionMeta } from "@rcc/protocol
 import { createSignal, createEffect, onCleanup, type Accessor } from "solid-js";
 import type { RccClient } from "../client";
 import { toast } from "../primitives/Toast";
+import {
+  createDebouncer,
+  loadCachedMessages,
+  saveMessages,
+} from "../hooks/useOfflineHydrate";
 
 export interface StreamingStats {
   count: number;
@@ -364,12 +369,38 @@ export function createStreamingMessages(
   // On sid change, clear and request a fresh list. Mirrors ChatView.tsx.
   // [B14-C] Also reset seq tracking and re-register the resolver so reconnect
   // replay scopes to the active session.
+  // [B20-C] Seed from localStorage cache (if any) after clear so the user
+  // still sees the last N messages when offline. chat.list (or chat.replay)
+  // will overwrite whenever the WS delivers it.
   createEffect(() => {
     const sid = sidAccessor();
     clear();
     lastSeenSeq = undefined;
     syncResolver(sid);
-    if (sid) client.send({ v: 1, t: "chat.list.request", sid });
+    if (sid) {
+      const cached = loadCachedMessages(sid);
+      if (cached.length > 0) setMessages(cached);
+      client.send({ v: 1, t: "chat.list.request", sid });
+    }
+  });
+
+  // [B20-C] Debounced persistence of messages → localStorage, keyed by the
+  // currently-active sid. Each sid change creates a new debouncer bound to
+  // that sid; the previous one is flushed + disposed.
+  let persistMessages: ReturnType<typeof createDebouncer> | null = null;
+  let persistedSid: string | undefined;
+  createEffect(() => {
+    const sid = sidAccessor();
+    if (sid !== persistedSid) {
+      persistMessages?.flush();
+      persistMessages?.dispose();
+      persistMessages = sid
+        ? createDebouncer(() => saveMessages(sid, messages()))
+        : null;
+      persistedSid = sid;
+    }
+    messages(); // track
+    persistMessages?.schedule();
   });
 
   const stats: Accessor<StreamingStats> = () => {
@@ -386,6 +417,9 @@ export function createStreamingMessages(
     unregisterResolver?.();
     unregisterResolver = null;
     resolverSid = undefined;
+    persistMessages?.flush();
+    persistMessages?.dispose();
+    persistMessages = null;
   }
 
   onCleanup(dispose);

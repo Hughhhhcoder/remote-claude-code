@@ -2,21 +2,53 @@
 /**
  * RCC PWA service worker — hand-rolled, no dependencies.
  *
- * Strategy:
- *   - Precache the app shell (/, /index.html, /manifest.webmanifest, icons).
- *   - Runtime: cache-first for fingerprinted static assets under /assets/
- *     and for the icons + manifest.
- *   - Runtime: network-first for HTML navigations, falling back to the
- *     cached shell so the app opens offline.
+ * Strategy (B20-B · precache narrowed + per-build versioned):
+ *   - Precache ONLY the app shell (/, /index.html, /manifest.webmanifest,
+ *     icons). The entry JS/CSS are fingerprinted and pulled on first
+ *     navigation; precaching them here would require build-time asset
+ *     discovery, which we get for free via runtime caching below.
+ *   - Runtime caching is split into three buckets so heavy lazy chunks
+ *     (Monaco / xterm / sodium / yjs / *.worker*) don't share an LRU with
+ *     the entry chunk + fonts + icons:
+ *       · rcc-assets  → cache-first, unbounded, for entry/vendor/solid/
+ *         icon/font assets. These are small and every session needs them.
+ *       · rcc-heavy   → stale-while-revalidate, bounded to 20 entries, for
+ *         the big lazy chunks. First paint never waits on cache refresh,
+ *         and stale copies evict naturally on new-build deploy because
+ *         their filename hash changes and the bounded bucket pushes old
+ *         hashes out.
+ *       · rcc-html    → network-first for navigations, falls back to the
+ *         cached shell so the PWA opens offline.
  *   - NEVER cache realtime / auth / health paths: /ws, /pair/*, /health,
  *     /tunnel. These must always hit the network (and must not be served
  *     stale), otherwise pairing + tunnel + liveness break.
- *   - Version cache name `rcc-v1`; on activate we nuke any other caches.
+ *   - Cache names embed a build-hash VERSION injected by vite.config.ts at
+ *     build time (placeholder `__BUILD_VERSION__`). On activate we nuke any
+ *     cache whose name doesn't match the current VERSION, so deploying a
+ *     new build evicts every prior bucket cleanly in one pass.
  */
 
-const VERSION = "rcc-v1";
+// Replaced at build time by vite.config.ts with the entry-chunk hash so
+// each deploy gets fresh cache buckets. In dev the placeholder survives
+// (which is fine — dev has its own SW-less flow via ?nosw=1).
+const VERSION = "__BUILD_VERSION__";
 const STATIC_CACHE = `rcc-static-${VERSION}`;
+const ASSETS_CACHE = `rcc-assets-${VERSION}`;
+const HEAVY_CACHE = `rcc-heavy-${VERSION}`;
 const HTML_CACHE = `rcc-html-${VERSION}`;
+const CURRENT_CACHES = new Set([
+  STATIC_CACHE,
+  ASSETS_CACHE,
+  HEAVY_CACHE,
+  HTML_CACHE,
+]);
+
+// Names of lazy chunks produced by vite.config.ts `manualChunks`. Matching
+// `/assets/<name>-<hash>.(js|css|wasm)` sends them to the bounded heavy
+// bucket instead of the unbounded shared one. Keep in sync with vite.
+const HEAVY_CHUNK_PATTERN =
+  /\/assets\/(monaco|xterm|sodium|yjs|[a-zA-Z.]*\.worker)[^/]*\.(js|css|wasm)$/i;
+const HEAVY_CACHE_MAX_ENTRIES = 20;
 
 const APP_SHELL = [
   "/",
@@ -71,6 +103,10 @@ function isStaticAsset(url) {
   return false;
 }
 
+function isHeavyChunk(url) {
+  return HEAVY_CHUNK_PATTERN.test(url.pathname);
+}
+
 function isNavigation(req) {
   return (
     req.mode === "navigate" ||
@@ -95,9 +131,7 @@ self.addEventListener("activate", (event) => {
     (async () => {
       const keys = await caches.keys();
       await Promise.all(
-        keys
-          .filter((k) => k !== STATIC_CACHE && k !== HTML_CACHE)
-          .map((k) => caches.delete(k)),
+        keys.filter((k) => !CURRENT_CACHES.has(k)).map((k) => caches.delete(k)),
       );
       await self.clients.claim();
     })(),
@@ -118,8 +152,13 @@ self.addEventListener("fetch", (event) => {
   if (shouldBypass(url)) return;
   if (req.headers.get("upgrade") === "websocket") return;
 
+  if (isHeavyChunk(url)) {
+    event.respondWith(staleWhileRevalidate(req, HEAVY_CACHE, HEAVY_CACHE_MAX_ENTRIES));
+    return;
+  }
+
   if (isStaticAsset(url)) {
-    event.respondWith(cacheFirst(req, STATIC_CACHE));
+    event.respondWith(cacheFirst(req, ASSETS_CACHE));
     return;
   }
 
@@ -144,6 +183,45 @@ async function cacheFirst(req, cacheName) {
     if (fallback) return fallback;
     throw err;
   }
+}
+
+// Stale-while-revalidate for heavy lazy chunks. Returns the cached copy
+// immediately when present, and kicks off a background refresh so the next
+// load picks up the newer build. Bounded via `maxEntries` so an endlessly
+// deploying branch can't fill the origin quota with every hash Monaco has
+// ever shipped.
+async function staleWhileRevalidate(req, cacheName, maxEntries) {
+  const cache = await caches.open(cacheName);
+  const cached = await cache.match(req);
+  const networkPromise = fetch(req)
+    .then(async (res) => {
+      if (res && res.status === 200 && res.type !== "opaque") {
+        await cache.put(req, res.clone()).catch(() => {});
+        if (typeof maxEntries === "number" && maxEntries > 0) {
+          await trimCache(cache, maxEntries).catch(() => {});
+        }
+      }
+      return res;
+    })
+    .catch(() => null);
+  if (cached) {
+    // Don't block the response on revalidate — just let it run.
+    // eslint-disable-next-line no-unused-expressions
+    networkPromise;
+    return cached;
+  }
+  const fresh = await networkPromise;
+  if (fresh) return fresh;
+  throw new Error("swr-fetch-failed");
+}
+
+// Drop oldest entries (by insertion order — Cache Storage preserves it)
+// when the bucket exceeds `max`. Called after successful writes.
+async function trimCache(cache, max) {
+  const reqs = await cache.keys();
+  if (reqs.length <= max) return;
+  const toDelete = reqs.slice(0, reqs.length - max);
+  await Promise.all(toDelete.map((r) => cache.delete(r)));
 }
 
 async function networkFirstHtml(req) {

@@ -441,9 +441,9 @@
 - B19-C visualViewport 高频事件节流 — ✅ 完成。`useVisualViewportBottom` 的 resize/scroll 监听改为 rAF 合并(每帧最多一次布局读),iOS 软键盘动画期间的连续事件不再触发抖动;`streaming.ts` rAF coalescer 审计通过(dedupe、dispose/clear/sid-switch 均取消 rAF,无泄漏)。
 
 **batch 20** · 网络:
-- B20-A gzip / brotli 响应 + 长缓存静态资源
-- B20-B PWA precache 名单收紧 + 版本化
-- B20-C 离线真用(session 列表 + 上次消息可读)
+- B20-A gzip / brotli 响应 + 长缓存静态资源 — ✅ 完成。`packages/host/src/index.ts` `serveStatic` 现在解析请求 `Accept-Encoding`,优先读取预生成的 `.br` 兄弟文件(回退 `.gz`,最后 raw),按资产类型发不同 `Cache-Control`:vite hash 命名资产(`-xxxxxxxx.ext`)走 `public, max-age=31536000, immutable`,`index.html` 走 `no-cache`,其他非 hash 文件走 `public, max-age=3600`;可压缩文件补 `Vary: Accept-Encoding`。预压缩脚本 `packages/web/scripts/precompress.mjs`(zlib 内置,无新依赖)在 `vite build` 后扫 dist,对 .html/.js/.css/.json/.svg/.map/.webmanifest 生成 quality-11 brotli 与 level-9 gzip,仅当压缩后 <95% 原大小时落盘。`pnpm -F @rcc/web build` 通过:monaco JS 4.29MB → br 852KB(5.0×)/ gz 1.10MB;全部文本资产 14.32MB → br 2.61MB / gz 3.43MB。
+- B20-B PWA precache 名单收紧 + 版本化 — ✅ 完成。`packages/web/public/sw.js` 重写运行时路由:APP_SHELL 精简到 6 项(`/`、`/index.html`、`/manifest.webmanifest`、3 个 icon,合计 122KB),入口 JS/CSS/vendor/solid/icon-font 走新 `rcc-assets-<ver>` 桶(cache-first,不限容量),重度懒加载 chunk(`monaco-*`/`xterm-*`/`sodium-*`/`yjs-*`/`*.worker*` 的 .js/.css/.wasm,合计 ~13MB)走 `rcc-heavy-<ver>` 桶(stale-while-revalidate,20 条上限,`trimCache` 按插入顺序淘汰),HTML 导航保持 `rcc-html-<ver>` network-first 回退离线壳。`sw.js` 的 `VERSION` 改为 `__BUILD_VERSION__` 占位符,新增 `vite.config.ts` 内联插件 `injectSwVersion`(closeBundle 钩子,sha256(所有输出文件名).slice(0,12))把 `dist/sw.js` 里的占位符替换为本次构建哈希,`activate` 只保留以该哈希结尾的四个桶、其余全删 → 新 build 上线自动清除旧缓存。`index.html` 的 SW register 补 `updateViaCache:"none"`,CDN 缓了旧 `sw.js` 也绕开。无新依赖。`pnpm -F @rcc/web typecheck ✅ · build ✅`,本次 VERSION=`f1258b18b1f2`,首装预缓存从旧版全量 `/assets/*` ~15MB 降到 shell 122KB,重度 chunk 按需拉取。
+- B20-C 离线真用(session 列表 + 上次消息可读) — ✅ 完成。新增 `packages/web/src/hooks/useOfflineHydrate.ts`(~155 LOC:读写工具、500ms 防抖、`rcc.offline.*` 命名空间、QuotaExceededError 时驱逐最旧 sid 桶)。`sessionsStore.ts` 在 `createSignal` 初值处 `loadCachedSessions()`,`createEffect` 追踪 `sessions()` 调度防抖写入(cap 50),dispose 时 flush+dispose。`streaming.ts` sid-switch effect 在 `clear()` 后用 `loadCachedMessages(sid)` 种子消息(WS `chat.list` 会覆盖),另一 effect 为每个 sid 绑定独立防抖器持久化(cap 100 条/sid × 20 sid,LRU 驱逐)。`ConnectionBanner.tsx` 在 `reconnecting`/`failed` 且 `hasOfflineCache()` 时追加徽章「🔌 离线模式 · 显示最近缓存」(sm+ 可见)。在线流程零变更;持久化纯副作用,QuotaExceeded 静默降级;首次无缓存 → 空信号 + 现有 EmptyState。typecheck + build 通过。
 
 **验收**: initial JS < 80kB gzip;LCP < 1.5s 本地;10k 消息无卡顿。tag `v0.1.11`。
 

@@ -205,7 +205,33 @@ const MIME: Record<string, string> = {
   ".map": "application/json; charset=utf-8",
 };
 
-async function serveStatic(urlPath: string): Promise<{ body: Buffer; headers: Record<string, string> } | null> {
+// Vite emits hashed filenames like `index-z4jiDD0n.js`, `monaco-xYz12Abc.js`.
+// Matches `-<8+ alnum chars>.<ext>` — safe because real app filenames rarely
+// contain a `-` immediately followed by 8+ base36-ish chars before the extension.
+const HASHED_NAME = /-[A-Za-z0-9_]{8,}\.[A-Za-z0-9]+$/;
+
+// Exts where on-the-fly compression pays off (text-shaped).
+const COMPRESSIBLE = new Set([".html", ".js", ".mjs", ".css", ".json", ".svg", ".map", ".webmanifest", ".txt"]);
+
+function pickEncoding(accept: string | undefined): "br" | "gzip" | null {
+  if (!accept) return null;
+  const a = accept.toLowerCase();
+  if (a.includes("br")) return "br";
+  if (a.includes("gzip")) return "gzip";
+  return null;
+}
+
+function cacheControlFor(rel: string, ext: string): string {
+  if (ext === ".html") return "no-cache";
+  // Hashed, content-addressed assets can be cached forever.
+  if (HASHED_NAME.test(rel)) return "public, max-age=31536000, immutable";
+  return "public, max-age=3600";
+}
+
+async function serveStatic(
+  urlPath: string,
+  acceptEncoding: string | undefined,
+): Promise<{ body: Buffer; headers: Record<string, string> } | null> {
   if (!SERVE_WEB) return null;
   const clean = decodeURIComponent(urlPath.split("?")[0]!);
   let rel = clean === "/" ? "/index.html" : clean;
@@ -220,16 +246,39 @@ async function serveStatic(urlPath: string): Promise<{ body: Buffer; headers: Re
     // fallthrough to SPA
     filePath = join(WEB_DIST, "index.html");
   }
+  const ext = extname(filePath).toLowerCase();
+  const mime = MIME[ext] ?? "application/octet-stream";
+  const cacheControl = cacheControlFor(rel, ext);
+  const wantEnc = COMPRESSIBLE.has(ext) ? pickEncoding(acceptEncoding) : null;
+
+  // Prefer a precomputed sibling if it exists and the client accepts it.
+  if (wantEnc) {
+    const sibling = filePath + (wantEnc === "br" ? ".br" : ".gz");
+    try {
+      const body = await readFile(sibling);
+      return {
+        body,
+        headers: {
+          "content-type": mime,
+          "cache-control": cacheControl,
+          "content-encoding": wantEnc,
+          vary: "Accept-Encoding",
+        },
+      };
+    } catch {
+      // fall through to raw file; runtime compression is avoided to keep CPU
+      // predictable — precompress step produces siblings at build time.
+    }
+  }
+
   try {
     const body = await readFile(filePath);
-    const ext = extname(filePath).toLowerCase();
-    return {
-      body,
-      headers: {
-        "content-type": MIME[ext] ?? "application/octet-stream",
-        "cache-control": ext === ".html" ? "no-cache" : "public, max-age=3600",
-      },
+    const headers: Record<string, string> = {
+      "content-type": mime,
+      "cache-control": cacheControl,
     };
+    if (COMPRESSIBLE.has(ext)) headers["vary"] = "Accept-Encoding";
+    return { body, headers };
   } catch {
     return null;
   }
@@ -3782,7 +3831,10 @@ const httpServer = createServer(async (req, res) => {
   }
 
   // Serve the built web bundle when present.
-  const served = await serveStatic(req.url ?? "/");
+  const served = await serveStatic(
+    req.url ?? "/",
+    typeof req.headers["accept-encoding"] === "string" ? req.headers["accept-encoding"] : undefined,
+  );
   if (served) {
     res.writeHead(200, served.headers);
     res.end(served.body);
