@@ -30,6 +30,7 @@ import { Sidebar } from "./shell/Sidebar.tsx";
 import { TopBar } from "./shell/TopBar.tsx";
 import { TabNav } from "./shell/TabNav.tsx";
 import { ConnectionBanner } from "./shell/ConnectionBanner.tsx";
+import { UpdateBanner } from "./shell/UpdateBanner.tsx";
 import { useIsCompact } from "./hooks/useMediaQuery.ts";
 import { useLandmarkCycle } from "./hooks/useLandmarkCycle.ts";
 import { EmptyState } from "./primitives/EmptyState.tsx";
@@ -45,11 +46,33 @@ import { createTunnelStore } from "./stores/tunnelStore.ts";
 import { MainPane, WorkflowRunBar } from "./MainPane.tsx";
 import { ShortcutHelp } from "./shell/ShortcutHelp.tsx";
 import { initShortcutSystem, registerShortcut } from "./hooks/useKeyboardShortcuts.ts";
+import { createSharedText } from "./crdt.ts";
 
 function readShareTokenFromLocation(): string | null {
   try {
     const params = new URLSearchParams(window.location.search);
     return params.get("share");
+  } catch {
+    return null;
+  }
+}
+
+// B21-C: Web Share Target. Browsers navigate to /share?title=&text=&url= when
+// the user picks rcc from a share sheet. We pull the params once, clear the
+// URL, and later pre-fill the active session's composer draft.
+function readSharedDraft(): string | null {
+  try {
+    const u = new URL(window.location.href);
+    if (u.pathname !== "/share") return null;
+    const title = u.searchParams.get("title");
+    const text = u.searchParams.get("text");
+    const url = u.searchParams.get("url");
+    if (!title && !text && !url) return null;
+    const lines: string[] = [];
+    if (title) lines.push(`分享：${title}`);
+    if (text) lines.push(text);
+    if (url) lines.push(url);
+    return lines.join("\n") + "\n\n";
   } catch {
     return null;
   }
@@ -110,6 +133,13 @@ export function App() {
   >(null);
   const [shortcutHelpOpen, setShortcutHelpOpen] = createSignal(false);
 
+  // B21-C: stash shared content from Web Share Target; replay into the first
+  // session's composer draft when status is connected and a sid is active.
+  let pendingShare: string | null = readSharedDraft();
+  if (pendingShare) {
+    try { window.history.replaceState(null, "", "/"); } catch { /* ignore */ }
+  }
+
   const unsubStatus = client.onStatus(setStatus);
   // App-local frame subscription: only the parts no store claims (device +
   // file-browser root seeding from first session + starter bootstrap timing).
@@ -165,6 +195,26 @@ export function App() {
       }
     }, 300);
   }
+
+  // B21-C: once connected + a session is active, write the shared draft into
+  // its input-draft CRDT. If no sessions exist after hydrate, open the new
+  // session modal — the effect re-fires on the resulting sid.
+  createEffect(() => {
+    if (!pendingShare) return;
+    if (status() !== "connected") return;
+    const sid = sessionsStore.activeSid();
+    if (sid) {
+      const draft = pendingShare;
+      pendingShare = null;
+      const st = createSharedText(client, sid, "input-draft");
+      setTimeout(() => {
+        st.setValue(draft + st.getValue());
+        st.destroy();
+      }, 250);
+    } else if (sessionsStore.sessions().length === 0 && !uiStore.modalOpen()) {
+      onNewSession();
+    }
+  });
 
   const customKeys = createMemo(() => {
     const k = prefsStore.prefs().customKeys;
@@ -501,6 +551,7 @@ export function App() {
       />
       <PushPrompt client={client} />
       <ToastContainer />
+      <UpdateBanner />
     </Show>
   );
 }

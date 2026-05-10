@@ -19,22 +19,5 @@
   <body class="bg-zinc-950 text-zinc-100">
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
-    <script>
-      // Register the PWA service worker. Skip when explicitly disabled via
-      // ?nosw=1 so devs can bypass aggressive caching if needed.
-      // `updateViaCache: "none"` forces the browser to bypass HTTP cache
-      // when checking /sw.js for updates, so a new deploy's version bump
-      // reaches users on their next reload even if intermediate CDNs
-      // served sw.js with a stale Cache-Control.
-      if ("serviceWorker" in navigator && !/[?&]nosw=1/.test(location.search)) {
-        window.addEventListener("load", function () {
-          navigator.serviceWorker
-            .register("/sw.js", { scope: "/", updateViaCache: "none" })
-            .catch(function (err) {
-              console.warn("[rcc] SW registration failed:", err);
-            });
-        });
-      }
-    </script>
   </body>
 </html>

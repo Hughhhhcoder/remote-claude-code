@@ -123,7 +123,11 @@ self.addEventListener("install", (event) => {
       }),
     ),
   );
-  self.skipWaiting();
+  // B21-A: intentionally NOT calling self.skipWaiting() here. A new SW
+  // stays in the "waiting" state and the page shows an UpdateBanner; the
+  // user clicks "立即更新" which postMessages SKIP_WAITING (handler below).
+  // This avoids hot-swapping the controller mid-session and clobbering
+  // whatever the user is typing.
 });
 
 self.addEventListener("activate", (event) => {
@@ -246,7 +250,12 @@ async function networkFirstHtml(req) {
 }
 
 self.addEventListener("message", (event) => {
-  if (event.data === "SKIP_WAITING") self.skipWaiting();
+  // B21-A: UpdateBanner sends `{type:"SKIP_WAITING"}`; legacy string payload
+  // also accepted so an older page can still promote the newer SW.
+  const d = event.data;
+  if (d === "SKIP_WAITING" || (d && typeof d === "object" && d.type === "SKIP_WAITING")) {
+    self.skipWaiting();
+  }
 });
 
 // ── Web Push ────────────────────────────────────────────────────────────────
@@ -277,35 +286,46 @@ self.addEventListener("push", (event) => {
     body: data.body || "",
     icon: "/icon-192.png",
     badge: "/icon-192.png",
-    tag: data.tag,
-    data: data.data ?? null,
+    tag: data.tag || "rcc-generic",
+    data: data.data ?? {},
     requireInteraction: data.requireInteraction === true,
+    silent: data.silent === true,
   };
   event.waitUntil(self.registration.showNotification(title, options));
 });
 
+// Clicking a notification should focus an existing RCC tab already on the
+// target route (data.url — usually /#/s/<sid>) when possible; otherwise focus
+// any RCC tab and navigate it; otherwise open a new window at data.url.
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
+  const data = event.notification.data || {};
+  const target = typeof data.url === "string" && data.url ? data.url : "/";
   event.waitUntil(
     (async () => {
       const all = await self.clients.matchAll({
         type: "window",
         includeUncontrolled: true,
       });
+      // Prefer a tab already on the target url.
       for (const c of all) {
-        // Prefer an existing tab on same origin — no point in opening 5.
+        if (c.url.includes(target) && "focus" in c) {
+          try { return await c.focus(); } catch { /* fall through */ }
+        }
+      }
+      // Fall back: focus any same-origin tab and navigate it.
+      for (const c of all) {
         if ("focus" in c) {
           try {
             await c.focus();
+            if ("navigate" in c && target !== "/") {
+              try { await c.navigate(target); } catch { /* ignore */ }
+            }
             return;
-          } catch {
-            // fall through
-          }
+          } catch { /* fall through */ }
         }
       }
-      if (self.clients.openWindow) {
-        await self.clients.openWindow("/");
-      }
+      if (self.clients.openWindow) await self.clients.openWindow(target);
     })(),
   );
 });

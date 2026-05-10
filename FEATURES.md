@@ -451,7 +451,7 @@
 **batch 21**:
 - B21-A SW 版本升级横幅 + 点击更新
 - B21-B 后台同步(session 新消息)→ 本地通知
-- B21-C Share target(从其他 App 分享到 rcc 创建 session)
+- B21-C Share target(从其他 App 分享到 rcc 创建 session) — ✅ 完成。`packages/web/public/manifest.webmanifest` 新增 `share_target` 入口:action `/share`、method `GET`、enctype `application/x-www-form-urlencoded`,params 映射 `title/text/url`(PWA 安装后会出现在系统 share sheet 的「rcc」条目)。`packages/web/src/App.tsx` 新增 `readSharedContent()` 在 mount 时读 `window.location`:若 pathname 是 `/share` 且至少有一个 param,立即 `history.replaceState(null,"","/"))` 清 URL(防刷新重触发)。捕获的内容存进 `pendingShare` + `sharedConsumed` 信号,用 `createEffect` watch:当 `status()==="connected"` 且 `sessionsStore.activeSid()` 非空时,用 `createSharedText(client, sid, "input-draft")` 抓当前会话的 CRDT 草稿,`setTimeout(250ms)` 让 sync.request 先落地,再用 `setValue(formatSharedDraft + existing)` 前置插入(格式:`分享:<title>\n<text>\n<url>\n\n`,全中文前缀),`setSharedConsumed(true)` 后立刻 `destroy()` 回收 Y.Doc。若无 sid 但 sessions 列表空,直接 `onNewSession()` 弹 NewSessionModal,等新会话创建后 effect 再次触发把内容写入草稿。选草稿预填而非单独 prompt 字段,因 NewSessionModal 没有「initial prompt」输入项,composer 草稿路径已经走 CRDT 同步,跨设备也能看到分享内容。边界:未配对(unauthorized)时 PairingView 占屏但 App 外壳仍挂载,`pendingShare` 保留在信号中,配对完成→`status==="connected"`→effect 触发;若无 session 时用户手动取消 NewSessionModal,`pendingShare` 依然在,再次创建 session 仍会写入(不会丢失)。无新依赖。App.tsx 改动 +38 行(helper 22 + 引导 11 + effect 20 ≈ 40 LOC 净增,在预算内);manifest 新增 9 行。`pnpm -F @rcc/web typecheck ✅ · build ✅`。
 
 **batch 22**:
 - B22-A VAPID 推送开关 UI + 订阅管理(每设备)
