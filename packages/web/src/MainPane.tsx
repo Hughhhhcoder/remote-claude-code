@@ -8,7 +8,6 @@ import type {
   SessionUsage,
 } from "@rcc/protocol";
 import type { RccClient } from "./client.ts";
-import { TerminalView } from "./TerminalView.tsx";
 import { ChatSurface } from "./chat/ChatSurface.tsx";
 import { NotebookView } from "./NotebookView.tsx";
 import { RecordingPanel } from "./RecordingPanel.tsx";
@@ -18,6 +17,10 @@ import type { createWorkflowRunner } from "./workflow-runner.ts";
 
 const FileBrowser = lazy(() =>
   import("./FileBrowser.tsx").then((m) => ({ default: m.FileBrowser })),
+);
+// Lazy-load TerminalView so xterm only ships when the terminal view is opened.
+const TerminalView = lazy(() =>
+  import("./TerminalView.tsx").then((m) => ({ default: m.TerminalView })),
 );
 
 /**

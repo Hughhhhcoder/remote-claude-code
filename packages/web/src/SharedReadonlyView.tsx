@@ -1,8 +1,11 @@
-import { createSignal, createMemo, onCleanup, onMount, Show } from "solid-js";
+import { createSignal, createMemo, lazy, onCleanup, onMount, Show } from "solid-js";
 import type { SessionMeta } from "@rcc/protocol";
 import { RccClient, defaultWsUrl, type ConnStatus } from "./client.ts";
 import { ChatView } from "./ChatView.tsx";
-import { TerminalView } from "./TerminalView.tsx";
+// Lazy-load TerminalView so xterm only ships when the terminal view is opened.
+const TerminalView = lazy(() =>
+  import("./TerminalView.tsx").then((m) => ({ default: m.TerminalView })),
+);
 
 interface Props {
   shareToken: string;

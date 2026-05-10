@@ -1,8 +1,14 @@
 // Light windowing (no virtualizer dep): render everything under 200 msgs; above,
 // show last N with an "expand older" button. Keeps streaming/delta updates safe.
+//
+// B18-B hardening for 10k-message sessions:
+//  - IntersectionObserver-deferred content for mid-sized messages (>2KB, outside tail).
+//  - Doubling expand step so users can drill back in history in O(log N) clicks.
+//  - Single createMemo for isFollowup flags instead of per-row recompute.
 import {
   createSignal,
   createEffect,
+  createMemo,
   onCleanup,
   onMount,
   For,
@@ -12,6 +18,7 @@ import {
 import type { ChatMessage } from "@rcc/protocol";
 import { useChatPane } from "./ChatPane";
 import { MessageRow } from "./MessageRow";
+import { LazyContent } from "./LazyContent";
 import { estimateMessageSize, HEAVY_MESSAGE_BYTES } from "./MessageList.perf";
 
 export interface MessageListProps {
@@ -27,6 +34,9 @@ const GROUP_WINDOW_MS = 60_000;
 /** Messages within the last N of the visible window always render in full, even
  *  if "heavy" — users are most likely to read recent output. */
 const ACTIVE_TAIL = 20;
+/** Below this size, skip the IntersectionObserver wrapper entirely — the
+ *  observer overhead would cost more than rendering a tiny message. */
+const LAZY_CONTENT_THRESHOLD_BYTES = 2 * 1024;
 
 export function MessageList(props: MessageListProps): JSX.Element {
   const pane = useChatPane();
@@ -45,16 +55,38 @@ export function MessageList(props: MessageListProps): JSX.Element {
     setExpandedIds(new Set<string>());
   });
 
-  const visibleMessages = (): ChatMessage[] => {
+  const visibleMessages = createMemo<ChatMessage[]>(() => {
     const all = props.messages;
-    if (all.length <= windowSize()) return all;
-    return all.slice(all.length - windowSize());
-  };
+    const w = windowSize();
+    if (all.length <= w) return all;
+    return all.slice(all.length - w);
+  });
 
   const hiddenCount = (): number => {
     const n = props.messages.length - windowSize();
     return n > 0 ? n : 0;
   };
+
+  // Precomputed per-index isFollowup flags — avoids O(visible) array lookups
+  // inside the For render loop. Recomputes only when visibleMessages changes.
+  const followupFlags = createMemo<boolean[]>(() => {
+    const list = visibleMessages();
+    const flags = new Array<boolean>(list.length);
+    for (let i = 0; i < list.length; i += 1) {
+      if (i === 0) {
+        flags[i] = false;
+        continue;
+      }
+      const prev = list[i - 1];
+      const cur = list[i];
+      if (!prev || !cur || prev.role !== cur.role) {
+        flags[i] = false;
+      } else {
+        flags[i] = cur.timestamp - prev.timestamp < GROUP_WINDOW_MS;
+      }
+    }
+    return flags;
+  });
 
   // --- Bottom-lock tracking ----------------------------------------------
   const [atBottom, setAtBottom] = createSignal(true);
@@ -115,31 +147,46 @@ export function MessageList(props: MessageListProps): JSX.Element {
     scrollToBottom();
   });
 
-  // --- Grouping -----------------------------------------------------------
-  const isFollowup = (list: ChatMessage[], i: number): boolean => {
-    if (i === 0) return false;
-    const prev = list[i - 1];
-    const cur = list[i];
-    if (!prev || !cur) return false;
-    if (prev.role !== cur.role) return false;
-    return cur.timestamp - prev.timestamp < GROUP_WINDOW_MS;
-  };
-
   const onPillClick = (): void => {
     setNewCount(0);
     scrollToBottom();
   };
 
   // --- Expand-older with scroll anchoring --------------------------------
+  // Doubling step: 200 → 400 → 800 → 1600 → ... so drilling back through a
+  // 10k-message history takes ~6 clicks instead of 50.
   const onExpandOlder = (): void => {
     const el = scrollEl();
     const savedDistance = el ? el.scrollHeight - el.scrollTop : 0;
-    setWindowSize((w) => w + WINDOW_STEP);
+    if (import.meta.env.DEV) {
+      performance.mark("messagelist-expand-start");
+    }
+    setWindowSize((w) => {
+      const total = props.messages.length;
+      const remaining = total - w;
+      if (remaining <= 0) return w;
+      // First click: fixed WINDOW_STEP. Subsequent clicks: double current window,
+      // capped at the remaining count so we never overshoot total.
+      const step = w <= WINDOW_STEP ? WINDOW_STEP : w;
+      return Math.min(total, w + Math.min(remaining, step));
+    });
     if (!el) return;
     queueMicrotask(() => {
       // After the DOM grows upward, restore visual position by keeping the
       // same distance from the bottom of the scroll region.
       el.scrollTop = el.scrollHeight - savedDistance;
+      if (import.meta.env.DEV) {
+        performance.mark("messagelist-expand-end");
+        try {
+          performance.measure(
+            "MessageList expand",
+            "messagelist-expand-start",
+            "messagelist-expand-end",
+          );
+        } catch {
+          /* marks may have been cleared */
+        }
+      }
     });
   };
 
@@ -186,15 +233,27 @@ export function MessageList(props: MessageListProps): JSX.Element {
             const list = visibleMessages();
             const idx = i();
             const last = idx === list.length - 1;
-            const followup = isFollowup(list, idx);
+            const followup = followupFlags()[idx] ?? false;
             const inActiveTail = idx >= list.length - ACTIVE_TAIL;
             const size = estimateMessageSize(msg);
             const heavy = size > HEAVY_MESSAGE_BYTES;
             const collapsed = heavy && !inActiveTail && !expandedIds().has(msg.id);
+            // Mid-sized messages (>2KB) outside the active tail get wrapped in
+            // LazyContent so their heavy inner rendering defers until near-view.
+            // Tiny messages skip the observer entirely.
+            const useLazy = !inActiveTail && size > LAZY_CONTENT_THRESHOLD_BYTES;
             // Extended contract (P4-C): pass optional `isFollowup` hint via
             // spread so we don't break typecheck if P4-C hasn't added the
             // prop yet (Solid tolerates unknown DOM-ish props on components).
             const extra = { isFollowup: followup } as Record<string, unknown>;
+            const row = (): JSX.Element => (
+              <MessageRow
+                msg={msg}
+                onPin={props.onPinToNotebook}
+                isLast={last}
+                {...extra}
+              />
+            );
             return (
               <Show
                 when={!collapsed}
@@ -208,12 +267,9 @@ export function MessageList(props: MessageListProps): JSX.Element {
                   </button>
                 }
               >
-                <MessageRow
-                  msg={msg}
-                  onPin={props.onPinToNotebook}
-                  isLast={last}
-                  {...extra}
-                />
+                <Show when={useLazy} fallback={row()}>
+                  <LazyContent>{row()}</LazyContent>
+                </Show>
               </Show>
             );
           }}

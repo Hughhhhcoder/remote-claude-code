@@ -1,6 +1,7 @@
 import { createSignal, createEffect, onCleanup, onMount, Show, For, type JSX } from "solid-js";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
+import "@xterm/xterm/css/xterm.css";
 import type { RccClient } from "../client.ts";
 import { loadToken } from "../auth.ts";
 import { IconButton } from "../primitives/IconButton.tsx";

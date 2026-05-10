@@ -4,7 +4,8 @@
 @tailwind components;
 @tailwind utilities;
 
-@import "@xterm/xterm/css/xterm.css";
+/* xterm.css is imported inside TerminalView.tsx / RecordingPlayback.tsx so
+ * it ships with the xterm chunk instead of the initial CSS bundle. */
 
 /*
  * Legacy accent RGB triplets — retained for P1 back-compat.

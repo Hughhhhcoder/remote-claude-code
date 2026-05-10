@@ -431,7 +431,7 @@
 
 ### Phase 10 · 性能 + bundle(batch 18-20 · 9 agent)
 **batch 18** · 初始包:
-- B18-A Monaco/xterm 完全 lazy(只在 route 需要时加载)
+- B18-A Monaco/xterm 完全 lazy(只在 route 需要时加载) — ✅ 完成。MainPane/SharedReadonlyView 改用 `lazy()` 包裹 TerminalView,xterm.css 移入 TerminalView/RecordingPlayback 与 xterm chunk 同步;vite.config `manualChunks` 固定 `vite/preload-helper` 到 vendor,消除 entry 对 monaco chunk 的静态导入。initial index chunk 529KB → 440KB(-89KB),HTML 中不再 modulepreload monaco-*.js/css 或 xterm-*.js;monaco/xterm 仅在访问文件预览 / 终端视图 / 录制回放时触发 async 拉取。
 - B18-B 虚拟化消息列表 perf(10k 消息 60fps)
 - B18-C 分析剩余大 chunk,定向拆分
 
