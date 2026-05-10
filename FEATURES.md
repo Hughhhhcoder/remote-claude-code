@@ -219,9 +219,23 @@
 **batch 7 验收**: 6 文件 1219 行;`pnpm -F @rcc/web typecheck` ✅;`pnpm -F @rcc/web build` ✅(15s)。panes 落地但 **未接线** —— App.tsx 仍走 PermissionApproval modal / InboxView modal / DevicesModal / PeersModal 原路径,Phase 6 batch 10 再统一切换(避免中间态同时两个审批栈乱)。不打 tag。
 
 **batch 8** · 文件 + 笔记本 + 录屏:
-- P5-D `src/files/FileBrowser.tsx` + `FilePreview.tsx`(Monaco 懒加载保留)
-- P5-E `src/notebook/NotebookPane.tsx` + `NotebookEntry.tsx`
-- P5-F `src/recording/RecordingPanel.tsx` + `RecordingPlayback.tsx`
+- P5-D `src/files/FileBrowser.tsx` + `FilePreview.tsx` ✅ (batch 8 · 2026-05-10) · 261 + 200 行
+  - Wire frame 真名是 `fs.ls.request / fs.ls / fs.read.request / fs.read`(不是文档里误写的 `file.*`);`FileEntry = {name, path, type, size?, mtime?}` 无 symlink 字段。
+  - 扁平列表 + breadcrumb 导航(非递归 tree,375 友好);`min-h-[44px] sm:min-h-[32px]` tap;git dots `success/warn/danger` 三态;mobile breadcrumb 只保留 parent/current 段。
+  - Monaco 严格 lazy:`monacoPromise = import("monaco-editor")` 模块级 loader,只在 `MonacoPane onMount` 触发;encoding=base64 或 size ≥1MB 走 `<pre>` 不加载 Monaco。
+  - 未做:键盘方向键导航(省 LOC)、原始 path 文本输入框(breadcrumb + back 替代)、symlink 图标(协议不给)。
+- P5-E `src/notebook/NotebookPane.tsx` + `NotebookEntry.tsx` ✅ (batch 8 · 2026-05-10) · 216 + 174 行
+  - Wire frame:out `notebook.request / notebook.upsert / notebook.delete / chat.list.request`;in `notebook / notebook.upserted / notebook.deleted / chat.list / chat.append`。协议无 per-cell update/remove/clear —— upsert 是 bulk-replace,`notebook.delete` 即 clear all。
+  - Cell kinds 只有两种:`note`(wire 叫 note 不是 markdown,跟 wire)、`chatRef { id, messageId }`(sid 在父 notebook 上)。
+  - chatRef 真解析:pane 自己订阅 `chat.list/append` 维护 `Map<messageId, ChatMessage>`,`resolveMessage` prop 下发到 entry;解析成功渲 role + timestamp + 240 字 excerpt + 跳转按钮,失败 id chip 兜底。
+  - Ctrl/⌘+Enter 保存,Esc 取消(顶部新建 + cell 编辑两处都挂);TextBlock 复用 chat/blocks 渲 markdown。
+- P5-F `src/recording/RecordingPanel.tsx` + `RecordingPlayback.tsx` ✅ (batch 8 · 2026-05-10) · 231 + 208 行
+  - Wire 真名 `record.start / record.stop / record.status.request / record.status`(不是 `recording.*`);播放走 HTTP `GET /recording/<sid>.cast` + `DELETE /recording/<sid>`,带 `Bearer <token>`。
+  - `compact=true` 是 MainPane header 用的细控件(⏺录制 / ⏹+size+elapsed / ▶⬇🗑);`compact=false` 全 Pane 含"正在录制"行 + 历史列表 + EmptyState。
+  - xterm lazy:`RecordingPlayback` 通过 `Solid.lazy` 异步加载,xterm ~300KB 只在点播放时拉取;playback 含 play/pause / restart / 0.5x-4x 速度 / seekable range。
+  - 延后:share action(协议无 `record.share`)、跨 session 多录制列表(协议 1 sid 1 cast,pane 只能显示当前 session 唯一录制)—— 等 host 扩 recording id 再补。
+
+**batch 8 验收**: 6 文件 1290 行;`pnpm -F @rcc/web typecheck` ✅;`pnpm -F @rcc/web build` ✅(15s)。panes 落地未接线,Phase 6 batch 10 统一切。不打 tag。
 
 **batch 9** · 设置 + 配置(10 个子 tab 统一)
 - P5-G `src/settings/SettingsPane.tsx` + `settings/tabs/{Skills,MCP,Commands}.tsx`
