@@ -404,9 +404,28 @@
   - typecheck ✅ · build ✅(24s)。
 
 **batch 17** · 键盘:
-- B17-A 全局快捷键表(?. 呼出,g s 切 session,c n 新建,等)
-- B17-B Composer: Cmd+↑ 编辑上条,Cmd+K 命令面板,Cmd+/ 切 tab
-- B17-C 跨 focus 环回(esc → composer,tab 循环)
+- B17-A ✅ 全局快捷键表(?. 呼出,g s 切 session,c n 新建,等)
+  - 新增 `hooks/useKeyboardShortcuts.ts`(~175 LOC): 模块级 registry + 单例 window keydown listener,支持 chord(1s 窗口)/ single-key / 修饰键 / input-guard。
+  - 新增 `shell/ShortcutHelp.tsx`(~150 LOC): Portal 覆盖层,按 category 分组,移动端 bottom sheet · 桌面居中 modal,kbd 样式符合 spec。
+  - `App.tsx` +50 LOC: `initShortcutSystem()` + `onMount` 注册 `?` / `g s` / `g i` / `g c` / `g p` / `c n` / `c p` / `/`;Esc 用 `createEffect` 条件注册,仅当帮助面板打开时才声明,避免和其他 Dialog 的 Escape 打架。
+  - Cmd+K 仍归 `CommandPalette` 管辖,未触碰;`/` 聚焦 composer 通过 `textarea[data-composer]` 选择。
+  - Chord 机制:第一键锁前缀 + 1s timeout,第二键 match 触发、mismatch 清空并放过;任何修饰键 / editable focus 都不会 arm chord。
+  - typecheck ✅ · build ✅(15.17s)。
+- B17-B ✅ Composer 键盘快捷键(Cmd+↑ 调出上条 / Cmd+/ 切对话终端 / 已有 Cmd+Enter 强送 / Esc blur)
+  - `Composer.tsx` 新增 `getLastUserText?` 与 `onToggleView?` props;平台检测 `navigator.platform` → `IS_MAC` → `modKey(e)` 选 meta/ctrl(+38 LOC)。
+  - Cmd+↑ 仅在 `draft().trim() === ""` 时生效(保护用户未发送的编辑);回调返回非空才替换 draft 并把光标放到末尾;否则 no-op 让浏览器原生上箭头处理。
+  - Cmd+/ 仅当 `props.onToggleView` 有值时 preventDefault + 调用;SDK driver session 在 MainPane 已传 `undefined`,shortcut 自动 no-op。
+  - `ChatSurface.tsx` 新增 `lastUserText()` 访问器(反向扫 `stream.messages()`,仅取 user + text segments.content.join("\n").trim())并传 `onToggleView={props.onToggleViewMode}`(+13 LOC)。
+  - SlashPalette 已自带 Escape(batch 6),Composer Escape 仍 blur textarea,并存;CommandPalette 的 Cmd+K 未触碰。
+  - aria-describedby sr-only 帮助文本追加 "Cmd+↑ 调出上一条消息,Cmd+/ 切换对话/终端视图"。
+  - typecheck ✅ · build ✅(14.6s)。
+- B17-C ✅ 跨 focus 环回(esc → composer,tab 循环,F6 跨 landmark)
+  - `hooks/useFocusTrap.ts`(119 LOC):Solid onMount/onCleanup hook,Tab/Shift+Tab 在容器内 wrap,bubble 阶段监听让嵌套 dialog 由内向外生效;支持 `initialFocus` 取首个 focusable 回退、`restoreFocus` 默认 true。
+  - `hooks/useLandmarkCycle.ts`(73 LOC):F6 / Shift+F6 在 header → nav[会话导航] → main#main → nav[主导航] 之间循环;`offsetParent===null` 跳过隐藏 landmark(移动端隐藏 sidebar 自动跳过);按需补 `tabindex=-1` 保证可编程 focus。
+  - `Dialog.tsx` 抽 `DialogPanel` 内部组件挂 `useFocusTrap(() => ref, {restoreFocus:true})`,只在 open 时挂载卸载,替代原 createEffect 里的 focusFirst+restore;ESC/scroll-lock 仍走原 effect(净 LOC 改动 ≈ 0,结构更干净)。
+  - `ChatSurface.tsx` 新增 window 级 bubble-phase keydown 监听(+30 LOC):Esc 时若无打开 dialog、无 INPUT/TEXTAREA/isContentEditable 焦点、且 composer 未已聚焦,`querySelector('textarea[aria-label="输入消息"]').focus()`;Dialog 的 capture-phase Esc 先 stopPropagation 故优先级天然正确。
+  - App.tsx 顶部 `useLandmarkCycle()`(+2 LOC import + call + comment)全局装监听。
+  - typecheck ✅ · build ✅。
 
 **验收**: 仅键盘可用;macOS VoiceOver 播报关键流程。tag `v0.1.10`。
 

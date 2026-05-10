@@ -1,12 +1,12 @@
 import {
   Show,
   createEffect,
-  createSignal,
   onCleanup,
   splitProps,
   type JSX,
 } from "solid-js";
 import { Portal } from "solid-js/web";
+import { useFocusTrap } from "../hooks/useFocusTrap";
 
 /**
  * Dialog — modal with focus management and responsive presentation.
@@ -58,38 +58,18 @@ export function Dialog(props: DialogProps): JSX.Element {
   // Stable id for the optional heading so we can wire aria-labelledby.
   const titleId = `dlg-${Math.random().toString(36).slice(2, 9)}-title`;
 
-  let panelRef: HTMLDivElement | undefined;
-  const [previouslyFocused, setPreviouslyFocused] =
-    createSignal<HTMLElement | null>(null);
+  // Body scroll lock + ESC key, bound to `open`. Focus trap (initial focus
+  // + Tab wrapping + restore) lives in <DialogPanel> via useFocusTrap, which
+  // only mounts while `open` is true.
 
-  // Body scroll lock + focus management + keybindings, bound to `open`.
+  // Body scroll lock + ESC key, bound to `open`.
   createEffect(() => {
     if (!local.open) return;
     if (typeof document === "undefined") return;
 
-    // Remember what was focused; we'll restore on close.
-    const active = document.activeElement as HTMLElement | null;
-    setPreviouslyFocused(active);
-
-    // Lock body scroll.
     const prevOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
 
-    // Focus first focusable inside panel after render.
-    const focusFirst = () => {
-      if (!panelRef) return;
-      const focusables = panelRef.querySelectorAll<HTMLElement>(
-        'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])',
-      );
-      if (focusables.length > 0) {
-        focusables[0].focus();
-      } else {
-        panelRef.focus();
-      }
-    };
-    const rafId = requestAnimationFrame(focusFirst);
-
-    // Global ESC listener.
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape" && dismissible()) {
         e.stopPropagation();
@@ -99,18 +79,8 @@ export function Dialog(props: DialogProps): JSX.Element {
     document.addEventListener("keydown", onKeyDown, true);
 
     onCleanup(() => {
-      cancelAnimationFrame(rafId);
       document.removeEventListener("keydown", onKeyDown, true);
       document.body.style.overflow = prevOverflow;
-      // Restore focus to opener if still connected.
-      const prev = previouslyFocused();
-      if (prev && typeof prev.focus === "function" && prev.isConnected) {
-        try {
-          prev.focus();
-        } catch {
-          /* noop */
-        }
-      }
     });
   });
 
@@ -137,58 +107,83 @@ export function Dialog(props: DialogProps): JSX.Element {
           ].join(" ")}
           onClick={onBackdropClick}
         >
-          <div
-            ref={panelRef}
-            role="dialog"
-            aria-modal="true"
-            aria-label={local.title ? undefined : "对话框"}
-            aria-labelledby={local.title ? titleId : undefined}
-            tabIndex={-1}
-            class={[
-              "pointer-events-auto relative",
-              "bg-bg-surface text-text-primary",
-              "w-full flex flex-col",
-              // Mobile: bottom sheet
-              "rounded-t-2xl max-h-[85vh] animate-slide-up",
-              // Desktop: centered card, capped width
-              "sm:rounded-lg sm:max-h-[calc(100vh-64px)] sm:animate-fade-in",
-              SIZE_MAX_WIDTH[size()],
-              "shadow-2xl border border-border-subtle",
-              "focus:outline-none",
-              local.class ?? "",
-            ].join(" ")}
-            style={{
-              // Safe-area for iOS home indicator; only meaningful on mobile
-              // but harmless on desktop (env() resolves to 0 there).
-              "padding-bottom": "env(safe-area-inset-bottom)",
-            }}
+          <DialogPanel
+            title={local.title}
+            titleId={titleId}
+            size={size()}
+            extraClass={local.class ?? ""}
           >
-            {/* Drag handle — visible on mobile only (bottom sheet affordance) */}
-            <div class="sm:hidden flex items-center justify-center pt-2 pb-1 shrink-0">
-              <div
-                class="w-12 h-[5px] rounded-full bg-border-strong/60"
-                aria-hidden="true"
-              />
-            </div>
-
-            <Show when={local.title}>
-              <div class="px-5 pt-4 pb-3 sm:px-6 sm:pt-5 shrink-0">
-                <h2
-                  id={titleId}
-                  class="font-serif text-lg sm:text-xl font-medium text-text-primary m-0"
-                >
-                  {local.title}
-                </h2>
-              </div>
-            </Show>
-
-            <div class="flex-1 overflow-y-auto px-5 pb-5 sm:px-6 sm:pb-6">
-              {local.children}
-            </div>
-          </div>
+            {local.children}
+          </DialogPanel>
         </div>
       </Portal>
     </Show>
+  );
+}
+
+/**
+ * Inner panel — separated so it only mounts while `open` is true, which lets
+ * useFocusTrap (onMount/onCleanup based) handle initial focus, Tab wrapping
+ * and focus restoration symmetrically with dialog open/close.
+ */
+interface DialogPanelProps {
+  title?: string;
+  titleId: string;
+  size: DialogSize;
+  extraClass: string;
+  children: JSX.Element;
+}
+
+function DialogPanel(props: DialogPanelProps): JSX.Element {
+  let ref: HTMLDivElement | undefined;
+  useFocusTrap(() => ref, { restoreFocus: true });
+  return (
+    <div
+      ref={(el) => { ref = el; }}
+      role="dialog"
+      aria-modal="true"
+      aria-label={props.title ? undefined : "对话框"}
+      aria-labelledby={props.title ? props.titleId : undefined}
+      tabIndex={-1}
+      class={[
+        "pointer-events-auto relative",
+        "bg-bg-surface text-text-primary",
+        "w-full flex flex-col",
+        // Mobile: bottom sheet
+        "rounded-t-2xl max-h-[85vh] animate-slide-up",
+        // Desktop: centered card, capped width
+        "sm:rounded-lg sm:max-h-[calc(100vh-64px)] sm:animate-fade-in",
+        SIZE_MAX_WIDTH[props.size],
+        "shadow-2xl border border-border-subtle",
+        "focus:outline-none",
+        props.extraClass,
+      ].join(" ")}
+      style={{
+        "padding-bottom": "env(safe-area-inset-bottom)",
+      }}
+    >
+      <div class="sm:hidden flex items-center justify-center pt-2 pb-1 shrink-0">
+        <div
+          class="w-12 h-[5px] rounded-full bg-border-strong/60"
+          aria-hidden="true"
+        />
+      </div>
+
+      <Show when={props.title}>
+        <div class="px-5 pt-4 pb-3 sm:px-6 sm:pt-5 shrink-0">
+          <h2
+            id={props.titleId}
+            class="font-serif text-lg sm:text-xl font-medium text-text-primary m-0"
+          >
+            {props.title}
+          </h2>
+        </div>
+      </Show>
+
+      <div class="flex-1 overflow-y-auto px-5 pb-5 sm:px-6 sm:pb-6">
+        {props.children}
+      </div>
+    </div>
   );
 }
 

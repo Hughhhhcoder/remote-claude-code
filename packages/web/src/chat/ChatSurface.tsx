@@ -1,4 +1,4 @@
-import { Show, createMemo, createSignal, onCleanup, type JSX } from "solid-js";
+import { Show, createMemo, createSignal, onCleanup, onMount, type JSX } from "solid-js";
 import type { CommandSummary, GitStatusData, SessionMeta } from "@rcc/protocol";
 import type { RccClient } from "../client";
 import { useIsMobile } from "../hooks/useMediaQuery";
@@ -186,6 +186,42 @@ export function ChatSurface(props: ChatSurfaceProps): JSX.Element {
   // --- attach / context injector ------------------------------------------
   const [injectOpen, setInjectOpen] = createSignal(false);
 
+  // --- last-user-message recall (Cmd+↑) -----------------------------------
+  const lastUserText = (): string | null => {
+    const msgs = stream.messages();
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      const m = msgs[i];
+      if (m.role === "user" && m.segments.length > 0) {
+        return m.segments.filter((s) => s.kind === "text").map((s) => s.content).join("\n").trim();
+      }
+    }
+    return null;
+  };
+
+  // --- Esc → focus composer -----------------------------------------------
+  // Bubbling phase so Dialog's capture-phase Esc listener always wins first:
+  // if a dialog is open, it stopPropagation()s Esc and this never fires. We
+  // also skip when focus is inside another text control (Esc-clears-input).
+  onMount(() => {
+    if (typeof document === "undefined") return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.defaultPrevented) return;
+      if (document.querySelector('[role="dialog"][aria-modal="true"]')) return;
+      const active = document.activeElement as HTMLElement | null;
+      if (active?.getAttribute("aria-label") === "输入消息") return;
+      if (active) {
+        const tag = active.tagName;
+        if (tag === "INPUT" || tag === "TEXTAREA" || active.isContentEditable) return;
+      }
+      const composer = document.querySelector<HTMLTextAreaElement>(
+        'textarea[aria-label="输入消息"]',
+      );
+      if (composer) composer.focus();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    onCleanup(() => window.removeEventListener("keydown", onKeyDown));
+  });
+
   // --- JSX -----------------------------------------------------------------
   return (
     <>
@@ -218,6 +254,8 @@ export function ChatSurface(props: ChatSurfaceProps): JSX.Element {
               initialDraft={draft()}
               onDraftChange={onDraftChange}
               remoteEditing={remoteEditActive()}
+              getLastUserText={lastUserText}
+              onToggleView={props.onToggleViewMode}
               placeholder="发送消息…"
               attachSlot={<AttachButton onClick={() => setInjectOpen(true)} />}
               voiceSlot={

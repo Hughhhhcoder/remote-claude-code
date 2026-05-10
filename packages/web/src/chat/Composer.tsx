@@ -59,7 +59,20 @@ export interface ComposerProps {
   initialDraft?: string;
   /** When true, draws a faint accent ring to signal a remote collaborator edit. */
   remoteEditing?: boolean;
+  /**
+   * Returns the last user message text for Cmd+↑ recall. When null, recall is
+   * a no-op. Called lazily only when the shortcut fires and draft is empty.
+   */
+  getLastUserText?: () => string | null;
+  /**
+   * Called when user presses Cmd+/ to toggle between chat/terminal views.
+   * When omitted (e.g. SDK-driver sessions), the shortcut is a no-op.
+   */
+  onToggleView?: () => void;
 }
+
+const IS_MAC = typeof navigator !== "undefined" && /Mac|iPhone|iPad|iPod/i.test(navigator.platform);
+const modKey = (e: KeyboardEvent) => (IS_MAC ? e.metaKey : e.ctrlKey);
 
 const MAX_HEIGHT_PX = 192; // 8 rows × 24px line-height
 const MIN_HEIGHT_PX = 40; // single-line resting height
@@ -114,6 +127,32 @@ export function Composer(props: ComposerProps): JSX.Element {
       submit();
       return;
     }
+    // Cmd+/ (Ctrl+/ on non-Mac): toggle view mode if available.
+    if (modKey(e) && e.key === "/") {
+      if (props.onToggleView) {
+        e.preventDefault();
+        props.onToggleView();
+      }
+      return;
+    }
+    // Cmd+↑ (Ctrl+↑ on non-Mac): recall last user message when draft is empty.
+    if (modKey(e) && e.key === "ArrowUp") {
+      if (draft().trim() === "") {
+        const recalled = props.getLastUserText?.();
+        if (recalled) {
+          e.preventDefault();
+          updateDraft(recalled);
+          queueMicrotask(() => {
+            const el = ref;
+            if (!el) return;
+            el.focus();
+            const end = el.value.length;
+            el.setSelectionRange(end, end);
+          });
+        }
+      }
+      return;
+    }
     // IME composition in progress — never submit.
     if (composing() || e.isComposing) return;
     if (e.key === "Enter") {
@@ -154,7 +193,7 @@ export function Composer(props: ComposerProps): JSX.Element {
       </Show>
 
       <span id={hintId} class="sr-only">
-        按回车发送,Shift+回车换行
+        按回车发送,Shift+回车换行,Cmd+↑ 调出上一条消息,Cmd+/ 切换对话/终端视图
       </span>
 
       <div class={outerCls()}>

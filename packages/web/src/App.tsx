@@ -1,4 +1,4 @@
-import { createSignal, createMemo, onCleanup, Show } from "solid-js";
+import { createSignal, createMemo, createEffect, onCleanup, onMount, Show } from "solid-js";
 import type {
   PermissionMode,
   ProjectColor,
@@ -31,6 +31,7 @@ import { TopBar } from "./shell/TopBar.tsx";
 import { TabNav } from "./shell/TabNav.tsx";
 import { ConnectionBanner } from "./shell/ConnectionBanner.tsx";
 import { useIsCompact } from "./hooks/useMediaQuery.ts";
+import { useLandmarkCycle } from "./hooks/useLandmarkCycle.ts";
 import { EmptyState } from "./primitives/EmptyState.tsx";
 import { ErrorBoundary } from "./primitives/ErrorBoundary.tsx";
 import { ToastContainer } from "./primitives/Toast.tsx";
@@ -42,6 +43,8 @@ import { createCommandsStore } from "./stores/commandsStore.ts";
 import { createSearchStore } from "./stores/searchStore.ts";
 import { createTunnelStore } from "./stores/tunnelStore.ts";
 import { MainPane, WorkflowRunBar } from "./MainPane.tsx";
+import { ShortcutHelp } from "./shell/ShortcutHelp.tsx";
+import { initShortcutSystem, registerShortcut } from "./hooks/useKeyboardShortcuts.ts";
 
 function readShareTokenFromLocation(): string | null {
   try {
@@ -79,6 +82,8 @@ export function App() {
 
   const client = new RccClient({ url: defaultWsUrl(), token: loadToken() });
   const isCompact = useIsCompact();
+  // Global F6 / Shift+F6 cycles focus through header → nav → main → tabnav.
+  useLandmarkCycle();
 
   // Stores (order matters: projects before sessions for defaultProjectId dep).
   const prefsStore = createPrefsStore(client);
@@ -103,6 +108,7 @@ export function App() {
   const [currentDevice, setCurrentDevice] = createSignal<
     { id: string; name: string; hasPasskey?: boolean } | null
   >(null);
+  const [shortcutHelpOpen, setShortcutHelpOpen] = createSignal(false);
 
   const unsubStatus = client.onStatus(setStatus);
   // App-local frame subscription: only the parts no store claims (device +
@@ -163,6 +169,33 @@ export function App() {
   const customKeys = createMemo(() => {
     const k = prefsStore.prefs().customKeys;
     return k.length > 0 ? k : [...DEFAULT_CUSTOM_KEYS];
+  });
+
+  // Global keyboard shortcuts (B17-A). Cmd+K remains owned by CommandPalette.
+  onMount(() => {
+    initShortcutSystem();
+    const focusSel = (sel: string) => () => {
+      const el = document.querySelector<HTMLElement>(sel);
+      el?.focus();
+      if (el instanceof HTMLInputElement) el.select();
+    };
+    const S = registerShortcut;
+    const unsubs: Array<() => void> = [
+      S({ id: "help.toggle", keys: ["?"], label: "显示键盘快捷键", category: "app", handler: () => setShortcutHelpOpen((v) => !v) }),
+      S({ id: "nav.inbox", keys: ["g", "i"], label: "打开收件箱", category: "nav", handler: () => uiStore.setInboxOpen(true) }),
+      S({ id: "nav.settings", keys: ["g", "c"], label: "打开设置", category: "nav", handler: () => uiStore.setSettingsOpen(true) }),
+      S({ id: "nav.projects", keys: ["g", "p"], label: "管理项目", category: "nav", handler: () => uiStore.setProjectsModalOpen(true) }),
+      S({ id: "session.switch", keys: ["g", "s"], label: "切换会话 (侧栏搜索)", category: "session", handler: () => { uiStore.setDrawerOpen(true); queueMicrotask(focusSel('input[aria-label="搜索会话"]')); } }),
+      S({ id: "session.new", keys: ["c", "n"], label: "新建会话", category: "session", handler: () => onNewSession() }),
+      S({ id: "project.new", keys: ["c", "p"], label: "新建项目", category: "session", handler: () => uiStore.setNewProjectOpen(true) }),
+      S({ id: "chat.focus", keys: ["/"], label: "聚焦输入框", category: "chat", handler: focusSel('textarea[data-composer], textarea') }),
+    ];
+    onCleanup(() => { for (const u of unsubs) u(); });
+  });
+  // Esc closes the help overlay; only register while open to not stomp other dialogs' Esc.
+  createEffect(() => {
+    if (!shortcutHelpOpen()) return;
+    onCleanup(registerShortcut({ id: "help.close", keys: ["Escape"], label: "关闭帮助面板", category: "app", guardInput: false, handler: () => setShortcutHelpOpen(false) }));
   });
 
   const paletteActions = createMemo<PaletteAction[]>(() => [
@@ -457,6 +490,10 @@ export function App() {
         activeSid={activeSid()}
         actions={paletteActions()}
         onActivateSession={sessionsStore.setActiveSid}
+      />
+      <ShortcutHelp
+        open={shortcutHelpOpen()}
+        onClose={() => setShortcutHelpOpen(false)}
       />
       <WorkflowRunBar
         state={workflowRunner.state()}
