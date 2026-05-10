@@ -186,7 +186,12 @@ export function PermissionsTab(props: Props) {
       <Show when={error()}>
         <div class="mb-4 rounded-lg border border-rose-500/40 bg-rose-500/10 text-rose-300 px-4 py-2 text-xs flex items-center justify-between">
           <span class="font-mono truncate">{error()}</span>
-          <button class="text-rose-200 hover:text-white ml-3" onClick={() => setError(null)}>
+          <button
+            type="button"
+            aria-label="关闭错误提示"
+            class="text-rose-200 hover:text-white ml-3"
+            onClick={() => setError(null)}
+          >
             ✕
           </button>
         </div>

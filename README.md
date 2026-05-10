@@ -1,84 +1,176 @@
 # RCC — Remote Claude Code
 
-> 从任何设备控制本机 `claude` CLI 的远程终端。
-> Control your local `claude` CLI from any device. Same UX on mobile, desktop web, and CLI.
-> E2E encrypted, fully auditable, pluggable.
+> Run Claude Code on your laptop. Drive it from anywhere — iPhone, iPad, desktop browser, another Mac — over a secure tunnel with the same Claude.ai-inspired UI end-to-end.
 
-**📱 想用手机连上来?** → **[中文快速上手](docs/quickstart.zh.md)** · **[English Quickstart](docs/quickstart.en.md)**
+RCC wraps the local `claude` CLI (or the Claude Agent SDK) inside a small daemon and exposes a WebSocket + REST + PWA surface. Pair a device once with a 6-digit code, then any browser or installed PWA can attach to the same sessions, stream new output, approve tools, fork conversations, or just read along. E2E encrypted, fully auditable, pluggable, and designed mobile-first.
 
-<!-- hero image placeholder: screenshot/GIF -->
+[中文快速上手](docs/quickstart.zh.md) · [English Quickstart](docs/quickstart.en.md) · [Architecture](docs/architecture.md) · [Threat model](docs/threat-model.md)
 
-## 为什么
+---
 
-- `claude` CLI 只能在本机跑;手机想继续对话得 ssh + tmux
-- 多设备、家里公司切换,session 状态经常丢
-- 公网直接暴露终端风险高,需要能用的认证 + 加密
-
-RCC 把 `claude` 包在一个守护进程里,暴露 WebSocket + REST + PWA,配对后任何设备都能安全接回同一个 session。
-
-## 快速开始
+## Quickstart
 
 ```sh
-# 一键脚本 (macOS / Linux)
-curl -fsSL https://raw.githubusercontent.com/Hughhhhcoder/remote-claude-code/main/scripts/install.sh | bash
-
-# 启动 host
-rcc
-
-# 想公网访问:
-RCC_TUNNEL=1 rcc
-```
-
-详见 [docs/install.md](docs/install.md)(Homebrew、手动、源码安装、环境变量全表)。
-
-## 特性概览
-
-- 💬 **双视图**:xterm 原生终端 + 结构化对话(ANSI 剥离 + 段落分类 + tool_use/diff 折叠)
-- 🤖 **Claude Agent SDK 驱动**:CLI 或 SDK 双 driver 可选,SDK 走真实结构化流 + token/cost 统计
-- 🔐 **E2E 加密**:X25519 ECDH + libsodium secretbox,device pairing、per-device sharedKey、重放防护
-- 🔑 **Passkey 二次确认**:高风险审批走 WebAuthn,Touch ID / Face ID 确认
-- 📱 **移动优化**:PWA + SW 缓存、虚拟键盘条、权限审批专用页、Web Push、语音输入
-- ⚙ **内置管理面板**:Skills / MCP / Slash commands / Subagents / Hooks / Permissions / Workflows / Starters / Prompts / Notebook / Plugins / Audit
-- 🌐 **公网访问**:cloudflared 随机隧道或命名隧道,单 URL 同时服务 UI + WebSocket
-- 🔌 **Plugin SDK + Marketplace**:manifest 驱动,permissions 声明,iframe sandbox UI
-- 🧰 **完整 REST API + OpenAPI 3.1**:`@rcc/cli` 客户端,第三方脚本友好
-- 📊 **观测 + 审计**:metrics sparkline、session 录屏 asciinema 回放、append-only JSONL audit log
-- 🤝 **多 host 联邦**:订阅远程 host,sessions 合并展示,sid 前缀透传
-- 🔗 **只读分享链接**:TTL 可选、可撤销,访客无 E2E key,白名单帧过滤
-
-## 文档
-
-- **[中文快速上手 / Quickstart (zh)](docs/quickstart.zh.md)** · **[English Quickstart](docs/quickstart.en.md)** — 手机连上本机 `claude` 的 5 分钟教程
-- [安装](docs/install.md)
-- [架构](docs/architecture.md)
-- [威胁模型](docs/threat-model.md)
-- [CLI 使用](packages/cli/README.md)
-
-## 开发
-
-```sh
+# 1. Install deps (Node >= 20, pnpm 9.x)
 pnpm install
-pnpm dev:host    # shell 1 — host daemon (默认 :7777)
-pnpm dev:web     # shell 2 — web 前端 (:5273,代理 /ws)
-# 打开 http://localhost:5273
+
+# 2. Run host daemon (shell 1) and web frontend (shell 2)
+pnpm dev:host       # :7777 — daemon, WS + REST
+pnpm dev:web        # :5273 — Vite dev server, proxies /ws
+
+# 3. Open the URL printed by dev:host in any browser.
+#    First load shows a 6-digit pairing code — type it to claim a device token.
+#    Subsequent visits from that device reattach automatically.
 ```
 
-不想装真 `claude` 也能冒烟:
+For production / public access:
+
+```sh
+# Random Cloudflare tunnel (no account needed)
+RCC_TUNNEL=1 rcc
+
+# Named tunnel (your own domain)
+RCC_TUNNEL=named rcc
+```
+
+Full install matrix (Homebrew, prebuilt tarballs, Docker-less one-liner, env var reference): [docs/install.md](docs/install.md).
+
+Don't want to install the real `claude` binary? Swap the driver:
 
 ```sh
 RCC_CLAUDE_CMD=bash RCC_CLAUDE_ARGS="-l" RCC_CWD=/tmp pnpm dev:host
 ```
 
-常用环境变量:
+---
 
-| 变量 | 默认 | 用途 |
+## What's in the box
+
+### Clients and drivers
+
+- **Mobile-first PWA** — installable, offline cache of recent sessions, Web Push for high-risk approvals, system share target, haptic feedback, pull-to-refresh, pinch-zoom code blocks, 4-tab bottom nav (chat / files / approvals / settings).
+- **Desktop web** — same codebase, container-queries-first layout, 280px sidebar with projects + peers + archived, global Cmd+K palette, `?` shortcut help, chord bindings (`g s` / `g i` / `c n` …), landmark cycling with F6.
+- **CLI + SDK drivers** — pick `claude` pty driver (real terminal) or Claude Agent SDK driver (structured messages with token/cost stats). Both render identically as chat bubbles via the host-side ANSI/tool/diff state machine.
+- **`@rcc/cli`** — Node client speaking the same WebSocket protocol for scripts and CI.
+
+### Chat surface
+
+- Claude.ai-inspired design language: warm cream palette (`#eeece2` light / `#1a1816` dark), Charter serif body, Inter chrome, JetBrains Mono code, terra cotta accent. High-contrast AA override respecting `prefers-contrast`.
+- **Rich segments** — text + markdown (XSS-safe, no innerHTML), fenced code with built-in tokenizer (TS / JS / JSON / Python / Go / Rust / shell), unified diff with per-hunk chevrons, side-by-side diff on ≥lg, inline tool_use / tool_result cards with input/output separation.
+- **Smart tool-output summarizer** — long results classified as error / JSON / dirlist / grep / text with head+tail folding, top-key table for JSON, grouped matches for grep.
+- **Streaming** — rAF-coalesced delta frames, orphan-update handling, reconnect + seq-checked replay with ring buffer (drops → auto toast + refetch).
+- **Message actions** — copy as text / Markdown, quote to composer, pin to notebook, share deep link, fork session from any message, regenerate (planned).
+- **Fork, rename, pin, archive, tag** sessions. Auto-title from first user message. Pull-to-refresh on mobile.
+- **Export** — Markdown, JSON, print-to-PDF with dedicated `@media print` stylesheet; offline static HTML (session viewable without the host).
+- **Context injection** — `@mention` sessions or files (live `fs.ls` completions), cross-session history paste with byte-budget warning (32 KB cap, 24 KB yellow).
+- **Workflow runner** — step-visualized panel (mobile bottom sheet / desktop floating card), interpolated variables `{{name}}` / `{{env:VAR}}`, conditional `if` expressions, skip / retry / resume-from-step, live elapsed time.
+- **Starters** — Claude-styled card grid, one-click preview of system prompt + skills + first-steps bootstrap.
+
+### Panes and modes
+
+- Files (breadcrumb nav, Monaco lazy-loaded only on demand)
+- Approvals (pending + 24h history, Face ID gate on high-risk)
+- Inbox (grouped today / this week / earlier)
+- Devices / Peers (fingerprint chip, revoke with passkey gate)
+- Notebook (notes + chat references that resolve to real messages)
+- Recording (start/stop via `record.*`, asciinema-compatible cast + xterm playback at 0.5x–4x)
+- Settings (10 lazy tabs: Skills / MCP / Commands / Subagents / Hooks / Permissions / Starters / Workflows / Prompts / Plugins / Notifications / Appearance)
+- Marketplace (skills / MCPs / plugins, install with scope picker)
+- Session timeline (chronological merge of messages + audit entries)
+- Metrics panel (sparklines, p50/p95 approval latency, active sessions, crash count)
+
+### Security model
+
+- **Pairing** — PAKE-style 6-digit code → per-device token + X25519 keypair; loopback trust configurable.
+- **E2E encryption** — X25519 ECDH + libsodium secretbox, per-device shared key, replay nonces, brotli/gzip negotiated transport.
+- **Passkeys (WebAuthn)** — required for high-risk approvals, device revocation, and toggling `bypassPermissions`. Fallback to `confirm()` + typed warning when WebAuthn unavailable.
+- **Audit log** — append-only JSONL (`~/.rcc/audit.jsonl`), searchable UI, sensitive-field redacted export endpoint (`GET /api/v1/logs/export`) with self-referential `logs.export` entry.
+- **CSP / COEP / COOP / Permissions-Policy** headers, cache-busting SW (`rcc-*-<build-hash>` buckets, `updateViaCache:"none"`), token rotation hooks.
+- **Share links** — optional TTL, revocable, read-only whitelist of frames; guests get no E2E key.
+- **Quiet hours** for push notifications (per-device, per-tz, cross-midnight aware).
+
+### Infra
+
+- Multi-host federation (subscribe remote hosts, sid-prefixed merge, cross-peer visibility).
+- Cloudflared tunnels — random `try` or named.
+- REST API + OpenAPI 3.1, served off the same HTTP surface.
+- Prebuilt artifacts gzip+brotli, long-cache for hashed assets, SW precache only shell (~122 KB) and lazy-load Monaco / xterm / sodium / yjs on demand.
+- Offline hydrate: session list + last-seen messages persist in `localStorage` with LRU eviction.
+
+---
+
+## Architecture
+
+```
+                                 +------------------+
+                                 |   claude CLI /   |
+                                 | Claude Agent SDK |
+                                 +---------+--------+
+                                           |
+                                           | pty / SDK stream
+                                           v
++----------+    WS + REST    +--------------------------+
+|  Browser | <-------------> |  @rcc/host (Node daemon) |
+|  (PWA)   |   E2E encrypted |  - session registry      |
++----------+                 |  - ChatParser state mach.|
+                             |  - audit.jsonl           |
++----------+    WS + REST    |  - push / webauthn       |
+|  @rcc/cli| <-------------> |  - plugins + market      |
+|  (Node)  |                 |  - cloudflared tunnel    |
++----------+                 +-----------+--------------+
+                                         |
+                                         | mDNS / manual
+                                         v
+                                 +------------------+
+                                 |  Peer hosts      |
+                                 |  (federation)    |
+                                 +------------------+
+```
+
+Protocol lives in `packages/protocol` (Zod-validated Frame discriminated union). Host in `packages/host`. Web PWA in `packages/web`. CLI in `packages/cli`. Full component walkthrough in [docs/architecture.md](docs/architecture.md).
+
+---
+
+## Environment variables (most common)
+
+| Variable | Default | Purpose |
 |---|---|---|
-| `RCC_PORT` | `7777` | host 端口 |
-| `RCC_CWD` | `process.cwd()` | 新 session 默认 cwd |
-| `RCC_CLAUDE_CMD` | `claude` | 被 spawn 的命令 |
-| `RCC_PERMISSION_MODE` | `default` | 新 session 默认 `--permission-mode` |
-| `RCC_TUNNEL` | 未设 | `1`/`try` 启随机隧道,`named` 启命名隧道,`off` 关闭 |
-| `RCC_TRUST_LOOPBACK` | `1` | `0` 要求 loopback 也带 token |
+| `RCC_PORT` | `7777` | host port |
+| `RCC_CWD` | `process.cwd()` | default cwd for new sessions |
+| `RCC_CLAUDE_CMD` | `claude` | driver executable |
+| `RCC_CLAUDE_ARGS` | (none) | extra CLI args |
+| `RCC_PERMISSION_MODE` | `default` | `default` / `acceptEdits` / `plan` / `bypassPermissions` |
+| `RCC_TUNNEL` | (none) | `1` / `try` / `named` / `off` |
+| `RCC_TRUST_LOOPBACK` | `1` | `0` forces tokens even on loopback |
+
+Full table: [docs/install.md](docs/install.md).
+
+---
+
+## Documentation
+
+- [Quickstart (zh)](docs/quickstart.zh.md) · [Quickstart (en)](docs/quickstart.en.md)
+- [Install](docs/install.md)
+- [Architecture](docs/architecture.md)
+- [Threat model](docs/threat-model.md)
+- [Operations](docs/operations.md)
+- [Plugin authoring](docs/plugin-authoring.md)
+- [CLI usage](packages/cli/README.md)
+- [Changelog](CHANGELOG.md)
+
+---
+
+## Development
+
+```sh
+pnpm install
+pnpm -r typecheck       # all packages
+pnpm -F @rcc/web build  # production web bundle
+pnpm dev                # run host + web in parallel
+```
+
+Mobile verification is a hard gate on every phase: 375 px baseline, touch targets ≥ 44 px, composer follows the visual viewport, no horizontal scroll, safe-area insets respected on iOS.
+
+---
 
 ## License
 

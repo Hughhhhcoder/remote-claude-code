@@ -199,6 +199,7 @@ export function Sidebar(props: SidebarProps): JSX.Element {
           variant="primary"
           size="md"
           class="w-full"
+          data-tour-target="new-session"
           onClick={() => props.onNewSession()}
         >
           <span aria-hidden="true">+</span>

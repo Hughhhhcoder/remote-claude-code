@@ -428,4 +428,20 @@ export const en = {
   "voice.stop": "Stop voice input",
   "voice.start": "Voice input",
   "voice.aria": "Voice input",
+
+  // first-run onboarding tour
+  "tour.aria": "Onboarding tour",
+  "tour.skip": "Skip tour",
+  "tour.skipInline": "Skip",
+  "tour.next": "Next",
+  "tour.done": "Get started",
+  "tour.newSession.title": "Start a session",
+  "tour.newSession.body":
+    "Click “New session” in the sidebar to open your first chat. Pick an existing project or create a new one — the host spins up Claude Code for you.",
+  "tour.composer.title": "Type, or trigger a slash command",
+  "tour.composer.body":
+    "Type here to chat with Claude. Press “/” for slash commands and “@” to mention files or sessions. Enter sends, Shift+Enter adds a line.",
+  "tour.mobileNav.title": "Mobile navigation",
+  "tour.mobileNav.body":
+    "Pull down the message list to refresh, swipe from the left edge for the sessions drawer, and use the four bottom tabs to switch between Chat / Files / Terminal / More.",
 } as const;

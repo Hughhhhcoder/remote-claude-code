@@ -507,6 +507,7 @@ export function Composer(props: ComposerProps): JSX.Element {
             ref = el;
             queueMicrotask(resize);
           }}
+          data-tour-target="composer"
           rows={1}
           value={draft()}
           disabled={props.disabled}

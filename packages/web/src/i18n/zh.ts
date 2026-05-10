@@ -428,4 +428,20 @@ export const zh = {
   "voice.stop": "停止语音输入",
   "voice.start": "语音输入",
   "voice.aria": "语音输入",
+
+  // first-run onboarding tour
+  "tour.aria": "新手引导",
+  "tour.skip": "跳过引导",
+  "tour.skipInline": "跳过",
+  "tour.next": "下一步",
+  "tour.done": "开始使用",
+  "tour.newSession.title": "新建会话",
+  "tour.newSession.body":
+    "点击左侧的「新建会话」按钮开启第一个对话。你可以选择已有项目或新建项目，host 会为你启动 Claude Code。",
+  "tour.composer.title": "输入 / 触发 slash 命令",
+  "tour.composer.body":
+    "在这里输入消息与 Claude 对话。输入 / 唤出 slash 命令面板，@ 提及文件或会话。Enter 发送，Shift+Enter 换行。",
+  "tour.mobileNav.title": "移动端导航",
+  "tour.mobileNav.body":
+    "下拉消息列表可刷新；从左侧边缘右滑唤出会话抽屉；底部四个 tab 在 Chat / Files / Terminal / More 之间切换。",
 } as const;

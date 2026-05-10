@@ -23,6 +23,7 @@ import { createPrefsStore, DEFAULT_CUSTOM_KEYS } from "./prefs.ts";
 import { ShareModal } from "./ShareModal.tsx";
 import { SharedReadonlyView } from "./SharedReadonlyView.tsx";
 import { CommandPalette, type PaletteAction } from "./CommandPalette.tsx";
+import { OnboardingTour } from "./OnboardingTour.tsx";
 import { InboxView, createInboxStore } from "./InboxView.tsx";
 import { createWorkflowRunner, type WorkflowRunRequest } from "./workflow-runner.ts";
 import { t } from "./i18n/index.ts";
@@ -690,6 +691,7 @@ export function App() {
       <PushPrompt client={client} />
       <ToastContainer />
       <UpdateBanner />
+      <OnboardingTour active={sessionsStore.sessions().length === 0} />
     </Show>
   );
 }
