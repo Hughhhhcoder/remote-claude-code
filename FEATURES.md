@@ -237,13 +237,24 @@
 
 **batch 8 验收**: 6 文件 1290 行;`pnpm -F @rcc/web typecheck` ✅;`pnpm -F @rcc/web build` ✅(15s)。panes 落地未接线,Phase 6 batch 10 统一切。不打 tag。
 
-**batch 9** · 设置 + 配置(10 个子 tab 统一)
-- P5-G `src/settings/SettingsPane.tsx` + `settings/tabs/{Skills,MCP,Commands}.tsx`
-- P5-H `settings/tabs/{Subagents,Hooks,Permissions,Starters}.tsx`
-- P5-I `settings/tabs/{Workflows,Prompts,Plugins}.tsx`
-- P5-J `src/marketplace/MarketplacePane.tsx` + 分类卡片
+**batch 9** · 设置 + 配置(10 个子 tab 统一):
+- P5-G/H/I `src/settings/SettingsPane.tsx` + `tabsConfig.ts` ✅ (batch 9 · 2026-05-10) · 256 + 65 行
+  - 复用既有 10 个 `*Tab.tsx`(`SkillsTab` / `McpTab` / `CommandsTab` / `SubagentsTab` / `HooksTab` / `PermissionsTab` / `StartersTab` / `WorkflowsTab` / `PromptsTab` / `PluginsTab`),不重写业务逻辑;tabsConfig `lazy(() => import(...))` 逐个代码分割。
+  - 响应式三档:桌面 ≥1024 左 sidebar `w-56` + 右 scrollable;<1024 水平 `overflow-x-auto` tab strip(`h-11` 触达) + 下方内容;所有断点 serif 16px title。
+  - 搜索过滤 sidebar/strip(label/id/description 模糊匹配)+ Enter 跳首个 + Esc 清空或关闭;URL hash 同步 `#settings/<id>` 含 popstate 监听。
+  - `<Switch><Match>` 按 id 分发各 tab 正确 props:`WorkflowsTab` 用 `onRun` 不是 `onRunWorkflow`,在 pane 层做了 adapter。
+  - tab content 外包 `<Suspense>` 显示"加载中…"。
+- P5-J `src/marketplace/MarketplacePane.tsx` ✅ (batch 9 · 2026-05-10) · 270 行
+  - 三类 discriminated union:`skill | mcp | plugin`(直接映 `MarketSkillEntry / MarketMcpEntry / MarketPluginEntry`),分类 chip 为 All / Skills / MCPs / Plugins(原 MarketplaceView 无 Commands/Starters,按现实用)。
+  - Wire frame 照搬 `market.catalog.request` / `market.install.skill|mcp|plugin` / `market.skill|mcp|plugin.installed`;协议无 uninstall,与原 View 一致只装不卸。
+  - 响应式 grid:`grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 lg:gap-4`;category chip horizontal scroll;search input `flex-1 sm:w-72`。
+  - 详情 slide-in deferred,装按钮点开居中 confirm overlay(skill 作用域 radio / mcp env hints / tags / description)—— 对齐老 View 的 install prompt UX。
 
-**验收**: 所有旧 Tab.tsx / View.tsx 迁移完毕,`mobile/` 子目录全删。tag `v0.1.6`。
+**batch 9 验收**: 3 文件 591 行;`pnpm -F @rcc/web typecheck` ✅;`pnpm -F @rcc/web build` ✅(15s)。所有 Pane 全部落地 **但 App.tsx 仍走旧 Modal 路径**。
+
+**Phase 5 整体完结**: 12 个 Pane / 15 文件 / 3100 行代码落盘,ApprovalPane / InboxPane / DevicesPane / PeersPane / FileBrowser / FilePreview / NotebookPane / NotebookEntry / RecordingPanel / RecordingPlayback / SettingsPane / MarketplacePane。典型 Pane contract 统一:`{ client, sid?, onClose? }` + 业务 callback;frame 取真协议名(非 spec 里的误写)。
+
+**Phase 5 不打独立 tag**,留给 Phase 6 batch 10 做一键清理与接线后一起 tag `v0.1.7`。
 
 ### Phase 6 · 首轮清理(batch 10 · 3 agent)
 - **B10-A** 删 `mobile/` 7 文件 + `MobileKeyBar` + `useIsMobile` + 旧 `ChatView.tsx` 残件;`App.tsx` 彻底清掉桌面硬分支
