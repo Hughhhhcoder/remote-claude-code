@@ -612,18 +612,84 @@ function broadcastApproval(frame: Frame): void {
   }
   // Side-effect: kick a Web Push on high-risk approval requests so users get
   // a lock-screen nudge. Low/medium pass silently to avoid notification
-  // fatigue — the in-app approval sheet handles those.
+  // fatigue — the in-app approval sheet handles those. Throttled via a 5s
+  // debounce: if multiple high-risk approvals arrive in that window, send one
+  // aggregate notification instead of N individual pings (see pushHighRisk).
   if (frame.t === "approval.request" && frame.risk === "high") {
-    const title = "⚠ 高风险审批";
-    const body = `${frame.tool} · ${frame.summary}`.slice(0, 240);
-    void push.broadcast("all", {
-      title,
-      body,
-      tag: `approval-${frame.id}`,
-      data: { sid: frame.sid, id: frame.id, kind: "approval" },
-      requireInteraction: true,
-    });
+    pushHighRiskApproval(frame);
   }
+}
+
+// [push-throttle] Buffer high-risk approvals for 5s; on flush, emit either a
+// single detailed notification (if exactly one in the window) or an aggregate
+// count ("N 个高风险请求待审批"). Skips when no push subs exist, or when the
+// only subscribed device is already actively connected via WebSocket (no point
+// pushing to yourself — the in-app sheet is already visible).
+interface PendingApproval {
+  id: string;
+  sid: string;
+  tool: string;
+  summary: string;
+}
+const PUSH_DEBOUNCE_MS = 5_000;
+let pendingPushApprovals: PendingApproval[] = [];
+let pushFlushTimer: ReturnType<typeof setTimeout> | null = null;
+function pushHighRiskApproval(frame: Extract<Frame, { t: "approval.request" }>): void {
+  pendingPushApprovals.push({
+    id: frame.id,
+    sid: frame.sid,
+    tool: frame.tool,
+    summary: frame.summary,
+  });
+  if (pushFlushTimer) return;
+  pushFlushTimer = setTimeout(() => {
+    pushFlushTimer = null;
+    const batch = pendingPushApprovals;
+    pendingPushApprovals = [];
+    if (batch.length === 0) return;
+    const subs = push.all();
+    if (subs.length === 0) return;
+    // "You're asking yourself" check: if every subscription maps to a device
+    // that's currently connected, skip — the in-app UI has it covered.
+    const connected = new Set<string>();
+    for (const client of wss.clients) {
+      if (client.readyState !== WebSocket.OPEN) continue;
+      const d = (client as E2EWebSocket).rccDevice;
+      if (d?.id) connected.add(d.id);
+    }
+    const offlineSubs = subs.filter((s) => !s.deviceId || !connected.has(s.deviceId));
+    if (offlineSubs.length === 0) return;
+    let payload: PushPayload;
+    if (batch.length === 1) {
+      const a = batch[0]!;
+      payload = {
+        title: "⚠ 高风险审批",
+        body: `${a.tool} · ${a.summary}`.slice(0, 80),
+        tag: a.id,
+        data: { url: "/#inbox", sid: a.sid, approvalId: a.id },
+        requireInteraction: true,
+      };
+    } else {
+      payload = {
+        title: "⚠ 高风险审批",
+        body: `${batch.length} 个高风险请求待审批`,
+        tag: "approval-batch",
+        data: { url: "/#inbox" },
+        requireInteraction: true,
+      };
+    }
+    const targetDeviceIds = offlineSubs
+      .map((s) => s.deviceId)
+      .filter((id): id is string => typeof id === "string" && id.length > 0);
+    // If some subs lack a deviceId, fall back to broadcast-all; 410 Gone is
+    // auto-pruned by PushService.sendOne.
+    const anyUnassigned = offlineSubs.some((s) => !s.deviceId);
+    if (anyUnassigned || targetDeviceIds.length === 0) {
+      void push.broadcast("all", payload);
+    } else {
+      void push.broadcast(targetDeviceIds, payload);
+    }
+  }, PUSH_DEBOUNCE_MS);
 }
 
 function attachApprovalWatcher(session: AnySession): void {
@@ -1611,12 +1677,23 @@ function handle(ws: WebSocket, state: WsState, frame: Frame): void {
           endpoint: frame.endpoint,
           keys: frame.keys,
           deviceId: frame.deviceId ?? state.device?.id ?? null,
+          quietHours: frame.quietHours,
         })
         .then(() => send(ws, { v: 1, t: "push.subscribed", ok: true }))
         .catch((err) => {
           console.warn("[rcc-host] push.subscribe failed:", err?.message ?? err);
           send(ws, { v: 1, t: "push.subscribed", ok: false });
         });
+      return;
+    }
+    case "push.preferences.set": {
+      // [B22-C] Apply quiet-hours prefs. With no endpoint, target every sub
+      // owned by the authenticated device (loopback = all).
+      void push.setPrefs({
+        endpoint: frame.endpoint,
+        deviceId: state.device?.id ?? null,
+        quietHours: frame.quietHours,
+      });
       return;
     }
     case "push.unsubscribe": {

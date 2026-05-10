@@ -32,7 +32,8 @@ export type SettingsTabId =
   | "starters"
   | "workflows"
   | "prompts"
-  | "plugins";
+  | "plugins"
+  | "notifications";
 
 export const SETTINGS_TABS: readonly SettingsTabEntry[] = [
   { id: "skills",      label: "技能",       labelEn: "Skills",      icon: "🧩", description: "Agent skills and capabilities" },
@@ -44,7 +45,8 @@ export const SETTINGS_TABS: readonly SettingsTabEntry[] = [
   { id: "starters",    label: "启动器",     labelEn: "Starters",    icon: "🚀", description: "Starter workflow templates" },
   { id: "workflows",   label: "工作流",     labelEn: "Workflows",   icon: "⚙",  description: "Multi-step workflows" },
   { id: "prompts",     label: "提示词",     labelEn: "Prompts",     icon: "📝", description: "Saved prompt templates" },
-  { id: "plugins",     label: "插件",       labelEn: "Plugins",     icon: "🧱", description: "Installed plugins" },
+  { id: "plugins",       label: "插件",       labelEn: "Plugins",       icon: "🧱", description: "Installed plugins" },
+  { id: "notifications", label: "通知",       labelEn: "Notifications", icon: "🔔", description: "Web Push / VAPID subscriptions" },
 ] as const;
 
 export function findTabById(id: string | undefined | null): SettingsTabEntry | undefined {

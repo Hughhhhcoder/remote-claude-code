@@ -516,6 +516,7 @@ export function App() {
       <SettingsModal
         open={uiStore.settingsOpen()}
         store={prefsStore}
+        client={client}
         onClose={() => uiStore.setSettingsOpen(false)}
       />
       <ShareModal

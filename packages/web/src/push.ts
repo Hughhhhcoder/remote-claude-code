@@ -1,4 +1,53 @@
 import type { RccClient } from "./client.ts";
+import type { QuietHours } from "@rcc/protocol";
+
+/**
+ * [B22-C] Device-local quiet-hours preference. Stored only in localStorage
+ * (NOT in the server-synced UiPrefs) because it's per-device. Propagated to
+ * the host after a push subscription so the host can enforce the window.
+ */
+const QH_KEY = "rcc:push-quiet-hours";
+
+export function getQuietHours(): QuietHours | null {
+  try {
+    const raw = localStorage.getItem(QH_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (
+      typeof parsed === "object" &&
+      parsed &&
+      typeof parsed.enabled === "boolean" &&
+      Number.isInteger(parsed.startHour) &&
+      Number.isInteger(parsed.endHour) &&
+      typeof parsed.timezone === "string"
+    ) {
+      return parsed as QuietHours;
+    }
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
+export function setQuietHoursLocal(qh: QuietHours | null): void {
+  try {
+    if (qh) localStorage.setItem(QH_KEY, JSON.stringify(qh));
+    else localStorage.removeItem(QH_KEY);
+  } catch {
+    // ignore
+  }
+}
+
+export function defaultQuietHours(): QuietHours {
+  const tz =
+    (typeof Intl !== "undefined" && Intl.DateTimeFormat().resolvedOptions().timeZone) || "UTC";
+  return { enabled: false, startHour: 22, endHour: 8, timezone: tz };
+}
+
+/** Send quiet-hours preferences to the host. */
+export function pushQuietHours(client: RccClient, qh: QuietHours | null): void {
+  client.send({ v: 1, t: "push.preferences.set", quietHours: qh ?? undefined });
+}
 
 /**
  * Web Push client helper.
@@ -148,6 +197,7 @@ export async function enablePush(client: RccClient): Promise<PushState> {
     t: "push.subscribe",
     endpoint: sub.endpoint,
     keys: { p256dh, auth },
+    quietHours: getQuietHours() ?? undefined,
   });
   return { status: "granted-on", endpoint: sub.endpoint };
 }

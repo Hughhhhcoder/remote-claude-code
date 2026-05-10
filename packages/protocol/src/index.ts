@@ -1081,6 +1081,20 @@ export const PushPublicKey = z.object({
   key: z.string(),
 });
 
+// [B22-C] Per-device quiet-hours window. Enforced host-side before sending a
+// push: if "now" (in `timezone`) falls inside [startHour, endHour) the host
+// skips the subscription. Window wraps midnight when startHour > endHour
+// (e.g. 22 → 8). `timezone` is an IANA name; falls back to UTC if invalid.
+// FUTURE: severe alerts (crash/auth fail) should bypass the window; not yet
+// differentiated in B22-C.
+export const QuietHours = z.object({
+  enabled: z.boolean(),
+  startHour: z.number().int().min(0).max(23),
+  endHour: z.number().int().min(0).max(23),
+  timezone: z.string().max(64),
+});
+export type QuietHours = z.infer<typeof QuietHours>;
+
 export const PushSubscribe = z.object({
   ...base,
   t: z.literal("push.subscribe"),
@@ -1090,6 +1104,16 @@ export const PushSubscribe = z.object({
     auth: z.string(),
   }),
   deviceId: z.string().optional(),
+  /** [B22-C] Optional quiet-hours window to apply immediately on subscribe. */
+  quietHours: QuietHours.optional(),
+});
+
+export const PushPrefsSet = z.object({
+  ...base,
+  t: z.literal("push.preferences.set"),
+  /** If omitted, applies to every subscription owned by the current device. */
+  endpoint: z.string().optional(),
+  quietHours: QuietHours.optional(),
 });
 
 export const PushSubscribed = z.object({
@@ -2542,6 +2566,7 @@ export const Frame = z.discriminatedUnion("t", [
   PushUnsubscribe,
   PushUnsubscribed,
   PushTest,
+  PushPrefsSet,
   CrdtUpdate,
   CrdtSync,
   CrdtSyncRequest,

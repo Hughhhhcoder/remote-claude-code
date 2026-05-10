@@ -5,10 +5,18 @@ import { DEFAULT_CUSTOM_KEYS, decodeSendEscapes, encodeSendEscapes, type PrefsSt
 import { availableLocales, getLocale, setLocale, t } from "./i18n/index.ts";
 import { useTheme } from "./tokens/theme.ts";
 import { Toggle } from "./primitives/Toggle.tsx";
+import type { RccClient } from "./client.ts";
+import {
+  defaultQuietHours,
+  getQuietHours,
+  pushQuietHours,
+  setQuietHoursLocal,
+} from "./push.ts";
 
 type Props = {
   open: boolean;
   store: PrefsStore;
+  client: RccClient;
   onClose: () => void;
 };
 
@@ -55,6 +63,7 @@ export function SettingsModal(props: Props) {
             <AppearanceSection />
             <AccentSection store={props.store} />
             <FontScaleSection store={props.store} />
+            <QuietHoursSection client={props.client} />
             <KeysSection store={props.store} />
           </div>
 
@@ -242,6 +251,91 @@ function KeysSection(props: { store: PrefsStore }) {
             )}
           </For>
         </Show>
+      </div>
+    </section>
+  );
+}
+
+function QuietHoursSection(props: { client: RccClient }) {
+  const initial = getQuietHours() ?? defaultQuietHours();
+  const [enabled, setEnabled] = createSignal(initial.enabled);
+  const [startH, setStartH] = createSignal(initial.startHour);
+  const [endH, setEndH] = createSignal(initial.endHour);
+  const tz = initial.timezone;
+
+  function persistAndPush() {
+    const qh = {
+      enabled: enabled(),
+      startHour: startH(),
+      endHour: endH(),
+      timezone: tz,
+    };
+    setQuietHoursLocal(qh);
+    pushQuietHours(props.client, qh.enabled ? qh : null);
+  }
+
+  function parseHour(v: string, fallback: number): number {
+    // "HH:MM" — we only keep hour precision for the host window.
+    const m = /^(\d{1,2})/.exec(v);
+    if (!m) return fallback;
+    const h = parseInt(m[1]!, 10);
+    return Number.isFinite(h) && h >= 0 && h <= 23 ? h : fallback;
+  }
+
+  function fmt(h: number): string {
+    return `${String(h).padStart(2, "0")}:00`;
+  }
+
+  return (
+    <section>
+      <div class="text-[10px] uppercase tracking-widest text-zinc-500 mb-2">静音时段</div>
+      <div class="flex items-center justify-between gap-3 mb-2">
+        <div class="min-w-0">
+          <div class="text-sm text-zinc-200">启用静音时段</div>
+          <div class="text-[11px] text-zinc-500">
+            静音时段内仍会收到严重告警(主机崩溃、认证失败)
+          </div>
+        </div>
+        <Toggle
+          checked={enabled()}
+          onChange={(v) => {
+            setEnabled(v);
+            persistAndPush();
+          }}
+          aria-label="启用静音时段"
+        />
+      </div>
+      <div class="flex items-center gap-2 text-xs text-zinc-400">
+        <label class="flex items-center gap-1.5">
+          开始
+          <input
+            type="time"
+            step="3600"
+            value={fmt(startH())}
+            onChange={(e) => {
+              setStartH(parseHour(e.currentTarget.value, startH()));
+              persistAndPush();
+            }}
+            class="bg-zinc-900 border border-zinc-800 rounded px-2 py-1 text-zinc-200 font-mono focus:outline-none focus:border-accent-500"
+          />
+        </label>
+        <span class="text-zinc-600">→</span>
+        <label class="flex items-center gap-1.5">
+          结束
+          <input
+            type="time"
+            step="3600"
+            value={fmt(endH())}
+            onChange={(e) => {
+              setEndH(parseHour(e.currentTarget.value, endH()));
+              persistAndPush();
+            }}
+            class="bg-zinc-900 border border-zinc-800 rounded px-2 py-1 text-zinc-200 font-mono focus:outline-none focus:border-accent-500"
+          />
+        </label>
+        <span class="ml-auto text-[10px] text-zinc-600 truncate" title={tz}>
+          {tz}
+        </span>
       </div>
     </section>
   );

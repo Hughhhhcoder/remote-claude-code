@@ -16,11 +16,55 @@ import webpush, { type PushSubscription as WebPushSubscription } from "web-push"
  * exposed to clients (only `getPublicKey()` is safe to share).
  */
 
+export interface QuietHoursPref {
+  enabled: boolean;
+  startHour: number;
+  endHour: number;
+  timezone: string;
+}
+
 export interface PushSubRecord {
   deviceId: string | null;
   endpoint: string;
   keys: { p256dh: string; auth: string };
   createdAt: number;
+  /** [B22-C] Per-device quiet-hours window. Absent = no quiet hours. */
+  quietHours?: QuietHoursPref;
+}
+
+/**
+ * [B22-C] Returns the hour (0–23) in `timezone` at `now`. Falls back to UTC
+ * if Intl rejects the IANA name. Kept tiny — no caching, called once per
+ * sendOne() which is already an async push.
+ */
+function hourInTz(now: Date, timezone: string): number {
+  try {
+    const s = new Intl.DateTimeFormat("en-US", {
+      timeZone: timezone,
+      hour: "numeric",
+      hour12: false,
+    }).format(now);
+    // "14" or "24" (some Chromes emit 24 for midnight) — normalize.
+    const h = parseInt(s, 10);
+    if (Number.isFinite(h)) return h === 24 ? 0 : h;
+  } catch {
+    // fall through
+  }
+  return now.getUTCHours();
+}
+
+/**
+ * [B22-C] True iff `now` is inside the quiet-hours window. Handles both
+ * same-day (9 → 17) and wrap-around-midnight (22 → 8) configurations.
+ * A window where startHour === endHour is treated as disabled.
+ */
+export function isQuietNow(qh: QuietHoursPref | undefined, now: Date = new Date()): boolean {
+  if (!qh || !qh.enabled) return false;
+  if (qh.startHour === qh.endHour) return false;
+  const h = hourInTz(now, qh.timezone || "UTC");
+  return qh.startHour < qh.endHour
+    ? h >= qh.startHour && h < qh.endHour
+    : h >= qh.startHour || h < qh.endHour;
 }
 
 interface VapidConfig {
@@ -107,17 +151,47 @@ export class PushService {
     endpoint: string;
     keys: { p256dh: string; auth: string };
     deviceId?: string | null;
+    quietHours?: QuietHoursPref;
   }): Promise<void> {
     const existing = this.subs.findIndex((s) => s.endpoint === sub.endpoint);
+    const prev = existing >= 0 ? this.subs[existing] : undefined;
     const rec: PushSubRecord = {
       deviceId: sub.deviceId ?? null,
       endpoint: sub.endpoint,
       keys: { p256dh: sub.keys.p256dh, auth: sub.keys.auth },
-      createdAt: existing >= 0 ? this.subs[existing]!.createdAt : Date.now(),
+      createdAt: prev ? prev.createdAt : Date.now(),
+      // Preserve prior quietHours unless an explicit one is provided on resubscribe.
+      quietHours: sub.quietHours ?? prev?.quietHours,
     };
     if (existing >= 0) this.subs[existing] = rec;
     else this.subs.push(rec);
     await this.persist();
+  }
+
+  /**
+   * [B22-C] Apply quiet-hours preferences. If `endpoint` is provided, updates
+   * only that sub; otherwise updates every sub owned by `deviceId` (or all
+   * subs when deviceId is null — loopback). Pass `quietHours: undefined` to
+   * clear. Returns the number of subs mutated.
+   */
+  async setPrefs(opts: {
+    endpoint?: string;
+    deviceId?: string | null;
+    quietHours?: QuietHoursPref;
+  }): Promise<number> {
+    let mutated = 0;
+    for (const s of this.subs) {
+      const match = opts.endpoint
+        ? s.endpoint === opts.endpoint
+        : opts.deviceId
+          ? s.deviceId === opts.deviceId
+          : true;
+      if (!match) continue;
+      s.quietHours = opts.quietHours;
+      mutated++;
+    }
+    if (mutated > 0) await this.persist();
+    return mutated;
   }
 
   async unsubscribe(endpoint: string): Promise<boolean> {
@@ -138,6 +212,9 @@ export class PushService {
 
   /** Send to a single subscription; auto-prune on 404/410. */
   async sendOne(sub: PushSubRecord, payload: PushPayload): Promise<boolean> {
+    // [B22-C] Respect the subscription's quiet-hours window. Currently blanket
+    // — severe alerts (crash / auth fail) should bypass this in a later batch.
+    if (isQuietNow(sub.quietHours)) return false;
     const pushSub: WebPushSubscription = {
       endpoint: sub.endpoint,
       keys: { p256dh: sub.keys.p256dh, auth: sub.keys.auth },

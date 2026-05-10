@@ -34,6 +34,7 @@ const StartersTab    = lazy(() => import("../StartersTab.tsx").then((m) => ({ de
 const WorkflowsTab   = lazy(() => import("../WorkflowsTab.tsx").then((m) => ({ default: m.WorkflowsTab })));
 const PromptsTab     = lazy(() => import("../PromptsTab.tsx").then((m) => ({ default: m.PromptsTab })));
 const PluginsTab     = lazy(() => import("../PluginsTab.tsx").then((m) => ({ default: m.PluginsTab })));
+const NotificationsTab = lazy(() => import("../push/PushSettingsPane.tsx").then((m) => ({ default: m.PushSettingsPane })));
 
 export interface SettingsPaneProps {
   client: RccClient;
@@ -244,6 +245,7 @@ export function SettingsPane(props: SettingsPaneProps): JSX.Element {
                 </Match>
                 <Match when={active() === "prompts"}><PromptsTab client={props.client} /></Match>
                 <Match when={active() === "plugins"}><PluginsTab client={props.client} /></Match>
+                <Match when={active() === "notifications"}><NotificationsTab client={props.client} /></Match>
               </Switch>
             </Suspense>
           </div>
