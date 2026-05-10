@@ -20,7 +20,7 @@ import {
 } from "@anthropic-ai/claude-agent-sdk";
 import { ChatParser } from "./chat-parser.ts";
 import { RingBuffer } from "./ring-buffer.ts";
-import type { BufferedChunk, ExitListener, SessionListener } from "./session.ts";
+import type { BufferedChatFrame, BufferedChunk, ExitListener, SessionListener } from "./session.ts";
 import { usage } from "./usage.ts";
 
 /**
@@ -51,6 +51,12 @@ export class SdkSession {
   exitCode: number | null = null;
 
   readonly chat: ChatParser;
+
+  // [B13-B] Per-session chat-frame seq + ring buffer — see Session.ts for
+  // the design note. Mirrored here so SDK-driver reconnects get the same
+  // seq-based replay protocol CLI sessions do.
+  private chatFrameSeqCounter = 0;
+  private readonly recentChatFrames = new RingBuffer<BufferedChatFrame>(500);
 
   // BufferedChunk subscribers are kept for API parity with Session — SDK
   // sessions don't stream raw bytes, but new clients still call subscribe()
@@ -193,6 +199,29 @@ export class SdkSession {
     if (since === null || since < 0) return this.buffer.since(-1) ?? [];
     const tail = this.buffer.since(since);
     return tail ?? this.buffer.since(-1) ?? [];
+  }
+
+  // [B13-B] See Session.replayChatFrames — parallel impl for SDK-driver.
+  nextChatFrameSeq(): number {
+    return ++this.chatFrameSeqCounter;
+  }
+
+  recordChatFrame(entry: BufferedChatFrame): void {
+    this.recentChatFrames.push(entry);
+  }
+
+  get currentChatFrameSeq(): number {
+    return this.chatFrameSeqCounter;
+  }
+
+  replayChatFrames(since: number): { frames: BufferedChatFrame[]; lostCount: number } {
+    const current = this.chatFrameSeqCounter;
+    if (since >= current) return { frames: [], lostCount: 0 };
+    const tail = this.recentChatFrames.since(since);
+    if (tail === null) {
+      return { frames: [], lostCount: current - since };
+    }
+    return { frames: tail, lostCount: 0 };
   }
 
   kill(): void {

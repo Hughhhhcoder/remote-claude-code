@@ -12,6 +12,7 @@ import {
 import type { ChatMessage } from "@rcc/protocol";
 import { useChatPane } from "./ChatPane";
 import { MessageRow } from "./MessageRow";
+import { estimateMessageSize, HEAVY_MESSAGE_BYTES } from "./MessageList.perf";
 
 export interface MessageListProps {
   messages: ChatMessage[];
@@ -23,6 +24,9 @@ export interface MessageListProps {
 const WINDOW_STEP = 200;
 const BOTTOM_THRESHOLD = 32;
 const GROUP_WINDOW_MS = 60_000;
+/** Messages within the last N of the visible window always render in full, even
+ *  if "heavy" — users are most likely to read recent output. */
+const ACTIVE_TAIL = 20;
 
 export function MessageList(props: MessageListProps): JSX.Element {
   const pane = useChatPane();
@@ -30,11 +34,15 @@ export function MessageList(props: MessageListProps): JSX.Element {
 
   // --- Windowing state ----------------------------------------------------
   const [windowSize, setWindowSize] = createSignal(WINDOW_STEP);
+  // User-expanded heavy-message overrides (persist across re-renders while
+  // the session is open).
+  const [expandedIds, setExpandedIds] = createSignal<Set<string>>(new Set());
 
   // Reset window when sid changes (switching sessions).
   createEffect(() => {
     pane?.sid();
     setWindowSize(WINDOW_STEP);
+    setExpandedIds(new Set<string>());
   });
 
   const visibleMessages = (): ChatMessage[] => {
@@ -61,19 +69,29 @@ export function MessageList(props: MessageListProps): JSX.Element {
     queueMicrotask(() => el.scrollTo({ top: el.scrollHeight }));
   };
 
-  // Wire scroll listener when the scrollEl becomes available.
+  // Wire scroll listener when the scrollEl becomes available. The listener
+  // is rAF-throttled so fast-flicks don't spam scrollTop/scrollHeight reads.
   createEffect(() => {
     const el = scrollEl();
     if (!el) return;
-    const onScroll = (): void => {
+    let rafId = 0;
+    const tick = (): void => {
+      rafId = 0;
       const bottom = isAtBottom(el);
       setAtBottom(bottom);
       if (bottom) setNewCount(0);
     };
+    const onScroll = (): void => {
+      if (rafId !== 0) return;
+      rafId = requestAnimationFrame(tick);
+    };
     el.addEventListener("scroll", onScroll, { passive: true });
-    // Prime state on mount.
-    onScroll();
-    onCleanup(() => el.removeEventListener("scroll", onScroll));
+    // Prime state on mount (sync, no rAF needed).
+    tick();
+    onCleanup(() => {
+      el.removeEventListener("scroll", onScroll);
+      if (rafId !== 0) cancelAnimationFrame(rafId);
+    });
   });
 
   // Autoscroll on append: track length and react when it grows.
@@ -112,6 +130,27 @@ export function MessageList(props: MessageListProps): JSX.Element {
     scrollToBottom();
   };
 
+  // --- Expand-older with scroll anchoring --------------------------------
+  const onExpandOlder = (): void => {
+    const el = scrollEl();
+    const savedDistance = el ? el.scrollHeight - el.scrollTop : 0;
+    setWindowSize((w) => w + WINDOW_STEP);
+    if (!el) return;
+    queueMicrotask(() => {
+      // After the DOM grows upward, restore visual position by keeping the
+      // same distance from the bottom of the scroll region.
+      el.scrollTop = el.scrollHeight - savedDistance;
+    });
+  };
+
+  const expandHeavy = (id: string): void => {
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      next.add(id);
+      return next;
+    });
+  };
+
   // --- Render -------------------------------------------------------------
   return (
     <div class="relative">
@@ -124,7 +163,7 @@ export function MessageList(props: MessageListProps): JSX.Element {
           <button
             type="button"
             class="text-xs text-text-secondary hover:text-text-primary border border-border-subtle rounded-full px-3 py-1.5 bg-bg-surface"
-            onClick={() => setWindowSize((w) => w + WINDOW_STEP)}
+            onClick={onExpandOlder}
           >
             显示更早消息 ({hiddenCount()})
           </button>
@@ -135,19 +174,37 @@ export function MessageList(props: MessageListProps): JSX.Element {
         <For each={visibleMessages()}>
           {(msg, i) => {
             const list = visibleMessages();
-            const last = i() === list.length - 1;
-            const followup = isFollowup(list, i());
+            const idx = i();
+            const last = idx === list.length - 1;
+            const followup = isFollowup(list, idx);
+            const inActiveTail = idx >= list.length - ACTIVE_TAIL;
+            const size = estimateMessageSize(msg);
+            const heavy = size > HEAVY_MESSAGE_BYTES;
+            const collapsed = heavy && !inActiveTail && !expandedIds().has(msg.id);
             // Extended contract (P4-C): pass optional `isFollowup` hint via
             // spread so we don't break typecheck if P4-C hasn't added the
             // prop yet (Solid tolerates unknown DOM-ish props on components).
             const extra = { isFollowup: followup } as Record<string, unknown>;
             return (
-              <MessageRow
-                msg={msg}
-                onPin={props.onPinToNotebook}
-                isLast={last}
-                {...extra}
-              />
+              <Show
+                when={!collapsed}
+                fallback={
+                  <button
+                    type="button"
+                    onClick={() => expandHeavy(msg.id)}
+                    class="my-6 py-2 px-3 rounded border border-border-subtle bg-bg-surface text-[11px] text-text-muted font-mono block w-full text-left hover:text-text-secondary"
+                  >
+                    [折叠] 历史消息 · {size} bytes · 点击展开
+                  </button>
+                }
+              >
+                <MessageRow
+                  msg={msg}
+                  onPin={props.onPinToNotebook}
+                  isLast={last}
+                  {...extra}
+                />
+              </Show>
             );
           }}
         </For>

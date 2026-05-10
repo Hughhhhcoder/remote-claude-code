@@ -10,9 +10,26 @@ import { Recorder } from "./recording.ts";
 
 const RING_TAIL_BYTES = 32 * 1024;
 
+// [B13-B] How many recent chat.append/update/delta frames to retain per
+// session for reconnect replay. 500 is ~a few minutes of heavy streaming;
+// anything older forces the client to do a full chat.list re-hydration.
+const CHAT_FRAME_RING_CAPACITY = 500;
+
 export interface BufferedChunk {
   seq: number;
   data: string;
+}
+
+/**
+ * [B13-B] A chat.* frame the host already emitted to subscribers, tagged
+ * with its per-session monotonic seq so reconnecting clients can diff from
+ * the seq they last saw.
+ */
+export interface BufferedChatFrame {
+  seq: number;
+  frame: import("@rcc/protocol").ChatAppend
+    | import("@rcc/protocol").ChatUpdate
+    | import("@rcc/protocol").ChatDelta;
 }
 
 export type SessionListener = (chunk: BufferedChunk) => void;
@@ -60,6 +77,14 @@ export class Session {
   // [messages] — heuristic semantic-chat parser. Feeds off pty output;
   // assistant messages surface via chat.append broadcasts in host/index.ts.
   readonly chat: ChatParser;
+
+  // [B13-B] Per-session monotonic chat-frame seq + ring buffer. Stamped on
+  // every outgoing chat.append/update/delta by attachChatBroadcast so a
+  // reconnecting client can ask for everything after its last-seen seq.
+  private chatFrameSeqCounter = 0;
+  private readonly recentChatFrames = new RingBuffer<BufferedChatFrame>(
+    CHAT_FRAME_RING_CAPACITY,
+  );
 
   constructor(opts: {
     command: string;
@@ -184,6 +209,41 @@ export class Session {
       return this.buffer.since(-1) ?? [];
     }
     return tail;
+  }
+
+  /** [B13-B] Reserve the next per-session chat-frame seq. */
+  nextChatFrameSeq(): number {
+    return ++this.chatFrameSeqCounter;
+  }
+
+  /** [B13-B] Retain an already-broadcast chat.* frame for reconnect replay. */
+  recordChatFrame(entry: BufferedChatFrame): void {
+    this.recentChatFrames.push(entry);
+  }
+
+  /** [B13-B] Current value of the chat-frame seq counter. */
+  get currentChatFrameSeq(): number {
+    return this.chatFrameSeqCounter;
+  }
+
+  /**
+   * [B13-B] Replay chat frames strictly after `since`. Returns:
+   *  - `{ frames, lostCount: 0 }` when the ring still covers `since`
+   *    (includes the no-op case `since === currentChatFrameSeq` → `[]`).
+   *  - `{ frames: [], lostCount: currentSeq - since }` when the client is too
+   *    far behind and should re-hydrate via `chat.list.request`.
+   *
+   * `since <= 0` on a session with zero emitted frames returns an empty
+   * replay without flagging loss (fresh attach has nothing to miss).
+   */
+  replayChatFrames(since: number): { frames: BufferedChatFrame[]; lostCount: number } {
+    const current = this.chatFrameSeqCounter;
+    if (since >= current) return { frames: [], lostCount: 0 };
+    const tail = this.recentChatFrames.since(since);
+    if (tail === null) {
+      return { frames: [], lostCount: current - since };
+    }
+    return { frames: tail, lostCount: 0 };
   }
 
   kill(): void {
@@ -328,6 +388,25 @@ export class DeadSession {
   replay(_since: number | null): BufferedChunk[] {
     if (!this._ringTail) return [];
     return [{ seq: 0, data: this._ringTail }];
+  }
+
+  // [B13-B] Dead sessions never emit chat frames (no pty, no SDK query, no
+  // attachChatBroadcast) so the seq counter stays at 0 and the replay is
+  // always empty with no perceived loss.
+  nextChatFrameSeq(): number {
+    return 0;
+  }
+
+  recordChatFrame(_entry: BufferedChatFrame): void {
+    // no-op
+  }
+
+  get currentChatFrameSeq(): number {
+    return 0;
+  }
+
+  replayChatFrames(_since: number): { frames: BufferedChatFrame[]; lostCount: number } {
+    return { frames: [], lostCount: 0 };
   }
 
   kill(): void {

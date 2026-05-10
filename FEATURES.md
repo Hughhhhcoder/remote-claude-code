@@ -318,9 +318,30 @@
 **batch 12 验收**: 5 文件合计 +287 行;`pnpm -r typecheck` ✅;`pnpm -F @rcc/web build` ✅。CLI 会话 chat 消费路径完整(delta + confirm + collapse),视觉与 SDK 路径一致。不打 tag。
 
 **batch 13** · 边界 case:
-- B13-A ANSI escape / cursor control 残留剥离测试
-- B13-B 中断恢复(session 重连后补帧)
-- B13-C 大 session(>10MB history)滚动流畅
+- B13-A ANSI escape / cursor control 残留剥离测试 ⏸ (batch 13 · 2026-05-10 · **deferred**)
+  - 执行时发现:**整个 monorepo 无任何测试基础设施** —— 无 vitest / jest / node:test fixture;root / 4 包的 `package.json` 均无 `test` script;`pnpm-lock.yaml` 也无 vitest 条目;`which vitest` 找不到 binary。agent 按 B11 批次明令"不加新 npm dep"规则停摆,不自行拉 vitest。
+  - 继续推进的选项,待用户决定:
+    1. 单独一个 batch 加 vitest devDep + CI 脚本接入;
+    2. 用 Node 20 内建 `node --test`(node:test)零新 dep 跑同样测试;
+    3. 进一步推到 Phase 22 batch 47 用户测试循环一起做。
+  - 目前 chat-parser v2 的 ANSI / 状态机 / onDelta 语义**无自动回归保护**,靠手测 + 代码 review 兜底。不影响本 batch 的其它产物接收。
+- B13-B 中断恢复(session 重连后补帧) ✅ (batch 13 · 2026-05-10)
+  - 协议(加法式,不破坏旧客户端):`ChatAppend` / `ChatUpdate` / `ChatDelta` 各加一个可选 `seq?: number`(host 在 broadcast 时盖章);`SessionAttach` 加可选 `chatSince?: number`(区别于 pty 的 `since`);新增 `ChatReplay { sid, frames: (ChatAppend|ChatUpdate|ChatDelta)[], lostCount: number }` 帧。类型已 `export type ChatAppend/ChatUpdate/ChatReplay`。
+  - `packages/host/src/session.ts`(+65 LOC):新增常量 `CHAT_FRAME_RING_CAPACITY = 500`、`interface BufferedChatFrame`,`Session` 里加私有 `chatFrameSeqCounter`(从 0 单调递增)+ `recentChatFrames: RingBuffer<BufferedChatFrame>(500)`,公开 `nextChatFrameSeq()` / `recordChatFrame(entry)` / `get currentChatFrameSeq` / `replayChatFrames(since)` 四个方法;`DeadSession` 提供 no-op 同名方法(seq 恒为 0,replay 返回 `{frames:[], lostCount:0}`)。
+  - `packages/host/src/sdk-session.ts`(+25 LOC):并行实现同一组方法,保证 SDK 驱动重连路径与 CLI 一致。
+  - `packages/host/src/index.ts`:`attachChatBroadcast` 的三个回调(`onMessage`/`onUpdate`/`onDelta`)每次广播前 `nextChatFrameSeq()`→在 frame 上附 `seq`→`recordChatFrame({seq, frame})`→`broadcast(frame)`(+~50 LOC)。`session.attach` 两处 handler(已鉴权 + share-guest)当活 session 且 `frame.chatSince != null` 时,调 `s.replayChatFrames(chatSince)`,发 `{t:"chat.replay", sid, frames: replay.frames.map(f=>f.frame), lostCount}` (+~30 LOC);`isFrameAllowedForShare` 加 `chat.replay` 白名单。
+  - `packages/web/src/chat/streaming.ts`:仅在顶部加注释描述 B13-B 契约("NOT YET WIRED — future Phase 8 batch 14")。
+  - 边界:`chatSince === 0` 且 session 无聊天历史 → `{frames:[], lostCount:0}`(seq 起始 0 所以 `since >= current` 立即命中 no-op);`chatSince < oldest` → `{frames:[], lostCount: current-since}`,客户端应 fall back 到 `chat.list.request`;DeadSession 走既有 `chat.list` 全量路径(未从 ring 补帧)。
+  - Web 客户端未消费 `chat.replay`(留给 Phase 8 batch 14)—— 老 host 省略 `seq`,老 client 忽略 `seq`,完全向后兼容。
+  - `pnpm -r typecheck` ✅。
+- B13-C 大 session(>10MB history)滚动流畅 ✅ (batch 13 · 2026-05-10)
+  - 新增 `packages/web/src/chat/MessageList.perf.ts`(43 行):`estimateMessageSize(m)` 汇总各 segment `.content` 长度 + 每 segment 200 字节元数据开销;`HEAVY_MESSAGE_BYTES = 64 * 1024` 作为行级折叠阈值。
+  - `MessageList.tsx` 171 → 228(+57):新增 `expandedIds: Set<string>` signal,可见窗内 **不在最后 20 条 `ACTIVE_TAIL`** 且 `estimateMessageSize > 64KB` 的消息渲染为 `[折叠] 历史消息 · {size} bytes · 点击展开` placeholder(点击加入 `expandedIds` 展开成完整 `MessageRow`)。与 B12-C 的 block 级折叠正交互补。
+  - "显示更早消息" 按钮加滚动锚:展开前 `savedDistance = scrollHeight - scrollTop`,展开后 `queueMicrotask` 内 `scrollTop = scrollHeight - savedDistance`,修正批次 4 遗留的"窗口上扩后视口被向下推"问题。
+  - `onScroll` 改 rAF throttle(同 frame 内多次 scroll 事件合并为一次 `tick()`,`cancelAnimationFrame` 在 cleanup 里取消挂起),快速 flick 时的 `scrollTop` / `scrollHeight` 读取从 O(events) 降到 O(frames)。
+  - 切 session 时同时 reset `windowSize` 与 `expandedIds`(新 `Set<string>()`,避免 TS `Set<unknown>` 推断)。
+  - 新增 `packages/web/src/chat/__fixtures__/generateLargeHistory.ts`(80 行):dev-only 纯函数 `generateLargeHistory(sid, count)`,文件顶部注释标明 **不接入 prod 路径**。混合 text + code + diff + tool_use,每 37 条一条 heavy(~100KB)压测行级折叠路径;10k 调用产出约 10MB。
+  - 未动 `MessageRow.tsx` / `blocks/*` / 其他任何文件。`pnpm -F @rcc/web typecheck` ✅;`pnpm -F @rcc/web build` ✅。
 
 **验收**: 真 `claude` CLI session 里的消息和 SDK session 视觉一致。tag `v0.1.8`。
 

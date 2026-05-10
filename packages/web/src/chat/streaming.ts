@@ -12,6 +12,21 @@
 // chat.update is an "override" that wins over previous content; deltas
 // queued in the same tick still apply on top of it.
 //
+// [B13-B] Host-side reconnect replay contract (NOT YET WIRED — future Phase 8
+// batch 14). Every chat.append / chat.update / chat.delta frame now carries
+// an optional `seq: number` (monotonic per sid). On WS reconnect the client
+// should:
+//   1. Track the last `seq` it saw for each sid,
+//   2. Send `session.attach { sid, chatSince: <lastSeq> }` on reattach,
+//   3. Expect a `chat.replay { frames, lostCount }` frame — apply `frames`
+//      in order as if they arrived live. When `lostCount > 0`, fall back to
+//      `chat.list.request` for a full re-hydration. When `frames` is empty
+//      and `lostCount === 0`, nothing was missed.
+// This keeps transcripts consistent across transient disconnects without
+// re-rendering the whole message list. Old hosts simply omit `seq` and the
+// client should ignore the upgrade path — plain `chat.list` remains the
+// safety net.
+//
 // This module is pure data reactivity — no JSX. MessageRow handles the
 // blinking-cursor affordance based on `ChatMessage.streaming`.
 import type { ChatMessage, ChatSegment, Frame } from "@rcc/protocol";

@@ -646,21 +646,38 @@ function attachApprovalWatcher(session: AnySession): void {
 // [messages] Bridge each session's ChatParser to a websocket broadcast so
 // every attached client sees assistant messages as they're classified.
 function attachChatBroadcast(session: AnySession): void {
+  // [B13-B] Every chat.* broadcast is stamped with a per-session monotonic
+  // seq and pushed into the session's recent-frames ring. A reconnecting
+  // client passes its last-seen seq via `session.attach.chatSince` and the
+  // host replies with `chat.replay` to fill the gap.
   const unsub = session.chat.onMessage((message) => {
     metrics.incr("chat.msgs");
     indexChatAppend(session, message);
-    broadcast({ v: 1, t: "chat.append", sid: session.id, message });
+    const seq = session.nextChatFrameSeq();
+    const frame: import("@rcc/protocol").ChatAppend = {
+      v: 1,
+      t: "chat.append",
+      sid: session.id,
+      message,
+      seq,
+    };
+    session.recordChatFrame({ seq, frame });
+    broadcast(frame);
   });
   // SDK driver also fires streaming segment updates; CLI driver never does.
   const unsubUpdate = session.chat.onUpdate((messageId, segmentIndex, segment) => {
-    broadcast({
+    const seq = session.nextChatFrameSeq();
+    const frame: import("@rcc/protocol").ChatUpdate = {
       v: 1,
       t: "chat.update",
       sid: session.id,
       messageId,
       segmentIndex,
       segment,
-    });
+      seq,
+    };
+    session.recordChatFrame({ seq, frame });
+    broadcast(frame);
   });
   // [B11-C] Fine-grained text-append deltas. Fires in addition to chat.update
   // for text segments that grow via pure append; lets future web-client
@@ -668,14 +685,18 @@ function attachChatBroadcast(session: AnySession): void {
   // chat.update above remains the authoritative safety net for any client
   // that hasn't yet been wired to consume chat.delta.
   const unsubDelta = session.chat.onDelta((messageId, segmentIndex, textDelta) => {
-    broadcast({
+    const seq = session.nextChatFrameSeq();
+    const frame: import("@rcc/protocol").ChatDelta = {
       v: 1,
       t: "chat.delta",
       sid: session.id,
       messageId,
       segmentIndex,
       textDelta,
-    });
+      seq,
+    };
+    session.recordChatFrame({ seq, frame });
+    broadcast(frame);
   });
   session.onExit(() => {
     unsub();
@@ -1077,6 +1098,7 @@ function isFrameAllowedForShare(frame: Frame, sid: string): boolean {
     case "chat.update":
     case "chat.delta":
     case "chat.list":
+    case "chat.replay":
     case "chat.resetted":
     case "pty.out":
     case "session.exited":
@@ -1127,6 +1149,16 @@ function handle(ws: WebSocket, state: WsState, frame: Frame): void {
         if (!s) return;
         if (s instanceof DeadSession) {
           send(ws, { v: 1, t: "chat.list", sid: s.id, messages: s.chat.list() });
+        } else if (typeof frame.chatSince === "number") {
+          // [B13-B] Same delta-replay path as the authenticated handler.
+          const replay = s.replayChatFrames(frame.chatSince);
+          send(ws, {
+            v: 1,
+            t: "chat.replay",
+            sid: s.id,
+            frames: replay.frames.map((f) => f.frame),
+            lostCount: replay.lostCount,
+          });
         }
         attach(ws, state, s, frame.since ?? null);
         return;
@@ -1288,6 +1320,19 @@ function handle(ws: WebSocket, state: WsState, frame: Frame): void {
       // clients see the full timeline without a separate chat.list.request.
       if (s instanceof DeadSession) {
         send(ws, { v: 1, t: "chat.list", sid: s.id, messages: s.chat.list() });
+      } else if (typeof frame.chatSince === "number") {
+        // [B13-B] Live session + client has a chat-frame cursor — send the
+        // delta since that seq so the transcript catches up without a full
+        // chat.list re-render. lostCount > 0 signals a ring-buffer miss and
+        // the client falls back to chat.list.request on its own.
+        const replay = s.replayChatFrames(frame.chatSince);
+        send(ws, {
+          v: 1,
+          t: "chat.replay",
+          sid: s.id,
+          frames: replay.frames.map((f) => f.frame),
+          lostCount: replay.lostCount,
+        });
       }
       attach(ws, state, s, frame.since ?? null);
       return;

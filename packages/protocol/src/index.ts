@@ -361,8 +361,15 @@ export const SessionAttach = z.object({
   ...base,
   t: z.literal("session.attach"),
   sid: z.string(),
-  /** last-seen seq; omit or pass null to receive full replay */
+  /** last-seen pty.out seq; omit or pass null to receive full replay */
   since: z.number().int().nonnegative().nullish(),
+  /**
+   * [B13-B] last-seen chat-frame seq. When set, host replies with a
+   * `chat.replay` carrying any chat.append/update/delta frames the client
+   * missed since then instead of a full `chat.list` re-hydration. Optional
+   * for back-compat — old clients omit it and still get chat.list as before.
+   */
+  chatSince: z.number().int().nonnegative().nullish(),
 });
 
 export const SessionClose = z.object({
@@ -1206,7 +1213,15 @@ export const ChatAppend = z.object({
   t: z.literal("chat.append"),
   sid: z.string(),
   message: ChatMessage,
+  /**
+   * [B13-B] Monotonic per-session chat-frame sequence number, stamped by the
+   * host at broadcast time. Lets reconnecting clients ask for everything
+   * since a known seq via `session.attach { chatSince }` → `chat.replay`.
+   * Optional for back-compat; old hosts omit it and old clients ignore it.
+   */
+  seq: z.number().int().nonnegative().optional(),
 });
+export type ChatAppend = z.infer<typeof ChatAppend>;
 
 // [sdk-driver] Incremental segment patch for an already-appended streaming
 // message. The SDK driver sends one `chat.append` with streaming:true when a
@@ -1221,7 +1236,10 @@ export const ChatUpdate = z.object({
   messageId: z.string(),
   segmentIndex: z.number().int().nonnegative(),
   segment: ChatSegment,
+  /** [B13-B] See ChatAppend.seq. */
+  seq: z.number().int().nonnegative().optional(),
 });
+export type ChatUpdate = z.infer<typeof ChatUpdate>;
 
 // [B11-B] Incremental text append for an in-flight streaming text segment.
 // Unlike chat.update (which replaces the whole segment), chat.delta APPENDS
@@ -1239,8 +1257,32 @@ export const ChatDelta = z.object({
   segmentIndex: z.number().int().nonnegative(),
   /** New text bytes to APPEND to segments[segmentIndex].content. */
   textDelta: z.string(),
+  /** [B13-B] See ChatAppend.seq. */
+  seq: z.number().int().nonnegative().optional(),
 });
 export type ChatDelta = z.infer<typeof ChatDelta>;
+
+// [B13-B] Catch-up frame the host sends in response to `session.attach`
+// carrying a `chatSince` hint. `frames` is the array of chat.append /
+// chat.update / chat.delta frames emitted for this sid whose seq is strictly
+// greater than chatSince — in the original emission order. When `lostCount`
+// is > 0 the requested `chatSince` was older than the ring buffer's oldest
+// retained entry, so `frames` will be empty and the client should fall back
+// to a full `chat.list.request`.
+//
+// Edge case: chatSince === current seq (or session has 0 emitted frames)
+// returns { frames: [], lostCount: 0 } — effectively a liveness ack.
+export const ChatReplayFrame = z.union([ChatAppend, ChatUpdate, ChatDelta]);
+export type ChatReplayFrame = z.infer<typeof ChatReplayFrame>;
+
+export const ChatReplay = z.object({
+  ...base,
+  t: z.literal("chat.replay"),
+  sid: z.string(),
+  frames: z.array(ChatReplayFrame),
+  lostCount: z.number().int().nonnegative(),
+});
+export type ChatReplay = z.infer<typeof ChatReplay>;
 
 export const ChatReset = z.object({
   ...base,
@@ -2483,6 +2525,7 @@ export const Frame = z.discriminatedUnion("t", [
   ChatAppend,
   ChatUpdate,
   ChatDelta,
+  ChatReplay,
   ChatReset,
   ChatResetted,
   PushPublicKeyRequest,
