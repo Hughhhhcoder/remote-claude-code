@@ -1633,6 +1633,13 @@ export const UiPrefs = z.object({
   fontScale: z.number().min(0.8).max(1.4).default(1.0),
   customKeys: z.array(UiCustomKey).max(32).default([]),
   theme: UiTheme.default("dark"),
+  /**
+   * [B27-B] Auto-expand `thinking` segments in the chat. Default false so
+   * ThinkingBlock collapses to a small chip; flipping to true renders the
+   * thought content inline without a user click. Optional-by-default for
+   * back-compat — old hosts / persisted prefs omit the field entirely.
+   */
+  showThinking: z.boolean().default(false),
 });
 export type UiPrefs = z.infer<typeof UiPrefs>;
 

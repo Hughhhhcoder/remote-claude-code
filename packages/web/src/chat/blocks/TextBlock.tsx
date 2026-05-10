@@ -1,4 +1,5 @@
 import { createMemo, createSignal, createUniqueId, For, Show, type JSX } from "solid-js";
+import { CitationPreview } from "./CitationPreview";
 
 /**
  * TextBlock — renders a "text" segment of a ChatMessage as lightly-formatted
@@ -30,7 +31,7 @@ type Inline =
   | { kind: "italic"; value: string }
   | { kind: "link"; text: string; href: string };
 
-const LINK_RE = /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g;
+const LINK_RE = /\[([^\]]+)\]\(([^\s)]+)\)/g;
 const CODE_RE = /`([^`\n]+)`/g;
 const BOLD_RE = /\*\*([^*\n]+)\*\*/g;
 const ITALIC_RE = /(?:\*([^*\n]+)\*|_([^_\n]+)_)/g;
@@ -77,7 +78,10 @@ function tokenizeInline(src: string): Inline[] {
   pass(CODE_RE, (m) => ({ kind: "code", value: m[1] }));
   pass(LINK_RE, (m) => {
     const href = m[2];
-    if (!/^https?:\/\//i.test(href)) return null;
+    // Accept http(s), in-page anchors, and relative/absolute paths. Reject
+    // only clearly-unsafe schemes (javascript:, data:) so a CitationPreview
+    // tap can't execute script.
+    if (/^(javascript|data|vbscript):/i.test(href)) return null;
     return { kind: "link", text: m[1], href };
   });
   pass(BOLD_RE, (m) => ({ kind: "bold", value: m[1] }));
@@ -121,16 +125,7 @@ function renderInline(node: Inline): JSX.Element {
     case "italic":
       return <em>{node.value}</em>;
     case "link":
-      return (
-        <a
-          href={node.href}
-          target="_blank"
-          rel="noopener noreferrer"
-          class="text-accent hover:text-accent-hover underline underline-offset-2"
-        >
-          {node.text}
-        </a>
-      );
+      return <CitationPreview href={node.href} text={node.text} />;
   }
 }
 

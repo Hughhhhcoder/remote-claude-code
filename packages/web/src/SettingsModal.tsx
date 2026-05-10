@@ -61,6 +61,7 @@ export function SettingsModal(props: Props) {
           <div class="p-5 space-y-6">
             <LanguageSection />
             <AppearanceSection />
+            <ShowThinkingSection store={props.store} />
             <AccentSection store={props.store} />
             <FontScaleSection store={props.store} />
             <QuietHoursSection client={props.client} />
@@ -118,6 +119,34 @@ function AppearanceSection() {
           checked={highContrast()}
           onChange={setHighContrast}
           aria-label={t("settings.highContrast")}
+        />
+      </div>
+    </section>
+  );
+}
+
+/**
+ * [B27-B] Toggle whether Claude's extended-thinking segments auto-expand on
+ * mount. Default off — users see a collapsed chip and click to reveal. When
+ * on, every newly rendered thinking block mounts expanded.
+ */
+function ShowThinkingSection(props: { store: PrefsStore }) {
+  return (
+    <section>
+      <div class="text-[10px] uppercase tracking-widest text-zinc-500 mb-2">
+        思考片段
+      </div>
+      <div class="flex items-center justify-between gap-3">
+        <div class="min-w-0">
+          <div class="text-sm text-zinc-200">总是展开思考</div>
+          <div class="text-[11px] text-zinc-500">
+            关闭时,思考片段以 💭 小芯片形式折叠;点击展开查看内容。
+          </div>
+        </div>
+        <Toggle
+          checked={props.store.prefs().showThinking === true}
+          onChange={(v) => props.store.update({ showThinking: v })}
+          aria-label="总是展开思考"
         />
       </div>
     </section>

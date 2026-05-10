@@ -10,6 +10,7 @@ import type { ChatMessage, ChatSegment } from "@rcc/protocol";
 import { IconButton } from "../primitives/IconButton";
 import { TextBlock } from "./blocks/TextBlock";
 import { CodeBlock } from "./blocks/CodeBlock";
+import { ThinkingBlock } from "./blocks/ThinkingBlock";
 import { MessageActionSheet, type MessageAction } from "./MessageActionSheet";
 
 /**
@@ -119,10 +120,17 @@ function SegmentView(props: { seg: ChatSegment }): JSX.Element {
         <Show
           when={seg().kind === "code"}
           fallback={
-            <div class="my-2 rounded-md border border-border-subtle bg-bg-surface p-3 text-xs font-mono text-text-secondary">
-              [{seg().kind}]{" "}
-              {((seg() as { content?: string }).content ?? "").slice(0, 120)}
-            </div>
+            <Show
+              when={seg().kind === "thinking"}
+              fallback={
+                <div class="my-2 rounded-md border border-border-subtle bg-bg-surface p-3 text-xs font-mono text-text-secondary">
+                  [{seg().kind}]{" "}
+                  {((seg() as { content?: string }).content ?? "").slice(0, 120)}
+                </div>
+              }
+            >
+              <ThinkingBlock content={(seg() as { content: string }).content} />
+            </Show>
           }
         >
           <CodeBlock
