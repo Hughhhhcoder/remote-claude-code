@@ -29,8 +29,10 @@ import { AppShell } from "./shell/AppShell.tsx";
 import { Sidebar } from "./shell/Sidebar.tsx";
 import { TopBar } from "./shell/TopBar.tsx";
 import { TabNav } from "./shell/TabNav.tsx";
+import { ConnectionBanner } from "./shell/ConnectionBanner.tsx";
 import { useIsCompact } from "./hooks/useMediaQuery.ts";
 import { EmptyState } from "./primitives/EmptyState.tsx";
+import { ErrorBoundary } from "./primitives/ErrorBoundary.tsx";
 import { createSessionsStore } from "./stores/sessionsStore.ts";
 import { createProjectsStore } from "./stores/projectsStore.ts";
 import { createPeersStore } from "./stores/peersStore.ts";
@@ -316,12 +318,21 @@ export function App() {
       when={status() !== "unauthorized"}
       fallback={<PairingView onPaired={(token) => client.setToken(token)} />}
     >
+      <ErrorBoundary scope="app">
       <AppShell
         sidebar={sidebarNode()}
         topBar={topBarNode()}
         tabNav={tabNavNode()}
+        connectionBanner={
+          <ConnectionBanner
+            status={status}
+            reconnect={() => client.reconnectState()}
+            onReconnectNow={() => client.reconnectNow()}
+          />
+        }
         drawer={{ open: uiStore.drawerOpen(), onClose: () => uiStore.setDrawerOpen(false) }}
       >
+        <ErrorBoundary scope="chat">
         <Show
           when={activeSid()}
           fallback={
@@ -361,7 +372,9 @@ export function App() {
             onShareSession={uiStore.openShare}
           />
         </Show>
+        </ErrorBoundary>
       </AppShell>
+      </ErrorBoundary>
 
       {/* Modals — still inline. Phase 5 relocates most of these into panes. */}
       <NewSessionModal

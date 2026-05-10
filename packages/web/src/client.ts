@@ -7,6 +7,11 @@ export type StatusListener = (status: ConnStatus) => void;
 
 export type ConnStatus = "connecting" | "connected" | "closed" | "unauthorized" | "readonly" | "slow";
 
+/** [B14-C] Callback the streaming store registers per-sid so the client can
+ * ask "what's the last chat-frame seq you saw?" at reattach time. Returns
+ * undefined when no chat frames have been seen yet (omit `chatSince`). */
+export type ChatSinceResolver = () => number | undefined;
+
 export interface RccClientOptions {
   url: string;
   token?: string | null;
@@ -93,9 +98,15 @@ export class RccClient {
   private readonly lastSeq = new Map<string, number>();
   private readonly outbox: Frame[] = [];
   private readonly attachedSids = new Set<string>();
+  /** [B14-C] Per-sid callback that returns last-seen chat-frame seq so the
+   * client can fold `chatSince` into `session.attach` on reconnect. */
+  private readonly chatSinceResolvers = new Map<string, ChatSinceResolver>();
   private status: ConnStatus = "connecting";
   private reconnectAttempts = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  /** ms-epoch when the currently scheduled reconnect will fire. null when no
+   * backoff timer is pending. Kept in sync with `reconnectTimer`. */
+  private nextAttemptAt: number | null = null;
   private closed = false;
   /** Raw base64 symmetric key. Null before sodium.ready or if not paired with
    * E2E. Once non-null, every outbound/inbound ws message is secretbox'd. */
@@ -206,10 +217,18 @@ export class RccClient {
 
     this.ws.addEventListener("open", () => {
       this.reconnectAttempts = 0;
+      this.nextAttemptAt = null;
       this.setStatus("connected");
       for (const sid of this.attachedSids) {
         const since = this.lastSeq.get(sid);
-        this.send({ v: 1, t: "session.attach", sid, since: since ?? null });
+        const chatSince = this.chatSinceResolvers.get(sid)?.();
+        this.send({
+          v: 1,
+          t: "session.attach",
+          sid,
+          since: since ?? null,
+          chatSince: chatSince ?? null,
+        });
       }
       while (this.outbox.length > 0) {
         const f = this.outbox.shift()!;
@@ -362,6 +381,7 @@ export class RccClient {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
     }
+    this.nextAttemptAt = null;
     this.reconnectAttempts = 0;
     this.connect();
   }
@@ -369,10 +389,36 @@ export class RccClient {
   private scheduleReconnect(): void {
     if (this.closed || this.reconnectTimer) return;
     const delay = Math.min(15_000, 500 * 2 ** Math.min(6, this.reconnectAttempts++));
+    this.nextAttemptAt = Date.now() + delay;
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
+      this.nextAttemptAt = null;
       this.connect();
     }, delay);
+  }
+
+  /** Snapshot of pending reconnect state for UI banners. null when the
+   * client is not waiting on a backoff timer (i.e. connected, or the
+   * timer just fired and `connect()` is running). */
+  reconnectState(): { attempt: number; nextAttemptAt: number | null } | null {
+    if (this.reconnectTimer === null && this.reconnectAttempts === 0) return null;
+    if (this.reconnectTimer === null) return null;
+    // reconnectAttempts was post-incremented in scheduleReconnect, so the
+    // attempt *about to fire* is reconnectAttempts (1-indexed for the user).
+    return { attempt: this.reconnectAttempts, nextAttemptAt: this.nextAttemptAt };
+  }
+
+  /** Cancel the backoff timer and reconnect immediately. Safe to call when
+   * no timer is pending (no-op). */
+  reconnectNow(): void {
+    if (this.closed) return;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+      this.nextAttemptAt = null;
+    }
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) return;
+    this.connect();
   }
 
   private setStatus(s: ConnStatus): void {
@@ -408,7 +454,25 @@ export class RccClient {
 
   attach(sid: string): void {
     const since = this.lastSeq.get(sid);
-    this.send({ v: 1, t: "session.attach", sid, since: since ?? null });
+    const chatSince = this.chatSinceResolvers.get(sid)?.();
+    this.send({
+      v: 1,
+      t: "session.attach",
+      sid,
+      since: since ?? null,
+      chatSince: chatSince ?? null,
+    });
+  }
+
+  /** [B14-C] Per-sid hook used by the streaming store so the client can fold
+   * `chatSince` into the reattach frame. Returns an unregister thunk. */
+  registerChatSinceResolver(sid: string, resolver: ChatSinceResolver): () => void {
+    this.chatSinceResolvers.set(sid, resolver);
+    return () => {
+      if (this.chatSinceResolvers.get(sid) === resolver) {
+        this.chatSinceResolvers.delete(sid);
+      }
+    };
   }
 
   write(sid: string, data: string): void {

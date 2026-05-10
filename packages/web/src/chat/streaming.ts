@@ -1,34 +1,23 @@
 // [P4-H] rAF-coalesced streaming buffer for SDK chat messages.
 //
-// Background: the SDK driver sends one `chat.append` (streaming:true) when a
-// new assistant message starts, then a burst of `chat.update` / `chat.delta`
-// frames as content arrives, then a final `chat.append` (streaming:false)
-// with the completed message. Here we coalesce per animation frame, keeping
-// only the latest state for each (messageId, segmentIndex) before flushing
-// into a Solid signal.
+// SDK sends chat.append(streaming:true) → flurry of chat.update/chat.delta
+// → final chat.append(streaming:false). We coalesce per animation frame,
+// keeping only the latest state for each (messageId, segmentIndex).
 //
-// [B12-A] Consumes `chat.delta` (B11-B) which APPENDs textDelta to an
-// existing text segment rather than replacing it. Within a flush tick a
-// chat.update is an "override" that wins over previous content; deltas
-// queued in the same tick still apply on top of it.
+// [B12-A] chat.delta APPENDs textDelta to an existing text segment. Within
+// a flush tick chat.update is an override; deltas queued in the same tick
+// apply on top of it.
 //
-// [B13-B] Host-side reconnect replay contract (NOT YET WIRED — future Phase 8
-// batch 14). Every chat.append / chat.update / chat.delta frame now carries
-// an optional `seq: number` (monotonic per sid). On WS reconnect the client
-// should:
-//   1. Track the last `seq` it saw for each sid,
-//   2. Send `session.attach { sid, chatSince: <lastSeq> }` on reattach,
-//   3. Expect a `chat.replay { frames, lostCount }` frame — apply `frames`
-//      in order as if they arrived live. When `lostCount > 0`, fall back to
-//      `chat.list.request` for a full re-hydration. When `frames` is empty
-//      and `lostCount === 0`, nothing was missed.
-// This keeps transcripts consistent across transient disconnects without
-// re-rendering the whole message list. Old hosts simply omit `seq` and the
-// client should ignore the upgrade path — plain `chat.list` remains the
-// safety net.
+// [B13-B / B14-C] Reconnect replay (WIRED B14-C). Every chat.append/update/
+// delta carries optional `seq`. Store tracks max via lastSeenSeq() and
+// registers a resolver with the client; on WS reconnect the client folds
+// `chatSince: <lastSeq>` into session.attach. Host answers with chat.replay
+// { frames, lostCount } — lostCount === 0 → re-dispatch frames through the
+// normal path; lostCount > 0 → fall back to chat.list.request. Old hosts
+// omit seq → resolver returns undefined → chatSince stays null → legacy
+// chat.list path is the safety net.
 //
-// This module is pure data reactivity — no JSX. MessageRow handles the
-// blinking-cursor affordance based on `ChatMessage.streaming`.
+// This module is pure data reactivity — no JSX.
 import type { ChatMessage, ChatSegment, Frame } from "@rcc/protocol";
 import { createSignal, createEffect, onCleanup, type Accessor } from "solid-js";
 import type { RccClient } from "../client";
@@ -43,18 +32,18 @@ export interface StreamingStats {
 export interface StreamingMessagesStore {
   messages: Accessor<ChatMessage[]>;
   stats: Accessor<StreamingStats>;
+  /** [B14-C] Last seen chat-frame seq (across append/update/delta). Consumed
+   * by the client so `session.attach` on reconnect can pass `chatSince`. */
+  lastSeenSeq(): number | undefined;
   clear(): void;
   dispose(): void;
 }
 
-/** Same 200-message cap ChatView.tsx uses; keep memory bounded. */
+/** Same 200-message cap ChatView uses; keep memory bounded. */
 const MAX_MESSAGES = 200;
 
-/**
- * Pure: return a new segments array with `segmentIndex` replaced by `incoming`.
- * Pads with empty text segments if `segmentIndex` is past the end — mirrors the
- * defensive behavior in ChatView.tsx so late-arriving updates don't drop text.
- */
+/** Pure: replace `segmentIndex` with `incoming`, padding with empty text
+ * segments if past the end (mirrors ChatView's defensive behavior). */
 export function mergeSegments(
   existing: ChatSegment[],
   segmentIndex: number,
@@ -68,11 +57,9 @@ export function mergeSegments(
   return next;
 }
 
-/**
- * [B12-A] Pure: append `textDelta` to segments[segmentIndex].content iff that
- * segment exists and is kind:"text". Per `chat.delta` spec missing/non-text
- * targets are silently ignored. Exported for reuse (tests, replay tools).
- */
+/** [B12-A] Pure: append `textDelta` to segments[segmentIndex].content iff
+ * that segment exists and is kind:"text". Missing/non-text silently ignored
+ * per `chat.delta` spec. Exported for tests/replay tools. */
 export function applyTextDelta(
   existing: ChatSegment[],
   segmentIndex: number,
@@ -126,6 +113,28 @@ export function createStreamingMessages(
   const orphanUpdates = new Map<string, Map<number, OrphanEntry>>();
 
   let rafHandle: { cancel: () => void } | null = null;
+
+  // [B14-C] Highest chat-frame seq seen across append/update/delta. undefined
+  // → host isn't seq-stamping (or nothing received yet); reattach sends
+  // chatSince=null so host falls back to plain chat.list replay.
+  let lastSeenSeq: number | undefined;
+  function noteSeq(seq: number | undefined): void {
+    if (typeof seq === "number" && (lastSeenSeq === undefined || seq > lastSeenSeq)) {
+      lastSeenSeq = seq;
+    }
+  }
+
+  // Re-register the per-sid chatSince resolver when active sid changes.
+  let resolverSid: string | undefined;
+  let unregisterResolver: (() => void) | null = null;
+  function syncResolver(sid: string | undefined): void {
+    if (sid === resolverSid) return;
+    unregisterResolver?.();
+    unregisterResolver = sid
+      ? client.registerChatSinceResolver(sid, () => lastSeenSeq)
+      : null;
+    resolverSid = sid;
+  }
 
   const [orphanCount, setOrphanCount] = createSignal(0);
 
@@ -194,16 +203,13 @@ export function createStreamingMessages(
 
   function scheduleFlush(): void {
     if (rafHandle) return;
-    rafHandle = rafSchedule(() => {
-      rafHandle = null;
-      flush();
-    });
+    rafHandle = rafSchedule(() => { rafHandle = null; flush(); });
   }
 
   function flush(): void {
     if (pending.size === 0) return;
-    // Snapshot + clear before setMessages so any re-entrant frame during the
-    // Solid update goes onto a fresh rAF batch.
+    // Snapshot + clear before setMessages so re-entrant frames during the
+    // Solid update land on a fresh rAF batch.
     const drained = new Map(pending);
     pending.clear();
 
@@ -214,21 +220,14 @@ export function createStreamingMessages(
         const idx = next.findIndex((m) => m.id === messageId);
         if (idx < 0) {
           // Message not present — re-park each entry as an orphan.
-          for (const [sIdx, entry] of segmentMap) {
-            parkOrphan(messageId, sIdx, entry);
-          }
+          for (const [sIdx, entry] of segmentMap) parkOrphan(messageId, sIdx, entry);
           continue;
         }
         const msg = next[idx]!;
         let segments = msg.segments;
-        for (const [sIdx, entry] of segmentMap) {
-          segments = applyEntry(segments, sIdx, entry);
-        }
+        for (const [sIdx, entry] of segmentMap) segments = applyEntry(segments, sIdx, entry);
         if (segments !== msg.segments) {
-          if (!changed) {
-            next = next.slice();
-            changed = true;
-          }
+          if (!changed) { next = next.slice(); changed = true; }
           next[idx] = { ...msg, segments };
         }
       }
@@ -238,10 +237,7 @@ export function createStreamingMessages(
   }
 
   function clear(): void {
-    if (rafHandle) {
-      rafHandle.cancel();
-      rafHandle = null;
-    }
+    if (rafHandle) { rafHandle.cancel(); rafHandle = null; }
     pending.clear();
     orphanUpdates.clear();
     setOrphanCount(0);
@@ -264,31 +260,17 @@ export function createStreamingMessages(
     return { ...message, segments };
   }
 
-  const unsubFrame = client.on((frame: Frame) => {
-    const sid = sidAccessor();
-    if (!sid) return;
-
-    if (frame.t === "chat.list" && frame.sid === sid) {
-      // Fresh hydration — discard any in-flight coalescing from the prior
-      // state and apply any orphans that match.
-      pending.clear();
-      if (rafHandle) {
-        rafHandle.cancel();
-        rafHandle = null;
-      }
-      const hydrated = frame.messages.map((m) => applyOrphansTo(m));
-      setMessages(hydrated);
-      return;
-    }
-
+  /** [B14-C] Apply chat.append/update/delta for the current sid. Extracted
+   * so chat.replay can re-dispatch buffered frames through the same path. */
+  function handleChatFrame(frame: Frame, sid: string): void {
     if (frame.t === "chat.append" && frame.sid === sid) {
+      noteSeq(frame.seq);
       const incoming = applyOrphansTo(frame.message);
       setMessages((ms) => {
         const idx = ms.findIndex((m) => m.id === incoming.id);
         if (idx >= 0) {
-          // Finalizing a streaming message we already have — swap in place.
-          // Also merge any pending entries that haven't flushed yet so the
-          // final frame doesn't race past them.
+          // Finalizing a streaming message — also merge any pending entries
+          // so the final frame doesn't race past them.
           const pendingForMsg = pending.get(incoming.id);
           let finalized = incoming;
           if (pendingForMsg) {
@@ -312,9 +294,8 @@ export function createStreamingMessages(
     }
 
     if (frame.t === "chat.update" && frame.sid === sid) {
+      noteSeq(frame.seq);
       const entry = getPendingEntry(frame.messageId, frame.segmentIndex);
-      // New override wins over any previously accumulated delta text for this
-      // slot; later deltas in the same tick append on top.
       entry.override = frame.segment;
       entry.textAccum = "";
       scheduleFlush();
@@ -322,46 +303,79 @@ export function createStreamingMessages(
     }
 
     if (frame.t === "chat.delta" && frame.sid === sid) {
+      noteSeq(frame.seq);
       if (frame.textDelta === "") return;
       getPendingEntry(frame.messageId, frame.segmentIndex).textAccum += frame.textDelta;
       scheduleFlush();
       return;
     }
+  }
+
+  const unsubFrame = client.on((frame: Frame) => {
+    const sid = sidAccessor();
+    if (!sid) return;
+
+    if (frame.t === "chat.list" && frame.sid === sid) {
+      // Fresh hydration — discard any in-flight coalescing from the prior
+      // state and apply any orphans that match.
+      pending.clear();
+      if (rafHandle) {
+        rafHandle.cancel();
+        rafHandle = null;
+      }
+      const hydrated = frame.messages.map((m) => applyOrphansTo(m));
+      setMessages(hydrated);
+      return;
+    }
+
+    if (frame.t === "chat.replay" && frame.sid === sid) {
+      // [B14-C] Reply to session.attach.chatSince. lostCount > 0 → cursor
+      // older than host ring; re-hydrate via chat.list. Clear pending/orphans
+      // but keep `messages` so user sees old prefix until chat.list replaces
+      // wholesale (no flash). lostCount === 0 → re-dispatch buffered frames.
+      if (frame.lostCount > 0) {
+        pending.clear();
+        orphanUpdates.clear();
+        if (rafHandle) { rafHandle.cancel(); rafHandle = null; }
+        setOrphanCount(0);
+        client.send({ v: 1, t: "chat.list.request", sid });
+        return;
+      }
+      for (const inner of frame.frames) handleChatFrame(inner, sid);
+      return;
+    }
+
+    if (frame.t === "chat.append" || frame.t === "chat.update" || frame.t === "chat.delta") {
+      handleChatFrame(frame, sid);
+      return;
+    }
   });
 
-  // On sid change, clear and request a fresh list. Mirrors ChatView.tsx line 52-55.
+  // On sid change, clear and request a fresh list. Mirrors ChatView.tsx.
+  // [B14-C] Also reset seq tracking and re-register the resolver so reconnect
+  // replay scopes to the active session.
   createEffect(() => {
     const sid = sidAccessor();
     clear();
-    if (sid) {
-      client.send({ v: 1, t: "chat.list.request", sid });
-    }
+    lastSeenSeq = undefined;
+    syncResolver(sid);
+    if (sid) client.send({ v: 1, t: "chat.list.request", sid });
   });
 
   const stats: Accessor<StreamingStats> = () => {
     const ms = messages();
-    let streaming = false;
-    for (const m of ms) {
-      if (m.streaming) {
-        streaming = true;
-        break;
-      }
-    }
-    return {
-      count: ms.length,
-      streaming,
-      pendingOrphanUpdates: orphanCount(),
-    };
+    const streaming = ms.some((m) => m.streaming);
+    return { count: ms.length, streaming, pendingOrphanUpdates: orphanCount() };
   };
 
   function dispose(): void {
     unsubFrame();
-    if (rafHandle) {
-      rafHandle.cancel();
-      rafHandle = null;
-    }
+    if (rafHandle) { rafHandle.cancel(); rafHandle = null; }
     pending.clear();
     orphanUpdates.clear();
+    unregisterResolver?.();
+    unregisterResolver = null;
+    resolverSid = undefined;
   }
 
   onCleanup(dispose);
@@ -369,6 +383,7 @@ export function createStreamingMessages(
   return {
     messages,
     stats,
+    lastSeenSeq: () => lastSeenSeq,
     clear,
     dispose,
   };

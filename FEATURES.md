@@ -349,7 +349,16 @@
 **batch 14** · 前端错误边界:
 - B14-A 全局 `ErrorBoundary.tsx` + 友好报错页 + "复制报告"按钮
 - B14-B ws 断线 UX(横幅 + 自动重连进度)
-- B14-C host crash → 重启检测 + session 自动 resume
+- B14-C host crash → 重启检测 + session 自动 resume ✅ (batch 14 · 2026-05-10 · partial)
+  - **Reconnect-replay 客户端全部落地**。`packages/web/src/client.ts`(+30 LOC):新增 `ChatSinceResolver` 类型 + `chatSinceResolvers: Map<string, ChatSinceResolver>` + 公开 `registerChatSinceResolver(sid, resolver)` 返回 unregister thunk;ws.open 重连回调里对每个 `attachedSids` 的 sid 查 `resolver?.()` 并把结果折进 `session.attach.chatSince`;单点 `attach(sid)` 同步更新。
+  - `packages/web/src/chat/streaming.ts`(375 → 390):在 `createStreamingMessages` 内闭包里维护 `lastSeenSeq: number | undefined` + `noteSeq(seq?)`(在每次 chat.append/update/delta handler 开头调用);新增 `syncResolver(sid)`(sid 变化时 unregister 旧的、register 新的);对外暴露 `lastSeenSeq()` accessor(类型 `StreamingMessagesStore.lastSeenSeq(): number | undefined`)。提取 `handleChatFrame(frame, sid)` 以便 chat.replay 复用同一分派路径。
+  - 新增 `chat.replay` 帧 handler:`lostCount > 0` → 清 `pending` + `orphanUpdates`(丢 post-cursor delta,避免粘到过期 prefix)但**不清 `messages`**,然后 `client.send chat.list.request`,靠随后的 `chat.list` 原子替换列表(中间 tick 界面继续显示旧 prefix,**不会空闪**);`lostCount === 0` → `for (inner of frame.frames) handleChatFrame(inner, sid)`,走与实时帧相同路径(seq 累加、rAF coalesce)。
+  - sid 切换的 `createEffect` 里加 `lastSeenSeq = undefined; syncResolver(sid);`,避免旧 sid 的 seq 泄漏到新 sid。`dispose()` unregister resolver。
+  - 重连链路:ws 断 → `scheduleReconnect()` 指数退避 → ws reopen → `addEventListener("open")` 遍历 `attachedSids` → 对每个 sid 发 `session.attach { sid, since: ptySeq ?? null, chatSince: resolver()?.() ?? null }` → host(B13-B)回 `chat.replay { frames, lostCount }` → 客户端新 handler 分派。
+  - **host-crash 检测未实现** —— 协议 `Hello` 帧没有 `bootId`/`hostInstanceId`/`processStartTime` 字段(仅 `TunnelInfo.startedAt` 是 tunnel 的不是 host 的),按任务说明"如无信号则跳过"。若 batch 15 需要此功能,需先给 `Hello` 加 `bootId`(host 进程启动时随机,每次进程重启变),client 侧在 hello handler 里 diff 决定是否显示 "host 已重启" 横幅。
+  - Session 自动 resume:`client.attachedSids` 在 `session.attach` / `session.close` 时自增删,ws 重连时整个集合自动 replay,因此 `sessionsStore` 侧无需改动。
+  - 约束核对:无新 npm dep;无协议改动;`streaming.ts` 390 LOC(< 400 budget);`MessageList.tsx` / 其他 UI 未动;`App.tsx` 零改动。
+  - `pnpm -r typecheck` ✅;`pnpm -F @rcc/web build` ✅(1374 modules,1m26s)。
 
 **batch 15** · 数据一致性:
 - B15-A 乐观更新回滚(approval / session.close)

@@ -65,6 +65,9 @@ export interface AppShellProps {
   topBar: JSX.Element;
   /** Optional bottom tab navigation. Only mounted on compact layouts. */
   tabNav?: JSX.Element;
+  /** Optional connection-status banner. Rendered between TopBar and main
+   * content at all breakpoints. Unmounted entirely on the happy path. */
+  connectionBanner?: JSX.Element;
   /** Main pane content. */
   children: JSX.Element;
   /**
@@ -123,6 +126,14 @@ export function AppShell(props: AppShellProps): JSX.Element {
         >
           {props.topBar}
         </header>
+
+        {/* ----- Connection banner ---------------------------------------
+            Slim strip between TopBar and main content. Unmounted on the
+            happy path; on mobile it stays sticky-below-TopBar naturally
+            because TopBar is the one with `sticky top-0`. */}
+        <Show when={props.connectionBanner}>
+          <div class="shrink-0 z-20">{props.connectionBanner}</div>
+        </Show>
 
         {/* ----- Main region ----------------------------------------------
             Desktop : grid [sidebar | content]
