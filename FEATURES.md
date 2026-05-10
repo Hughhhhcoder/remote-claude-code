@@ -200,9 +200,23 @@
 
 ### Phase 5 · 功能面板响应式(batch 7-9 · 11 agent 跨 3 批)
 **batch 7** · 审批 + 通知 + 设备:
-- P5-A `src/approvals/ApprovalPane.tsx` + `ApprovalCard.tsx`(Modal 版本迁移 + 历史列表)
-- P5-B `src/inbox/InboxPane.tsx` + `InboxItem.tsx`
-- P5-C `src/devices/DevicesPane.tsx` + `src/peers/PeersPane.tsx`
+- P5-A `src/approvals/ApprovalPane.tsx` + `ApprovalCard.tsx` ✅ (batch 7 · 2026-05-10) · 209 + 186 行
+  - Pane 消费 `createApprovalsStore` 的 `current() / history()`,24h 切窗 + 可选 sid 过滤,"待处理" / "最近" 两段 sticky header。
+  - wire frame 取真 `approval.response { id, sid, approve, webauthnToken? }`(与 `PermissionApproval.tsx:119` 一致),非文档里错写的 approve/deny;public callback 仍保留 `onApprove/onDeny` 抽象。
+  - Face ID 真跑:high-risk + `device.hasPasskey` + `isWebAuthnAvailable()` 时 `authenticateForApproval(deviceId, approvalId)` 等 token 再 response;有 `authing` / `authError` signal 做 inline 状态。prop 放宽到 `{id?, name?, hasPasskey?}` 以取 deviceId。
+  - Card 与 ApprovalBlock 视觉一致(风险色 border-2 + icon + accent tool + `<pre max-h 160>` + `h-11 sm:h-9` 按钮 wrap);compact 行宽 `min-h-11`。
+- P5-B `src/inbox/InboxPane.tsx` + `InboxItem.tsx` ✅ (batch 7 · 2026-05-10) · 203 + 151 行
+  - 消费 `InboxView.tsx` 现有 `createInboxStore`(`items() / unread() / total() / markAllRead()` —— 没有 per-item markRead,follow modal 行为,点任意行 + "全部已读" 按钮都调 markAllRead)。
+  - `ActivityItem` (approval / commits / crash / update / session_exit) → `InboxItemRecord` (approval / notification / workflow / message / system) 做 presenter 转换,`meta.approvalId` 透传。
+  - Pane 结构:sticky header(title + unread badge + filter chip 全部/待审批/通知/消息 + 全部已读)+ scroll body 三段 today/this-week/earlier 相对时间 grouping,EmptyState "收件箱为空"。
+  - 键盘 j/k/↑/↓ deferred(Enter/Space 原生 role=button tabIndex=0 可行);横向滚动只限 filter chip 条带,pane 自身 `overflow-x-hidden`。
+- P5-C `src/devices/DevicesPane.tsx` + `src/peers/PeersPane.tsx` ✅ (batch 7 · 2026-05-10) · 237 + 233 行
+  - DevicesPane:`device.list.request` 拉取,`device.revoke` 撤销;本设备高亮段 + 其他设备段 + passkey chip;直接复用 `webauthn.ts` 的 `registerPasskey/clearPasskey/isWebAuthnAvailable`。
+  - PeersPane:`peer.list.request / peer.add / peer.remove` 真 wire frame;cert fingerprint 用 `id.slice(0,6)` 作短 id chip(`PeerInfo` 无真 fingerprint 字段,标注待协议补)。
+  - 已知 gap:`peer.reconnect` 协议缺位,"重连"按钮退化为 `peer.list.request` 刷新;device rename 留给旧 modal;DevicesPane footer 无 hostname/version(无全局 host-info store,不动 App.tsx 就无法读)。
+  - 协议命名对齐:contract 写的 `PeerSummary` → 真类型 `PeerInfo`。
+
+**batch 7 验收**: 6 文件 1219 行;`pnpm -F @rcc/web typecheck` ✅;`pnpm -F @rcc/web build` ✅(15s)。panes 落地但 **未接线** —— App.tsx 仍走 PermissionApproval modal / InboxView modal / DevicesModal / PeersModal 原路径,Phase 6 batch 10 再统一切换(避免中间态同时两个审批栈乱)。不打 tag。
 
 **batch 8** · 文件 + 笔记本 + 录屏:
 - P5-D `src/files/FileBrowser.tsx` + `FilePreview.tsx`(Monaco 懒加载保留)
