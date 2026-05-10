@@ -24,12 +24,18 @@ interface EditorState {
   name: string;
   description: string;
   steps: WorkflowStep[];
+  /**
+   * [B25-C] Per-workflow variable map as an ordered pair list so the UI can
+   * render stable rows even while the user edits a key. Serialized to
+   * Record<string,string> on save (last-write wins for duplicate keys).
+   */
+  variables: Array<{ key: string; value: string }>;
   error?: string;
 }
 
 function cloneSteps(steps: WorkflowStep[]): WorkflowStep[] {
   return steps.map((s) => {
-    if (s.kind === "git") return { kind: "git", args: [...s.args] };
+    if (s.kind === "git") return { kind: "git", args: [...s.args], condition: s.condition };
     return { ...s } as WorkflowStep;
   });
 }
@@ -89,6 +95,7 @@ export function WorkflowsTab(props: Props) {
       name: "",
       description: "",
       steps: [blankStep("prompt")],
+      variables: [],
     });
   }
 
@@ -99,6 +106,10 @@ export function WorkflowsTab(props: Props) {
       name: w.name,
       description: w.description ?? "",
       steps: cloneSteps(w.steps),
+      variables: Object.entries(w.variables ?? {}).map(([key, value]) => ({
+        key,
+        value,
+      })),
     });
   }
 
@@ -128,6 +139,25 @@ export function WorkflowsTab(props: Props) {
         return;
       }
     }
+    // [B25-C] serialize variables; drop empty keys, cap at 32, last-key-wins
+    const varMap: Record<string, string> = {};
+    for (const { key, value } of e.variables) {
+      const k = key.trim();
+      if (!k) continue;
+      if (k.length > 64) {
+        setEditor({ ...e, error: `变量名 "${k.slice(0, 16)}…" 过长 (>64)` });
+        return;
+      }
+      if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(k)) {
+        setEditor({ ...e, error: `变量名 "${k}" 不合法 (字母/数字/下划线)` });
+        return;
+      }
+      varMap[k] = value;
+    }
+    if (Object.keys(varMap).length > 32) {
+      setEditor({ ...e, error: "变量数量超过 32" });
+      return;
+    }
     props.client.send({
       v: 1,
       t: "workflow.save",
@@ -135,6 +165,7 @@ export function WorkflowsTab(props: Props) {
       name,
       description: e.description.trim() || undefined,
       steps: e.steps,
+      variables: Object.keys(varMap).length ? varMap : undefined,
     });
   }
 
@@ -314,6 +345,11 @@ function WorkflowEditor(props: {
                 />
               </div>
 
+              <VariablesEditor
+                variables={s().variables}
+                onChange={(next) => props.onChange({ ...s(), variables: next })}
+              />
+
               <div>
                 <div class="flex items-center justify-between mb-2">
                   <label class="text-xs text-zinc-400">步骤 ({s().steps.length})</label>
@@ -401,22 +437,46 @@ function StepRow(props: {
   onRemove: () => void;
   onMove: (dir: -1 | 1) => void;
 }) {
+  // [B25-C] condition is optional on every step; preserve it through onChange
+  // for the kind-specific editors by wrapping them with setField.
+  function patchStep(next: WorkflowStep): void {
+    const cond = props.step.condition;
+    props.onChange(cond ? ({ ...next, condition: cond } as WorkflowStep) : next);
+  }
+  function setCondition(cond: string): void {
+    const trimmed = cond.trim();
+    const base = { ...props.step } as WorkflowStep;
+    if (!trimmed) {
+      delete (base as { condition?: string }).condition;
+    } else {
+      (base as { condition?: string }).condition = trimmed;
+    }
+    props.onChange(base);
+  }
   return (
     <div class="rounded-lg border border-zinc-800 bg-zinc-900/60 p-3 flex items-start gap-3">
       <div class="w-6 text-center text-xs text-zinc-500 pt-1.5 font-mono shrink-0">
         {props.index + 1}
       </div>
       <div class="flex-1 min-w-0">
-        <div class="text-[10px] uppercase tracking-widest text-zinc-500 mb-1.5">
-          {STEP_KIND_LABEL[props.step.kind]}
+        <div class="text-[10px] uppercase tracking-widest text-zinc-500 mb-1.5 flex items-center gap-2">
+          <span>{STEP_KIND_LABEL[props.step.kind]}</span>
+          <Show when={props.step.condition}>
+            <span
+              class="text-[9px] px-1.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/30 text-amber-300 normal-case tracking-normal"
+              title={`条件: ${props.step.condition}`}
+            >
+              if
+            </span>
+          </Show>
         </div>
         <Show when={props.step.kind === "prompt"}>
           <textarea
             value={(props.step as Extract<WorkflowStep, { kind: "prompt" }>).text}
             onInput={(ev) =>
-              props.onChange({ kind: "prompt", text: ev.currentTarget.value })
+              patchStep({ kind: "prompt", text: ev.currentTarget.value })
             }
-            placeholder="发送给 Claude 的 prompt 文本"
+            placeholder="发送给 Claude 的 prompt 文本 (支持 {{var}})"
             rows={3}
             class="w-full bg-zinc-950 border border-zinc-800 rounded px-2 py-1.5 text-xs font-mono outline-none focus:border-zinc-700 resize-y"
           />
@@ -426,7 +486,7 @@ function StepRow(props: {
             <span class="font-mono text-sm text-zinc-500">/</span>
             <input
               value={(props.step as Extract<WorkflowStep, { kind: "slash" }>).name}
-              onInput={(ev) => props.onChange({ kind: "slash", name: ev.currentTarget.value })}
+              onInput={(ev) => patchStep({ kind: "slash", name: ev.currentTarget.value })}
               placeholder="review"
               class="flex-1 bg-zinc-950 border border-zinc-800 rounded px-2 py-1 text-xs font-mono outline-none focus:border-zinc-700"
             />
@@ -438,7 +498,7 @@ function StepRow(props: {
             <input
               value={(props.step as Extract<WorkflowStep, { kind: "git" }>).args.join(" ")}
               onInput={(ev) =>
-                props.onChange({
+                patchStep({
                   kind: "git",
                   args: ev.currentTarget.value.split(/\s+/).filter(Boolean),
                 })
@@ -457,7 +517,7 @@ function StepRow(props: {
               step="0.5"
               value={(props.step as Extract<WorkflowStep, { kind: "wait" }>).seconds}
               onInput={(ev) =>
-                props.onChange({
+                patchStep({
                   kind: "wait",
                   seconds: Math.max(0, Math.min(600, Number(ev.currentTarget.value) || 0)),
                 })
@@ -467,6 +527,20 @@ function StepRow(props: {
             <span class="text-xs text-zinc-500">秒</span>
           </div>
         </Show>
+        <div class="mt-2 flex items-center gap-1.5">
+          <span
+            class="text-[10px] text-zinc-500 font-mono shrink-0"
+            title="可选:条件表达式。支持 == / != / contains / !contains,例如 ${env} == 'prod'"
+          >
+            if
+          </span>
+          <input
+            value={props.step.condition ?? ""}
+            onInput={(ev) => setCondition(ev.currentTarget.value)}
+            placeholder="${env} == 'prod'  (留空=始终执行)"
+            class="flex-1 bg-zinc-950 border border-zinc-800 rounded px-2 py-0.5 text-[11px] font-mono outline-none focus:border-zinc-700 text-amber-200 placeholder-zinc-600"
+          />
+        </div>
       </div>
       <div class="flex flex-col gap-1 shrink-0">
         <button
@@ -491,6 +565,83 @@ function StepRow(props: {
           ✕
         </button>
       </div>
+    </div>
+  );
+}
+
+// [B25-C] Workflow-level variable map editor. Renders an ordered list of
+// {key, value} rows so editing a key doesn't lose focus on every keystroke.
+// Empty-key rows are allowed in-memory and filtered out at save time.
+function VariablesEditor(props: {
+  variables: Array<{ key: string; value: string }>;
+  onChange: (next: Array<{ key: string; value: string }>) => void;
+}) {
+  function patchRow(idx: number, patch: Partial<{ key: string; value: string }>): void {
+    const next = props.variables.map((row, i) => (i === idx ? { ...row, ...patch } : row));
+    props.onChange(next);
+  }
+  function addRow(): void {
+    props.onChange([...props.variables, { key: "", value: "" }]);
+  }
+  function removeRow(idx: number): void {
+    props.onChange(props.variables.filter((_, i) => i !== idx));
+  }
+  return (
+    <div class="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
+      <div class="flex items-center justify-between mb-2">
+        <div class="flex items-center gap-2">
+          <label class="text-xs text-zinc-400">变量 ({props.variables.length})</label>
+          <span
+            class="text-[10px] text-zinc-500"
+            title="在步骤内用 {{name}} 引用;条件表达式内用 ${name}"
+          >
+            {`{{name}}`} / {"${name}"}
+          </span>
+        </div>
+        <button
+          onClick={addRow}
+          class="text-[11px] px-2 py-1 rounded border border-zinc-800 text-zinc-400 hover:text-zinc-200 hover:border-zinc-700"
+        >
+          + 变量
+        </button>
+      </div>
+      <Show
+        when={props.variables.length > 0}
+        fallback={
+          <div class="text-[11px] text-zinc-500 italic">
+            可选:添加 key=value 以便在 prompt/slash/git/条件中替换。
+          </div>
+        }
+      >
+        <div class="space-y-1.5">
+          <For each={props.variables}>
+            {(row, idx) => (
+              <div class="flex items-center gap-1.5">
+                <input
+                  value={row.key}
+                  onInput={(ev) => patchRow(idx(), { key: ev.currentTarget.value })}
+                  placeholder="name"
+                  class="w-40 bg-zinc-950 border border-zinc-800 rounded px-2 py-1 text-xs font-mono outline-none focus:border-zinc-700"
+                />
+                <span class="text-zinc-600 text-xs font-mono">=</span>
+                <input
+                  value={row.value}
+                  onInput={(ev) => patchRow(idx(), { value: ev.currentTarget.value })}
+                  placeholder="value"
+                  class="flex-1 bg-zinc-950 border border-zinc-800 rounded px-2 py-1 text-xs font-mono outline-none focus:border-zinc-700"
+                />
+                <button
+                  onClick={() => removeRow(idx())}
+                  class="text-[11px] px-1.5 py-0.5 rounded text-zinc-500 hover:text-rose-400 hover:bg-rose-500/10"
+                  title="删除变量"
+                >
+                  ✕
+                </button>
+              </div>
+            )}
+          </For>
+        </div>
+      </Show>
     </div>
   );
 }

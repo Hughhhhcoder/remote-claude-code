@@ -61,6 +61,7 @@ export class WorkflowStore {
     name: string;
     description?: string;
     steps: WorkflowStep[];
+    variables?: Record<string, string>;
   }): Promise<Workflow> {
     const name = opts.name.trim();
     if (!name) throw new Error("workflow name is empty");
@@ -71,6 +72,19 @@ export class WorkflowStore {
     const serialized = JSON.stringify(opts.steps);
     if (Buffer.byteLength(serialized, "utf8") > PER_WORKFLOW_BYTES_CAP) {
       throw new Error("workflow payload exceeds 32KB");
+    }
+    // [B25-C] Normalize variables: drop undefined, cap at 32 entries.
+    let variables: Record<string, string> | undefined;
+    if (opts.variables && typeof opts.variables === "object") {
+      const entries = Object.entries(opts.variables).filter(
+        ([k, v]) => typeof k === "string" && k.length > 0 && typeof v === "string",
+      );
+      if (entries.length > 32) {
+        throw new Error("workflow variables exceed 32 entries");
+      }
+      if (entries.length > 0) {
+        variables = Object.fromEntries(entries);
+      }
     }
 
     if (opts.id) {
@@ -83,6 +97,7 @@ export class WorkflowStore {
         description: opts.description?.trim() || undefined,
         steps: opts.steps,
         createdAt: prev.createdAt,
+        variables,
       };
       this.data.workflows[idx] = next;
       await this.persist();
@@ -95,6 +110,7 @@ export class WorkflowStore {
       description: opts.description?.trim() || undefined,
       steps: opts.steps,
       createdAt: Date.now(),
+      variables,
     };
     this.data.workflows.push(next);
     await this.persist();

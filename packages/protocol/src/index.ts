@@ -2043,21 +2043,33 @@ export const RecordStatus = z.object({
 // concept). Simplification: steps are fired back-to-back with a fixed delay;
 // the runner does NOT wait for Claude to finish responding between steps.
 
+// [B25-C] Optional `condition` on every step: a simple string expression
+// evaluated client-side at run time (see packages/web/src/workflow-runner.ts
+// `evaluateCondition`). When present and falsy, the step is SKIPPED — the
+// runner advances without dispatching the step. Syntax (all string ops, no
+// eval): `${lhs} <op> <rhs>` where op ∈ `==` | `!=` | `contains` | `!contains`
+// and rhs is either a `'quoted'` literal or a `${var}` placeholder. Unknown
+// operators default to false (step skipped) so malformed conditions never
+// accidentally execute. Optional for back-compat — old hosts/clients omit it.
 export const WorkflowStepPrompt = z.object({
   kind: z.literal("prompt"),
   text: z.string().min(1).max(8000),
+  condition: z.string().max(500).optional(),
 });
 export const WorkflowStepSlash = z.object({
   kind: z.literal("slash"),
   name: z.string().min(1).max(128),
+  condition: z.string().max(500).optional(),
 });
 export const WorkflowStepGit = z.object({
   kind: z.literal("git"),
   args: z.array(z.string().max(512)).min(1).max(16),
+  condition: z.string().max(500).optional(),
 });
 export const WorkflowStepWait = z.object({
   kind: z.literal("wait"),
   seconds: z.number().min(0).max(600),
+  condition: z.string().max(500).optional(),
 });
 export const WorkflowStep = z.discriminatedUnion("kind", [
   WorkflowStepPrompt,
@@ -2073,6 +2085,14 @@ export const Workflow = z.object({
   description: z.string().max(500).optional(),
   steps: z.array(WorkflowStep).min(1).max(50),
   createdAt: z.number(),
+  /**
+   * [B25-C] Per-workflow template variable map. `{{var}}` placeholders in step
+   * content (prompt.text / slash.name / git.args / wait.seconds string refs)
+   * are expanded at run time from this map. Falls back to `${env:VAR}` → JS
+   * env (process.env on host, undefined on web) when the key isn't present.
+   * Max 32 entries, ≤256 chars per value.
+   */
+  variables: z.record(z.string().min(1).max(64), z.string().max(256)).optional(),
 });
 export type Workflow = z.infer<typeof Workflow>;
 
@@ -2094,6 +2114,8 @@ export const WorkflowSave = z.object({
   name: z.string().min(1).max(64),
   description: z.string().max(500).optional(),
   steps: z.array(WorkflowStep).min(1).max(50),
+  /** [B25-C] Optional variables map; see Workflow.variables. */
+  variables: z.record(z.string().min(1).max(64), z.string().max(256)).optional(),
 });
 
 export const WorkflowSaved = z.object({

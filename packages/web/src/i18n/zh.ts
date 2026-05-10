@@ -61,6 +61,21 @@ export const zh = {
   // workflow bar
   "workflow.running": "正在运行 workflow",
   "workflow.abort": "中止",
+  "workflow.stop": "停止",
+  "workflow.skip": "跳过此步",
+  "workflow.resume": "从这里继续",
+  "workflow.retry": "重试",
+  "workflow.dismiss": "关闭",
+  "workflow.minimize": "收起",
+  "workflow.expand": "展开",
+  "workflow.finished": "已完成",
+  "workflow.finishedWithErrors": "已完成(含错误)",
+  "workflow.stepPending": "待执行",
+  "workflow.stepRunning": "执行中…",
+  "workflow.stepCompleted": "完成",
+  "workflow.stepSkipped": "已跳过",
+  "workflow.stepFailed": "失败",
+  "workflow.runAgain": "从头重跑",
 
   // new session modal
   "newSession.title": "新建会话",

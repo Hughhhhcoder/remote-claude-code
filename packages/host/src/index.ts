@@ -3068,6 +3068,7 @@ function handle(ws: WebSocket, state: WsState, frame: Frame): void {
           name: frame.name,
           description: frame.description,
           steps: frame.steps,
+          variables: frame.variables,
         })
         .then((wf) => {
           send(ws, { v: 1, t: "workflow.saved", workflow: wf });

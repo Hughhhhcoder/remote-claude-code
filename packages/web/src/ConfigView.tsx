@@ -35,6 +35,7 @@ interface TabSpec {
     client: RccClient;
     activeSid: string | null;
     onRunWorkflow: (req: WorkflowRunRequest) => void;
+    onUseStarter?: (starterId: string) => void;
   }) => JSX.Element;
 }
 
@@ -106,7 +107,7 @@ const TABS: readonly TabSpec[] = [
     label: "Starters",
     icon: "🚀",
     accent: "text-indigo-300",
-    render: (ctx) => <StartersTab client={ctx.client} />,
+    render: (ctx) => <StartersTab client={ctx.client} onUseStarter={ctx.onUseStarter} />,
   },
   {
     key: "plugins",
@@ -130,6 +131,13 @@ interface Props {
   activeSid: string | null;
   onClose: () => void;
   onRunWorkflow: (req: WorkflowRunRequest) => void;
+  /**
+   * Optional — when provided, StartersTab card "使用此 starter" taps the
+   * callback so App can close config + open NewSessionModal pre-selected.
+   * Omitted today; callback is backward-compatible (StartersTab falls back
+   * to dispatching a `rcc:use-starter` CustomEvent on window).
+   */
+  onUseStarter?: (starterId: string) => void;
 }
 
 /**
@@ -202,6 +210,7 @@ export function ConfigView(props: Props) {
                         client: props.client,
                         activeSid: props.activeSid,
                         onRunWorkflow: props.onRunWorkflow,
+                        onUseStarter: props.onUseStarter,
                       })}
                     </div>
                   </Show>

@@ -61,6 +61,21 @@ export const en = {
   // workflow bar
   "workflow.running": "Running workflow",
   "workflow.abort": "Abort",
+  "workflow.stop": "Stop",
+  "workflow.skip": "Skip step",
+  "workflow.resume": "Resume from here",
+  "workflow.retry": "Retry",
+  "workflow.dismiss": "Dismiss",
+  "workflow.minimize": "Minimize",
+  "workflow.expand": "Expand",
+  "workflow.finished": "Finished",
+  "workflow.finishedWithErrors": "Finished with errors",
+  "workflow.stepPending": "Pending",
+  "workflow.stepRunning": "Running…",
+  "workflow.stepCompleted": "Done",
+  "workflow.stepSkipped": "Skipped",
+  "workflow.stepFailed": "Failed",
+  "workflow.runAgain": "Run again from start",
 
   // new session modal
   "newSession.title": "New session",

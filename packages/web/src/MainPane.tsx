@@ -14,6 +14,7 @@ import { RecordingPanel } from "./RecordingPanel.tsx";
 import { permissionChip } from "./NewSessionModal.tsx";
 import { t } from "./i18n/index.ts";
 import type { createWorkflowRunner } from "./workflow-runner.ts";
+import { WorkflowRunPanel } from "./WorkflowRunPanel.tsx";
 
 const FileBrowser = lazy(() =>
   import("./FileBrowser.tsx").then((m) => ({ default: m.FileBrowser })),
@@ -378,32 +379,21 @@ function KeyButton(props: { label: string; onClick: () => void; hint?: string })
 export function WorkflowRunBar(props: {
   state: import("./workflow-runner.ts").RunState | null;
   onStop: () => void;
+  onSkip?: () => void;
+  onResumeFrom?: (i: number) => void;
+  onDismiss?: () => void;
+  onRestart?: () => void;
 }): JSX.Element {
+  // [B25-B] The full panel lives in WorkflowRunPanel.tsx — this export
+  // stays here as a thin adapter so App.tsx doesn't change its import path.
   return (
-    <Show when={props.state}>
-      {(s) => (
-        <div class="fixed top-14 left-1/2 -translate-x-1/2 z-40 flex items-center gap-3 px-4 py-1.5 rounded-full border border-teal-500/30 bg-bg-page/95 backdrop-blur shadow-lg text-[11px]">
-          <span class="text-teal-300">⏵</span>
-          <span class="text-text-primary">
-            {t("workflow.running")} <span class="font-mono text-teal-200">{s().workflow.name}</span>
-          </span>
-          <span class="text-text-muted font-mono">
-            {s().index + 1}/{s().total}
-          </span>
-          <div class="flex-1 h-1 rounded bg-bg-surfaceStrong overflow-hidden w-32">
-            <div
-              class="h-full bg-teal-400 transition-[width]"
-              style={{ width: `${Math.round(((s().index + 1) / s().total) * 100)}%` }}
-            />
-          </div>
-          <button
-            onClick={props.onStop}
-            class="px-2 py-0.5 rounded border border-rose-500/40 text-rose-300 hover:bg-rose-500/10 text-[10px]"
-          >
-            {t("workflow.abort")}
-          </button>
-        </div>
-      )}
-    </Show>
+    <WorkflowRunPanel
+      state={props.state}
+      onStop={props.onStop}
+      onSkip={props.onSkip ?? (() => {})}
+      onResumeFrom={props.onResumeFrom ?? (() => {})}
+      onDismiss={props.onDismiss ?? props.onStop}
+      onRestart={props.onRestart}
+    />
   );
 }

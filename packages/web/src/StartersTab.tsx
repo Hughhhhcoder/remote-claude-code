@@ -10,6 +10,14 @@ import type { RccClient } from "./client.ts";
 
 interface Props {
   client: RccClient;
+  /**
+   * Fired when the user taps "使用此 starter" on a card. The caller (ConfigView
+   * or App) is expected to close the config view and open NewSessionModal
+   * with this starter pre-selected. If omitted, the component falls back to
+   * dispatching a `rcc:use-starter` CustomEvent on window so App.tsx can
+   * listen without a direct prop wiring.
+   */
+  onUseStarter?: (starterId: string) => void;
 }
 
 type StepKind = WorkflowStep["kind"];
@@ -56,10 +64,24 @@ function blankStep(kind: StepKind): WorkflowStep {
   }
 }
 
+function stepSummary(step: WorkflowStep): string {
+  switch (step.kind) {
+    case "prompt":
+      return step.text.length > 80 ? step.text.slice(0, 80) + "…" : step.text;
+    case "slash":
+      return "/" + step.name;
+    case "git":
+      return "git " + step.args.join(" ");
+    case "wait":
+      return `wait ${step.seconds}s`;
+  }
+}
+
 export function StartersTab(props: Props) {
   const [starters, setStarters] = createSignal<Starter[]>([]);
   const [loaded, setLoaded] = createSignal(false);
   const [editor, setEditor] = createSignal<EditorState | null>(null);
+  const [previewId, setPreviewId] = createSignal<string | null>(null);
 
   const unsub = props.client.on((frame) => {
     if (frame.t === "starter.list") {
@@ -166,111 +188,88 @@ export function StartersTab(props: Props) {
     props.client.send({ v: 1, t: "starter.remove", id: s.id });
   }
 
+  function useStarter(s: Starter) {
+    if (props.onUseStarter) {
+      props.onUseStarter(s.id);
+      return;
+    }
+    // Fallback: fire a window event so App.tsx (or any ancestor) can wire
+    // the NewSessionModal open + starter pre-selection without a prop drill.
+    try {
+      window.dispatchEvent(
+        new CustomEvent("rcc:use-starter", { detail: { starterId: s.id } }),
+      );
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function togglePreview(id: string) {
+    setPreviewId((cur) => (cur === id ? null : id));
+  }
+
   const list = createMemo(() => starters());
 
   return (
     <div>
-      <div class="flex items-start justify-between mb-6">
-        <div>
+      <div class="flex items-start justify-between gap-3 mb-6 flex-wrap">
+        <div class="min-w-0">
           <div class="flex items-center gap-2 mb-2">
-            <h1 class="text-2xl font-semibold">Session Starter Kits</h1>
-            <span class="text-[11px] px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-300 border border-indigo-500/20">
+            <h1 class="text-2xl font-semibold text-text-primary">Session Starter Kits</h1>
+            <span class="text-[11px] px-2 py-0.5 rounded-full bg-accent-bg text-accent border border-accent/20">
               {list().length}
             </span>
           </div>
-          <p class="text-sm text-zinc-400 max-w-2xl">
-            新建会话时选一个 starter,自动注入 system prompt、启用所需 skills、并运行首步指令。
+          <p class="text-sm text-text-secondary max-w-2xl">
+            新建会话时选一个 starter，自动注入 system prompt、启用所需 skills、并运行首步指令。
             内置 3 条 (
-            <span class="font-mono text-indigo-300">Code Review</span> /
-            <span class="font-mono text-indigo-300"> Debug</span> /
-            <span class="font-mono text-indigo-300"> Plan</span>
-            ) 不可删除,可复制为用户版再改。
+            <span class="font-mono text-accent">Code Review</span> /
+            <span class="font-mono text-accent"> Debug</span> /
+            <span class="font-mono text-accent"> Plan</span>
+            ) 不可删除，可复制为用户版再改。
           </p>
         </div>
         <button
           onClick={openCreate}
-          class="px-3 py-1.5 rounded-lg bg-gradient-to-r from-indigo-500 to-violet-500 text-white text-xs font-medium hover:opacity-90"
+          class="min-h-[44px] px-4 py-2 rounded-lg bg-accent text-white text-sm font-medium hover:bg-accent-hover transition"
         >
           + 新建 Starter
         </button>
       </div>
 
-      <div class="rounded-xl border border-zinc-800 bg-zinc-900/40 overflow-hidden mb-8">
+      <Show
+        when={loaded()}
+        fallback={
+          <div class="rounded-xl border border-border-subtle bg-bg-surface px-4 py-10 text-center text-sm text-text-muted">
+            加载中…
+          </div>
+        }
+      >
         <Show
-          when={loaded()}
-          fallback={<div class="px-4 py-10 text-center text-sm text-zinc-500">加载中…</div>}
+          when={list().length > 0}
+          fallback={
+            <div class="rounded-xl border border-border-subtle bg-bg-surface px-4 py-10 text-center text-sm text-text-muted">
+              暂无 starter。点击右上角 + 新建一个。
+            </div>
+          }
         >
-          <For each={list()}>
-            {(s) => (
-              <div class="px-4 py-3 border-b border-zinc-800 last:border-b-0 hover:bg-zinc-900/60 flex items-start gap-4">
-                <div class="w-8 h-8 shrink-0 rounded-lg bg-zinc-800 grid place-items-center text-base">
-                  {s.icon || (s.builtin ? "🔒" : "✨")}
-                </div>
-                <div class="flex-1 min-w-0">
-                  <div class="flex items-center gap-2 mb-1 flex-wrap">
-                    <span class="font-mono text-sm text-zinc-100 truncate">{s.name}</span>
-                    <Show when={s.builtin}>
-                      <span class="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400 border border-zinc-700">
-                        内置
-                      </span>
-                    </Show>
-                    <Show when={s.permissionMode}>
-                      <span class="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/30 font-mono">
-                        {s.permissionMode}
-                      </span>
-                    </Show>
-                    <Show when={s.enableSkills && s.enableSkills.length > 0}>
-                      <span class="text-[10px] px-1.5 py-0.5 rounded bg-orange-500/10 text-orange-300 border border-orange-500/30">
-                        {s.enableSkills!.length} skills
-                      </span>
-                    </Show>
-                    <Show when={s.firstSteps && s.firstSteps.length > 0}>
-                      <span class="text-[10px] px-1.5 py-0.5 rounded bg-teal-500/10 text-teal-300 border border-teal-500/30">
-                        {s.firstSteps!.length} steps
-                      </span>
-                    </Show>
-                  </div>
-                  <Show when={s.description}>
-                    <div class="text-xs text-zinc-400 mb-1.5">{s.description}</div>
-                  </Show>
-                  <Show when={s.systemPrompt}>
-                    <div class="text-[11px] text-zinc-500 whitespace-pre-wrap break-words line-clamp-2 bg-zinc-950/50 rounded border border-zinc-900 px-2 py-1.5 font-mono">
-                      {s.systemPrompt!.length > 180 ? s.systemPrompt!.slice(0, 180) + "…" : s.systemPrompt}
-                    </div>
-                  </Show>
-                </div>
-                <div class="flex items-center gap-1.5 shrink-0">
-                  <Show when={s.builtin}>
-                    <button
-                      onClick={() => openDuplicate(s)}
-                      class="text-xs px-2 py-1 rounded text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800"
-                      title="复制为用户版"
-                    >
-                      ⎘
-                    </button>
-                  </Show>
-                  <Show when={!s.builtin}>
-                    <button
-                      onClick={() => openEdit(s)}
-                      class="text-xs px-2 py-1 rounded text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800"
-                      title="编辑"
-                    >
-                      ✎
-                    </button>
-                    <button
-                      onClick={() => removeStarter(s)}
-                      class="text-xs px-2 py-1 rounded text-zinc-500 hover:text-rose-400 hover:bg-rose-500/10"
-                      title="删除"
-                    >
-                      🗑
-                    </button>
-                  </Show>
-                </div>
-              </div>
-            )}
-          </For>
+          <div class="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
+            <For each={list()}>
+              {(s) => (
+                <StarterCard
+                  starter={s}
+                  expanded={previewId() === s.id}
+                  onTogglePreview={() => togglePreview(s.id)}
+                  onUse={() => useStarter(s)}
+                  onEdit={() => openEdit(s)}
+                  onDuplicate={() => openDuplicate(s)}
+                  onRemove={() => removeStarter(s)}
+                />
+              )}
+            </For>
+          </div>
         </Show>
-      </div>
+      </Show>
 
       <StarterEditor
         state={editor()}
@@ -278,6 +277,187 @@ export function StartersTab(props: Props) {
         onSave={saveEditor}
         onCancel={() => setEditor(null)}
       />
+    </div>
+  );
+}
+
+function StarterCard(props: {
+  starter: Starter;
+  expanded: boolean;
+  onTogglePreview: () => void;
+  onUse: () => void;
+  onEdit: () => void;
+  onDuplicate: () => void;
+  onRemove: () => void;
+}) {
+  const s = () => props.starter;
+  const hasSystemPrompt = () => !!s().systemPrompt && s().systemPrompt!.trim().length > 0;
+  const skills = () => s().enableSkills ?? [];
+  const steps = () => s().firstSteps ?? [];
+
+  return (
+    <div
+      class="rounded-xl border border-border-subtle bg-bg-surface hover:border-border-strong transition flex flex-col"
+      classList={{
+        "border-accent/40 shadow-[0_0_0_1px_rgb(var(--accent)/0.2)]": props.expanded,
+      }}
+    >
+      {/* Header: icon + name + builtin */}
+      <div class="flex items-start gap-3 p-4 pb-3">
+        <div class="w-10 h-10 shrink-0 rounded-lg bg-bg-surfaceStrong border border-border-subtle grid place-items-center text-lg">
+          {s().icon || (s().builtin ? "🔒" : "✨")}
+        </div>
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center gap-2 flex-wrap">
+            <span class="font-semibold text-sm text-text-primary truncate">{s().name}</span>
+            <Show when={s().builtin}>
+              <span class="text-[10px] px-1.5 py-0.5 rounded bg-bg-surfaceStrong text-text-muted border border-border-subtle">
+                内置
+              </span>
+            </Show>
+          </div>
+          <Show when={s().description}>
+            <div class="text-xs text-text-secondary mt-1 line-clamp-2">{s().description}</div>
+          </Show>
+        </div>
+      </div>
+
+      {/* Chip row */}
+      <div class="px-4 pb-3 flex flex-wrap gap-1.5">
+        <Show when={hasSystemPrompt()}>
+          <span class="text-[10px] px-1.5 py-0.5 rounded bg-accent-bg text-accent border border-accent/30">
+            system prompt
+          </span>
+        </Show>
+        <Show when={skills().length > 0}>
+          <span class="text-[10px] px-1.5 py-0.5 rounded bg-warn/10 text-warn border border-warn/30">
+            {skills().length} skills
+          </span>
+        </Show>
+        <Show when={steps().length > 0}>
+          <span class="text-[10px] px-1.5 py-0.5 rounded bg-success/10 text-success border border-success/30">
+            {steps().length} first steps
+          </span>
+        </Show>
+        <Show when={s().permissionMode}>
+          <span class="text-[10px] px-1.5 py-0.5 rounded bg-warn/10 text-warn border border-warn/30 font-mono">
+            {s().permissionMode}
+          </span>
+        </Show>
+        <Show when={!hasSystemPrompt() && skills().length === 0 && steps().length === 0 && !s().permissionMode}>
+          <span class="text-[10px] text-text-muted italic">仅元数据</span>
+        </Show>
+      </div>
+
+      {/* Inline preview */}
+      <Show when={props.expanded}>
+        <div class="mx-4 mb-3 rounded-lg border border-border-subtle bg-bg-page p-3 space-y-3">
+          <Show when={hasSystemPrompt()}>
+            <div>
+              <div class="text-[10px] uppercase tracking-widest text-text-muted mb-1.5">
+                system prompt
+              </div>
+              <div class="text-[11px] text-text-primary whitespace-pre-wrap break-words font-mono bg-bg-surface rounded border border-border-subtle px-2 py-1.5 max-h-40 overflow-y-auto">
+                {s().systemPrompt}
+              </div>
+            </div>
+          </Show>
+          <Show when={skills().length > 0}>
+            <div>
+              <div class="text-[10px] uppercase tracking-widest text-text-muted mb-1.5">
+                enabled skills ({skills().length})
+              </div>
+              <div class="flex flex-wrap gap-1.5">
+                <For each={skills()}>
+                  {(sk) => (
+                    <span class="text-[11px] font-mono px-1.5 py-0.5 rounded bg-bg-surface border border-border-subtle text-text-secondary">
+                      {sk}
+                    </span>
+                  )}
+                </For>
+              </div>
+            </div>
+          </Show>
+          <Show when={steps().length > 0}>
+            <div>
+              <div class="text-[10px] uppercase tracking-widest text-text-muted mb-1.5">
+                first steps ({steps().length})
+              </div>
+              <ol class="space-y-1.5">
+                <For each={steps()}>
+                  {(step, idx) => (
+                    <li class="flex items-start gap-2 text-[11px]">
+                      <span class="shrink-0 w-5 h-5 rounded-full bg-bg-surfaceStrong border border-border-subtle grid place-items-center text-[10px] font-mono text-text-muted">
+                        {idx() + 1}
+                      </span>
+                      <div class="flex-1 min-w-0">
+                        <span class="text-[9px] uppercase tracking-widest text-text-muted mr-1.5">
+                          {STEP_KIND_LABEL[step.kind]}
+                        </span>
+                        <span class="font-mono text-text-primary break-words">
+                          {stepSummary(step)}
+                        </span>
+                      </div>
+                    </li>
+                  )}
+                </For>
+              </ol>
+            </div>
+          </Show>
+          <Show when={!hasSystemPrompt() && skills().length === 0 && steps().length === 0}>
+            <div class="text-[11px] text-text-muted italic text-center py-2">
+              该 starter 不注入任何 prompt/skill/步骤，仅改会话默认值。
+            </div>
+          </Show>
+        </div>
+      </Show>
+
+      {/* Actions footer */}
+      <div class="mt-auto px-3 py-2.5 border-t border-border-subtle flex items-center gap-1.5">
+        <button
+          onClick={props.onUse}
+          class="flex-1 min-h-[44px] px-3 py-2 rounded-lg bg-accent text-white text-xs font-medium hover:bg-accent-hover transition"
+          title="用此 starter 开新会话"
+        >
+          使用此 starter
+        </button>
+        <button
+          onClick={props.onTogglePreview}
+          class="min-h-[44px] min-w-[44px] px-3 py-2 rounded-lg border border-border-subtle text-xs text-text-secondary hover:text-text-primary hover:border-border-strong transition"
+          title={props.expanded ? "收起预览" : "预览内容"}
+          aria-expanded={props.expanded}
+        >
+          {props.expanded ? "收起" : "预览"}
+        </button>
+        <Show when={s().builtin}>
+          <button
+            onClick={props.onDuplicate}
+            class="min-h-[44px] min-w-[44px] px-2 py-2 rounded-lg border border-border-subtle text-text-muted hover:text-text-primary hover:border-border-strong transition"
+            title="复制为用户版"
+            aria-label="复制"
+          >
+            ⎘
+          </button>
+        </Show>
+        <Show when={!s().builtin}>
+          <button
+            onClick={props.onEdit}
+            class="min-h-[44px] min-w-[44px] px-2 py-2 rounded-lg border border-border-subtle text-text-muted hover:text-text-primary hover:border-border-strong transition"
+            title="编辑"
+            aria-label="编辑"
+          >
+            ✎
+          </button>
+          <button
+            onClick={props.onRemove}
+            class="min-h-[44px] min-w-[44px] px-2 py-2 rounded-lg border border-border-subtle text-text-muted hover:text-danger hover:border-danger/40 transition"
+            title="删除"
+            aria-label="删除"
+          >
+            🗑
+          </button>
+        </Show>
+      </div>
     </div>
   );
 }
@@ -292,84 +472,86 @@ function StarterEditor(props: {
     <Show when={props.state}>
       {(s) => (
         <div
-          class="fixed inset-0 z-[60] bg-black/70 backdrop-blur-sm grid place-items-center"
+          class="fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm grid place-items-center p-2"
           onClick={(ev) => ev.target === ev.currentTarget && props.onCancel()}
         >
-          <div class="w-[760px] max-w-[calc(100vw-32px)] max-h-[calc(100vh-64px)] rounded-2xl border border-zinc-800 bg-zinc-950 shadow-2xl overflow-hidden flex flex-col">
-            <div class="px-5 py-4 border-b border-zinc-900 flex items-center justify-between">
-              <div>
-                <div class="text-sm font-semibold">
+          <div class="w-[760px] max-w-[calc(100vw-16px)] max-h-[calc(100svh-16px)] rounded-2xl border border-border-subtle bg-bg-surface shadow-2xl overflow-hidden flex flex-col">
+            <div class="px-5 py-4 border-b border-border-subtle flex items-center justify-between">
+              <div class="min-w-0">
+                <div class="text-sm font-semibold text-text-primary">
                   {s().mode === "create"
                     ? "新建 Starter"
                     : s().mode === "duplicate"
                     ? "复制 Starter"
                     : `编辑 ${s().name || "Starter"}`}
                 </div>
-                <div class="text-xs text-zinc-500 mt-0.5">
+                <div class="text-xs text-text-muted mt-0.5">
                   打包 systemPrompt + skills + 首步指令一键开会话
                 </div>
               </div>
-              <button class="text-zinc-500 hover:text-zinc-200 text-sm px-2" onClick={props.onCancel}>
+              <button
+                class="min-h-[44px] min-w-[44px] text-text-muted hover:text-text-primary text-sm px-2 rounded-lg"
+                onClick={props.onCancel}
+                aria-label="关闭"
+              >
                 ✕
               </button>
             </div>
 
             <div class="p-5 overflow-y-auto flex-1 space-y-4">
-              <div class="grid grid-cols-[auto_1fr_auto_1fr] gap-3 items-center">
-                <label class="text-xs text-zinc-400">名称</label>
+              <div class="grid gap-3 sm:grid-cols-[auto_1fr_auto_1fr] sm:items-center">
+                <label class="text-xs text-text-secondary sm:text-right">名称</label>
                 <input
                   value={s().name}
                   onInput={(ev) => props.onChange({ ...s(), name: ev.currentTarget.value, error: undefined })}
                   placeholder="My Starter"
-                  class="bg-zinc-900 border border-zinc-800 rounded px-3 py-1.5 text-sm outline-none focus:border-zinc-700"
+                  class="bg-bg-surfaceStrong border border-border-subtle rounded-lg px-3 py-2 text-sm text-text-primary outline-none focus:border-accent"
                 />
-                <label class="text-xs text-zinc-400">图标</label>
+                <label class="text-xs text-text-secondary sm:text-right">图标</label>
                 <input
                   value={s().icon}
                   onInput={(ev) => props.onChange({ ...s(), icon: ev.currentTarget.value })}
                   placeholder="🚀"
                   maxLength={4}
-                  class="bg-zinc-900 border border-zinc-800 rounded px-3 py-1.5 text-sm outline-none focus:border-zinc-700 w-20"
+                  class="bg-bg-surfaceStrong border border-border-subtle rounded-lg px-3 py-2 text-sm text-text-primary outline-none focus:border-accent sm:w-24"
                 />
 
-                <label class="text-xs text-zinc-400">描述</label>
+                <label class="text-xs text-text-secondary sm:text-right">描述</label>
                 <input
                   value={s().description}
                   onInput={(ev) => props.onChange({ ...s(), description: ev.currentTarget.value })}
                   placeholder="一句话说明这个 starter 是干嘛的"
-                  class="col-span-3 bg-zinc-900 border border-zinc-800 rounded px-3 py-1.5 text-sm outline-none focus:border-zinc-700"
+                  class="sm:col-span-3 bg-bg-surfaceStrong border border-border-subtle rounded-lg px-3 py-2 text-sm text-text-primary outline-none focus:border-accent"
                 />
               </div>
 
               <div>
-                <label class="block text-xs text-zinc-400 mb-1.5">System Prompt (可选)</label>
+                <label class="block text-xs text-text-secondary mb-1.5">System Prompt (可选)</label>
                 <textarea
                   value={s().systemPrompt}
                   onInput={(ev) => props.onChange({ ...s(), systemPrompt: ev.currentTarget.value })}
                   placeholder="你是严格的代码审查者..."
                   rows={4}
-                  class="w-full bg-zinc-900 border border-zinc-800 rounded px-3 py-2 text-xs font-mono outline-none focus:border-zinc-700 resize-y"
+                  class="w-full bg-bg-surfaceStrong border border-border-subtle rounded-lg px-3 py-2 text-xs font-mono text-text-primary outline-none focus:border-accent resize-y"
                 />
-                <div class="text-[10px] text-zinc-500 mt-1">
-                  Session 创建后,客户端会把这段文字作为第一条消息发给 Claude
+                <div class="text-[10px] text-text-muted mt-1">
+                  Session 创建后，客户端会把这段文字作为第一条消息发给 Claude
                 </div>
               </div>
 
               <div>
-                <label class="block text-xs text-zinc-400 mb-1.5">启用的 Skills (可选)</label>
+                <label class="block text-xs text-text-secondary mb-1.5">启用的 Skills (可选)</label>
                 <input
                   value={s().enableSkills}
                   onInput={(ev) => props.onChange({ ...s(), enableSkills: ev.currentTarget.value })}
                   placeholder="user:geo-audit, project:my-skill (逗号分隔)"
-                  class="w-full bg-zinc-900 border border-zinc-800 rounded px-3 py-1.5 text-xs font-mono outline-none focus:border-zinc-700"
+                  class="w-full bg-bg-surfaceStrong border border-border-subtle rounded-lg px-3 py-2 text-xs font-mono text-text-primary outline-none focus:border-accent"
                 />
-                <div class="text-[10px] text-zinc-500 mt-1">
-                  若当前禁用,客户端会自动开启
-                </div>
+                <div class="text-[10px] text-text-muted mt-1">若当前禁用，客户端会自动开启</div>
               </div>
 
               <div>
-                <label class="block text-xs text-zinc-400 mb-1.5">Permission Mode (可选)</label>
+                <label class="block text-xs text-text-secondary mb-1.5">Permission Mode (可选)</label>
                 <select
                   value={s().permissionMode}
                   onChange={(ev) =>
@@ -378,7 +560,7 @@ function StarterEditor(props: {
                       permissionMode: ev.currentTarget.value as PermissionMode | "",
                     })
                   }
-                  class="bg-zinc-900 border border-zinc-800 rounded px-3 py-1.5 text-xs outline-none focus:border-zinc-700"
+                  class="bg-bg-surfaceStrong border border-border-subtle rounded-lg px-3 py-2 text-xs text-text-primary outline-none focus:border-accent"
                 >
                   <option value="">(不覆盖)</option>
                   <For each={PERMISSION_MODES}>
@@ -388,9 +570,9 @@ function StarterEditor(props: {
               </div>
 
               <div>
-                <div class="flex items-center justify-between mb-2">
-                  <label class="text-xs text-zinc-400">First Steps ({s().firstSteps.length})</label>
-                  <div class="flex gap-1">
+                <div class="flex items-center justify-between mb-2 flex-wrap gap-2">
+                  <label class="text-xs text-text-secondary">First Steps ({s().firstSteps.length})</label>
+                  <div class="flex gap-1 flex-wrap">
                     <AddStepBtn kind="prompt" onAdd={(step) => props.onChange({ ...s(), firstSteps: [...s().firstSteps, step] })} />
                     <AddStepBtn kind="slash" onAdd={(step) => props.onChange({ ...s(), firstSteps: [...s().firstSteps, step] })} />
                     <AddStepBtn kind="git" onAdd={(step) => props.onChange({ ...s(), firstSteps: [...s().firstSteps, step] })} />
@@ -427,21 +609,21 @@ function StarterEditor(props: {
               </div>
 
               <Show when={s().error}>
-                <div class="text-xs text-rose-400 bg-rose-500/10 border border-rose-500/30 rounded px-3 py-2">
+                <div class="text-xs text-danger bg-danger/10 border border-danger/30 rounded-lg px-3 py-2">
                   {s().error}
                 </div>
               </Show>
             </div>
 
-            <div class="px-5 py-3 border-t border-zinc-900 flex items-center justify-end gap-2">
+            <div class="px-5 py-3 border-t border-border-subtle flex items-center justify-end gap-2">
               <button
-                class="text-sm px-3 py-1.5 rounded text-zinc-400 hover:text-zinc-200"
+                class="min-h-[44px] text-sm px-4 py-2 rounded-lg text-text-secondary hover:text-text-primary hover:bg-bg-surfaceStrong transition"
                 onClick={props.onCancel}
               >
                 取消
               </button>
               <button
-                class="text-sm px-3 py-1.5 rounded bg-gradient-to-r from-indigo-500 to-violet-500 text-white font-medium hover:opacity-90 disabled:opacity-50"
+                class="min-h-[44px] text-sm px-4 py-2 rounded-lg bg-accent text-white font-medium hover:bg-accent-hover transition disabled:opacity-50"
                 onClick={props.onSave}
                 disabled={!s().name.trim()}
               >
@@ -459,7 +641,7 @@ function AddStepBtn(props: { kind: StepKind; onAdd: (s: WorkflowStep) => void })
   return (
     <button
       onClick={() => props.onAdd(blankStep(props.kind))}
-      class="text-[11px] px-2 py-1 rounded border border-zinc-800 text-zinc-400 hover:text-zinc-200 hover:border-zinc-700"
+      class="text-[11px] min-h-[32px] px-2 py-1 rounded-lg border border-border-subtle text-text-secondary hover:text-text-primary hover:border-border-strong transition"
     >
       + {STEP_KIND_LABEL[props.kind]}
     </button>
@@ -474,12 +656,12 @@ function StepRow(props: {
   onMove: (dir: -1 | 1) => void;
 }) {
   return (
-    <div class="rounded-lg border border-zinc-800 bg-zinc-900/60 p-3 flex items-start gap-3">
-      <div class="w-6 text-center text-xs text-zinc-500 pt-1.5 font-mono shrink-0">
+    <div class="rounded-lg border border-border-subtle bg-bg-surfaceStrong p-3 flex items-start gap-3">
+      <div class="w-6 text-center text-xs text-text-muted pt-1.5 font-mono shrink-0">
         {props.index + 1}
       </div>
       <div class="flex-1 min-w-0">
-        <div class="text-[10px] uppercase tracking-widest text-zinc-500 mb-1.5">
+        <div class="text-[10px] uppercase tracking-widest text-text-muted mb-1.5">
           {STEP_KIND_LABEL[props.step.kind]}
         </div>
         <Show when={props.step.kind === "prompt"}>
@@ -490,23 +672,23 @@ function StepRow(props: {
             }
             placeholder="发送给 Claude 的 prompt 文本"
             rows={2}
-            class="w-full bg-zinc-950 border border-zinc-800 rounded px-2 py-1.5 text-xs font-mono outline-none focus:border-zinc-700 resize-y"
+            class="w-full bg-bg-surface border border-border-subtle rounded-lg px-2 py-1.5 text-xs font-mono text-text-primary outline-none focus:border-accent resize-y"
           />
         </Show>
         <Show when={props.step.kind === "slash"}>
           <div class="flex items-center gap-1.5">
-            <span class="font-mono text-sm text-zinc-500">/</span>
+            <span class="font-mono text-sm text-text-muted">/</span>
             <input
               value={(props.step as Extract<WorkflowStep, { kind: "slash" }>).name}
               onInput={(ev) => props.onChange({ kind: "slash", name: ev.currentTarget.value })}
               placeholder="review"
-              class="flex-1 bg-zinc-950 border border-zinc-800 rounded px-2 py-1 text-xs font-mono outline-none focus:border-zinc-700"
+              class="flex-1 bg-bg-surface border border-border-subtle rounded-lg px-2 py-1.5 text-xs font-mono text-text-primary outline-none focus:border-accent"
             />
           </div>
         </Show>
         <Show when={props.step.kind === "git"}>
           <div class="flex items-center gap-1.5">
-            <span class="font-mono text-sm text-zinc-500">git</span>
+            <span class="font-mono text-sm text-text-muted">git</span>
             <input
               value={(props.step as Extract<WorkflowStep, { kind: "git" }>).args.join(" ")}
               onInput={(ev) =>
@@ -516,7 +698,7 @@ function StepRow(props: {
                 })
               }
               placeholder="status --short"
-              class="flex-1 bg-zinc-950 border border-zinc-800 rounded px-2 py-1 text-xs font-mono outline-none focus:border-zinc-700"
+              class="flex-1 bg-bg-surface border border-border-subtle rounded-lg px-2 py-1.5 text-xs font-mono text-text-primary outline-none focus:border-accent"
             />
           </div>
         </Show>
@@ -534,31 +716,34 @@ function StepRow(props: {
                   seconds: Math.max(0, Math.min(600, Number(ev.currentTarget.value) || 0)),
                 })
               }
-              class="w-24 bg-zinc-950 border border-zinc-800 rounded px-2 py-1 text-xs font-mono outline-none focus:border-zinc-700"
+              class="w-24 bg-bg-surface border border-border-subtle rounded-lg px-2 py-1.5 text-xs font-mono text-text-primary outline-none focus:border-accent"
             />
-            <span class="text-xs text-zinc-500">秒</span>
+            <span class="text-xs text-text-muted">秒</span>
           </div>
         </Show>
       </div>
       <div class="flex flex-col gap-1 shrink-0">
         <button
           onClick={() => props.onMove(-1)}
-          class="text-[11px] px-1.5 py-0.5 rounded text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800"
+          class="text-[11px] min-w-[28px] min-h-[28px] px-1.5 py-0.5 rounded text-text-muted hover:text-text-primary hover:bg-bg-surface transition"
           title="上移"
+          aria-label="上移"
         >
           ↑
         </button>
         <button
           onClick={() => props.onMove(1)}
-          class="text-[11px] px-1.5 py-0.5 rounded text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800"
+          class="text-[11px] min-w-[28px] min-h-[28px] px-1.5 py-0.5 rounded text-text-muted hover:text-text-primary hover:bg-bg-surface transition"
           title="下移"
+          aria-label="下移"
         >
           ↓
         </button>
         <button
           onClick={props.onRemove}
-          class="text-[11px] px-1.5 py-0.5 rounded text-zinc-500 hover:text-rose-400 hover:bg-rose-500/10"
+          class="text-[11px] min-w-[28px] min-h-[28px] px-1.5 py-0.5 rounded text-text-muted hover:text-danger hover:bg-danger/10 transition"
           title="删除"
+          aria-label="删除"
         >
           ✕
         </button>

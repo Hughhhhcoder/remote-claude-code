@@ -598,6 +598,13 @@ export function App() {
       <WorkflowRunBar
         state={workflowRunner.state()}
         onStop={() => workflowRunner.stop()}
+        onSkip={() => workflowRunner.skipCurrent()}
+        onResumeFrom={(i) => workflowRunner.resumeFrom(i)}
+        onDismiss={() => workflowRunner.clear()}
+        onRestart={() => {
+          const s = workflowRunner.state();
+          if (s) workflowRunner.start({ workflow: s.workflow, sid: s.sid });
+        }}
       />
       <PushPrompt client={client} />
       <ToastContainer />
