@@ -36,6 +36,7 @@ interface TabSpec {
     activeSid: string | null;
     onRunWorkflow: (req: WorkflowRunRequest) => void;
     onUseStarter?: (starterId: string) => void;
+    currentDevice: { id: string; name: string; hasPasskey?: boolean } | null;
   }) => JSX.Element;
 }
 
@@ -80,7 +81,7 @@ const TABS: readonly TabSpec[] = [
     label: "Permissions",
     icon: "🛡",
     accent: "text-amber-400",
-    render: (ctx) => <PermissionsTab client={ctx.client} />,
+    render: (ctx) => <PermissionsTab client={ctx.client} currentDevice={ctx.currentDevice} />,
   },
   {
     key: "workflows",
@@ -138,6 +139,12 @@ interface Props {
    * to dispatching a `rcc:use-starter` CustomEvent on window).
    */
   onUseStarter?: (starterId: string) => void;
+  /**
+   * [B30-A] Current device (for Passkey-gated high-risk toggles in
+   * PermissionsTab — e.g. flipping defaultMode to `bypassPermissions`).
+   * Null when device registration hasn't completed yet.
+   */
+  currentDevice?: { id: string; name: string; hasPasskey?: boolean } | null;
 }
 
 /**
@@ -211,6 +218,7 @@ export function ConfigView(props: Props) {
                         activeSid: props.activeSid,
                         onRunWorkflow: props.onRunWorkflow,
                         onUseStarter: props.onUseStarter,
+                        currentDevice: props.currentDevice ?? null,
                       })}
                     </div>
                   </Show>

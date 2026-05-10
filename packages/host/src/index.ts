@@ -120,6 +120,7 @@ import {
 } from "./federation.ts";
 import { PluginHost, PluginEventBus } from "./plugins.ts";
 import { handleRestRoute } from "./rest.ts";
+import { applySecurityHeaders } from "./security-headers.ts";
 import {
   BACKPRESSURE_DROP_THRESHOLD,
   BACKPRESSURE_CLOSE_THRESHOLD,
@@ -3729,6 +3730,10 @@ async function handleWebAuthnRoute(
 }
 
 const httpServer = createServer(async (req, res) => {
+  // Strict security headers on every response. Set before any handler
+  // writes so they stick regardless of which branch handles the request.
+  // See security-headers.ts for policy rationale.
+  applySecurityHeaders(res);
   if (req.url === "/health") {
     res.writeHead(200, { "content-type": "application/json" });
     res.end(

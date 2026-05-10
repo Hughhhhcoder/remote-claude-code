@@ -6,9 +6,21 @@ import type {
   PermissionDefaultMode,
 } from "@rcc/protocol";
 import type { RccClient } from "./client.ts";
+import {
+  authenticateForHighRiskToggle,
+  isWebAuthnAvailable,
+} from "./webauthn.ts";
+import { toast } from "./primitives/Toast.tsx";
 
 interface Props {
   client: RccClient;
+  /**
+   * [B30-A] Current device — when it has a passkey enrolled, flipping a
+   * scope's `defaultMode` to `bypassPermissions` requires a passkey
+   * ceremony. Null/undefined means no passkey is available; we fall back
+   * to a loud `confirm()`.
+   */
+  currentDevice?: { id: string; name: string; hasPasskey?: boolean } | null;
 }
 
 const SCOPE_META: Record<
@@ -119,7 +131,28 @@ export function PermissionsTab(props: Props) {
   function removeRule(scope: PermissionScope, bucket: PermissionBucket, rule: string) {
     props.client.send({ v: 1, t: "perm.remove", scope, bucket, rule });
   }
-  function setDefaultMode(scope: PermissionScope, mode: PermissionDefaultMode | null) {
+  async function setDefaultMode(scope: PermissionScope, mode: PermissionDefaultMode | null) {
+    // [B30-A] Gate bypassPermissions — this flips the scope default so
+    // new sessions inherit an unsandboxed Claude. Require passkey when
+    // available; otherwise force a loud confirm.
+    if (mode === "bypassPermissions") {
+      const me = props.currentDevice;
+      if (me?.hasPasskey && isWebAuthnAvailable()) {
+        try {
+          await authenticateForHighRiskToggle(me.id, "bypass-permissions");
+        } catch (err) {
+          toast(
+            `Passkey 验证失败 · 未切换到 Bypass · ${(err as Error).message}`,
+            { tone: "danger" },
+          );
+          return;
+        }
+      } else if (!confirm(
+        "启用 Bypass Permissions 会让 Claude 自动执行所有操作(包括 rm、git push --force)。\n\n此操作不可逆,是否继续?",
+      )) {
+        return;
+      }
+    }
     props.client.send({ v: 1, t: "perm.set-default", scope, mode });
   }
   function addDir(scope: PermissionScope, path: string) {

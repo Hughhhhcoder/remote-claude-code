@@ -50,6 +50,38 @@ export default defineConfig({
   server: {
     port: 5273,
     strictPort: true,
+    // Mirror the host's production security headers so dev behavior matches
+    // prod (catches CSP violations locally instead of in production). See
+    // packages/host/src/security-headers.ts for rationale.
+    headers: {
+      "content-security-policy": [
+        "default-src 'self'",
+        // Vite dev server uses ws: on the same origin for HMR.
+        "connect-src 'self' wss: ws:",
+        "img-src 'self' data: blob:",
+        "script-src 'self' 'wasm-unsafe-eval'",
+        "style-src 'self' 'unsafe-inline'",
+        "font-src 'self' data:",
+        "worker-src 'self' blob:",
+        "frame-ancestors 'none'",
+        "base-uri 'self'",
+        "form-action 'none'",
+      ].join("; "),
+      "cross-origin-opener-policy": "same-origin",
+      "cross-origin-embedder-policy": "credentialless",
+      "cross-origin-resource-policy": "same-origin",
+      "permissions-policy": [
+        "camera=()",
+        "microphone=(self)",
+        "geolocation=()",
+        "interest-cohort=()",
+        "browsing-topics=()",
+        "publickey-credentials-get=(self)",
+      ].join(", "),
+      "referrer-policy": "no-referrer",
+      "x-frame-options": "DENY",
+      "x-content-type-options": "nosniff",
+    },
     proxy: {
       "/ws": {
         target: "ws://localhost:7777",

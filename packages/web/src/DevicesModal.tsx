@@ -1,7 +1,13 @@
 import { createSignal, createEffect, For, Show, onCleanup } from "solid-js";
 import type { DeviceSummary } from "@rcc/protocol";
 import type { RccClient } from "./client.ts";
-import { registerPasskey, clearPasskey, isWebAuthnAvailable } from "./webauthn.ts";
+import {
+  registerPasskey,
+  clearPasskey,
+  isWebAuthnAvailable,
+  authenticateForHighRiskToggle,
+} from "./webauthn.ts";
+import { toast } from "./primitives/Toast.tsx";
 
 interface Props {
   open: boolean;
@@ -38,12 +44,26 @@ export function DevicesModal(props: Props) {
     }
   });
 
-  function revoke(d: DeviceSummary) {
+  async function revoke(d: DeviceSummary) {
     if (d.current) {
       alert("不能从此设备吊销自己。请用另一台已配对设备或 host 的 CLI 吊销。");
       return;
     }
-    if (!confirm(`确认吊销设备 "${d.name}"？它将立即断开，下次连接需要重新配对。`)) return;
+    if (!confirm(`确认吊销设备 "${d.name}"？它将立即断开，下次连接需要重新配对。\n\n此操作不可逆,是否继续?`)) return;
+    // [B30-A] High-risk gate: require passkey re-auth on devices that have
+    // one enrolled. If the current device has no passkey, the confirm()
+    // above is the only safeguard.
+    const me = props.currentDevice;
+    if (me?.hasPasskey && isWebAuthnAvailable()) {
+      try {
+        await authenticateForHighRiskToggle(me.id, "revoke-device");
+      } catch (err) {
+        toast(`Passkey 验证失败 · 已取消吊销 · ${(err as Error).message}`, {
+          tone: "danger",
+        });
+        return;
+      }
+    }
     props.client.send({ v: 1, t: "device.revoke", deviceId: d.id });
   }
 

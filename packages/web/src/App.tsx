@@ -602,6 +602,7 @@ export function App() {
           workflowRunner.start(req);
           uiStore.setConfigOpen(false);
         }}
+        currentDevice={currentDevice()}
       />
       <MarketplaceView
         open={uiStore.marketOpen()}

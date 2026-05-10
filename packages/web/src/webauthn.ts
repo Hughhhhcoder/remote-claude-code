@@ -72,6 +72,36 @@ export async function authenticateForApproval(
   return result.webauthnToken;
 }
 
+/**
+ * Runs a WebAuthn assertion for high-risk UI toggles (e.g. flipping a
+ * session's permissionMode to `bypassPermissions`, revoking another paired
+ * device). Unlike `authenticateForApproval` there is no server-side approval
+ * id to bind against — the `label` is echoed purely for client-side intent
+ * recording. Throws on user cancellation or verification failure so callers
+ * can abort the toggle.
+ *
+ * Callers MUST check `isWebAuthnAvailable()` and `device.hasPasskey` first;
+ * when a passkey isn't set up, fall back to a plain `confirm()`.
+ */
+export async function authenticateForHighRiskToggle(
+  deviceId: string,
+  label: string,
+): Promise<void> {
+  // The server's /assert/begin accepts a synthetic approvalId; we namespace
+  // the label so logs can distinguish toggles from approval flows.
+  const approvalId = `toggle:${label}:${Date.now()}`;
+  const options = await post<PublicKeyCredentialRequestOptionsJSON>(
+    "/webauthn/assert/begin",
+    { deviceId, approvalId },
+  );
+  const response: AuthenticationResponseJSON = await startAuthentication({ optionsJSON: options });
+  const result = await post<{ ok: boolean; webauthnToken: string | null }>(
+    "/webauthn/assert/complete",
+    { deviceId, approvalId, response },
+  );
+  if (!result.ok) throw new Error("passkey verification failed");
+}
+
 export function isWebAuthnAvailable(): boolean {
   return typeof window !== "undefined" && !!window.PublicKeyCredential;
 }
