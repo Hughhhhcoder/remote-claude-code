@@ -1281,6 +1281,13 @@ export const ChatReplay = z.object({
   sid: z.string(),
   frames: z.array(ChatReplayFrame),
   lostCount: z.number().int().nonnegative(),
+  /**
+   * [B15-C] When `lostCount > 0` the host SHOULD set this to the seq of the
+   * oldest frame still retained in the ring buffer, so the client can tell
+   * the user "server retains since seq X". Optional for back-compat — old
+   * hosts omit it and the client's toast simply doesn't mention a seq.
+   */
+  oldestSeq: z.number().int().nonnegative().optional(),
 });
 export type ChatReplay = z.infer<typeof ChatReplay>;
 

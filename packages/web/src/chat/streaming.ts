@@ -18,9 +18,10 @@
 // chat.list path is the safety net.
 //
 // This module is pure data reactivity — no JSX.
-import type { ChatMessage, ChatSegment, Frame } from "@rcc/protocol";
+import type { ChatMessage, ChatSegment, Frame, SessionMeta } from "@rcc/protocol";
 import { createSignal, createEffect, onCleanup, type Accessor } from "solid-js";
 import type { RccClient } from "../client";
+import { toast } from "../primitives/Toast";
 
 export interface StreamingStats {
   count: number;
@@ -104,6 +105,7 @@ function rafSchedule(cb: () => void): { cancel: () => void } {
 export function createStreamingMessages(
   client: RccClient,
   sidAccessor: Accessor<string | undefined>,
+  sessionsAccessor?: Accessor<readonly SessionMeta[]>,
 ): StreamingMessagesStore {
   const [messages, setMessages] = createSignal<ChatMessage[]>([]);
 
@@ -329,6 +331,11 @@ export function createStreamingMessages(
     }
 
     if (frame.t === "chat.replay" && frame.sid === sid) {
+      // [B15-C] Dead-sid guard: drop silently if the sid isn't in our known
+      // sessions (host tore it down but a replay raced in). Before any
+      // pending/orphan mutation so state stays consistent.
+      const known = sessionsAccessor?.();
+      if (known && !known.some((s) => s.id === frame.sid)) return;
       // [B14-C] Reply to session.attach.chatSince. lostCount > 0 → cursor
       // older than host ring; re-hydrate via chat.list. Clear pending/orphans
       // but keep `messages` so user sees old prefix until chat.list replaces
@@ -338,6 +345,9 @@ export function createStreamingMessages(
         orphanUpdates.clear();
         if (rafHandle) { rafHandle.cancel(); rafHandle = null; }
         setOrphanCount(0);
+        // [B15-C] One toast per replay event (not per-frame) — the guard runs
+        // before the re-dispatch loop, which fires per frame for lostCount=0.
+        toast("会话快照回放窗口溢出 · 已重新加载", { tone: "warn" });
         client.send({ v: 1, t: "chat.list.request", sid });
         return;
       }

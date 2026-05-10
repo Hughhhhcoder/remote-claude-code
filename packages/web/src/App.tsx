@@ -33,6 +33,7 @@ import { ConnectionBanner } from "./shell/ConnectionBanner.tsx";
 import { useIsCompact } from "./hooks/useMediaQuery.ts";
 import { EmptyState } from "./primitives/EmptyState.tsx";
 import { ErrorBoundary } from "./primitives/ErrorBoundary.tsx";
+import { ToastContainer } from "./primitives/Toast.tsx";
 import { createSessionsStore } from "./stores/sessionsStore.ts";
 import { createProjectsStore } from "./stores/projectsStore.ts";
 import { createPeersStore } from "./stores/peersStore.ts";
@@ -462,6 +463,7 @@ export function App() {
         onStop={() => workflowRunner.stop()}
       />
       <PushPrompt client={client} />
+      <ToastContainer />
     </Show>
   );
 }

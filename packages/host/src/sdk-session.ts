@@ -214,14 +214,17 @@ export class SdkSession {
     return this.chatFrameSeqCounter;
   }
 
-  replayChatFrames(since: number): { frames: BufferedChatFrame[]; lostCount: number } {
+  replayChatFrames(since: number): { frames: BufferedChatFrame[]; lostCount: number; oldestSeq: number } {
     const current = this.chatFrameSeqCounter;
-    if (since >= current) return { frames: [], lostCount: 0 };
+    // [B15-C] oldestSeq = seq of the oldest retained frame; empty ring → current.
+    const ringTail = this.recentChatFrames.since(0);
+    const oldestSeq = ringTail && ringTail.length > 0 ? ringTail[0]!.seq : current;
+    if (since >= current) return { frames: [], lostCount: 0, oldestSeq };
     const tail = this.recentChatFrames.since(since);
     if (tail === null) {
-      return { frames: [], lostCount: current - since };
+      return { frames: [], lostCount: current - since, oldestSeq };
     }
-    return { frames: tail, lostCount: 0 };
+    return { frames: tail, lostCount: 0, oldestSeq };
   }
 
   kill(): void {

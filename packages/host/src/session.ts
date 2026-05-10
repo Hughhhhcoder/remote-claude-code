@@ -13,6 +13,11 @@ const RING_TAIL_BYTES = 32 * 1024;
 // [B13-B] How many recent chat.append/update/delta frames to retain per
 // session for reconnect replay. 500 is ~a few minutes of heavy streaming;
 // anything older forces the client to do a full chat.list re-hydration.
+//
+// [B15-C] Ring buffer: CHAT_FRAME_RING_CAPACITY = 500 frames. A client can
+// request replay from any seq >= oldestSeq. Older requests get lostCount > 0
+// and must re-hydrate via chat.list.request. Web client surfaces this via a
+// toast.
 const CHAT_FRAME_RING_CAPACITY = 500;
 
 export interface BufferedChunk {
@@ -236,14 +241,19 @@ export class Session {
    * `since <= 0` on a session with zero emitted frames returns an empty
    * replay without flagging loss (fresh attach has nothing to miss).
    */
-  replayChatFrames(since: number): { frames: BufferedChatFrame[]; lostCount: number } {
+  replayChatFrames(since: number): { frames: BufferedChatFrame[]; lostCount: number; oldestSeq: number } {
     const current = this.chatFrameSeqCounter;
-    if (since >= current) return { frames: [], lostCount: 0 };
+    // [B15-C] oldestSeq = seq of the oldest frame still retained. When the
+    // ring is empty we report `current` (next-to-emit) so the client can tell
+    // "nothing yet / fully caught up" from "window overflowed".
+    const ringTail = this.recentChatFrames.since(0);
+    const oldestSeq = ringTail && ringTail.length > 0 ? ringTail[0]!.seq : current;
+    if (since >= current) return { frames: [], lostCount: 0, oldestSeq };
     const tail = this.recentChatFrames.since(since);
     if (tail === null) {
-      return { frames: [], lostCount: current - since };
+      return { frames: [], lostCount: current - since, oldestSeq };
     }
-    return { frames: tail, lostCount: 0 };
+    return { frames: tail, lostCount: 0, oldestSeq };
   }
 
   kill(): void {
@@ -405,8 +415,8 @@ export class DeadSession {
     return 0;
   }
 
-  replayChatFrames(_since: number): { frames: BufferedChatFrame[]; lostCount: number } {
-    return { frames: [], lostCount: 0 };
+  replayChatFrames(_since: number): { frames: BufferedChatFrame[]; lostCount: number; oldestSeq: number } {
+    return { frames: [], lostCount: 0, oldestSeq: 0 };
   }
 
   kill(): void {

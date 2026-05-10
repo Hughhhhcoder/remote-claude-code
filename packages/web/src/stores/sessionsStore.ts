@@ -6,6 +6,7 @@ import type {
   SessionMeta,
 } from "@rcc/protocol";
 import type { RccClient } from "../client.ts";
+import { toast } from "../primitives/Toast.tsx";
 
 export type SessionsStore = ReturnType<typeof createSessionsStore>;
 
@@ -63,6 +64,38 @@ export function createSessionsStore(
     null,
   );
 
+  // --- Optimistic close rollback tracking ------------------------------
+  // When the user closes a session we drop it locally before the host has
+  // acknowledged. If the host rejects (error frame) or the next
+  // `session.list` still contains the sid, we restore the snapshot and
+  // toast the user. See B15-A.
+  interface CloseSnapshot {
+    session: SessionMeta;
+    wasActive: boolean;
+    timer: ReturnType<typeof setTimeout>;
+  }
+  const pendingCloses = new Map<string, CloseSnapshot>();
+  const CLOSE_TIMEOUT_MS = 10_000;
+
+  function rollbackClose(sid: string, reason: string): void {
+    const snap = pendingCloses.get(sid);
+    if (!snap) return;
+    clearTimeout(snap.timer);
+    pendingCloses.delete(sid);
+    setSessions((s) =>
+      s.some((x) => x.id === sid) ? s : [...s, snap.session],
+    );
+    if (snap.wasActive) setActiveSid(sid);
+    toast(`关闭失败 · ${reason}`, { tone: "danger" });
+  }
+
+  function resolveClose(sid: string): void {
+    const snap = pendingCloses.get(sid);
+    if (!snap) return;
+    clearTimeout(snap.timer);
+    pendingCloses.delete(sid);
+  }
+
   function requestGitStatusForMissing(list: readonly SessionMeta[]): void {
     const git = gitBySid();
     for (const s of list) {
@@ -74,6 +107,16 @@ export function createSessionsStore(
 
   const unsubFrame = client.on((frame) => {
     if (frame.t === "hello" || frame.t === "session.list") {
+      // Reconcile optimistic closes: any pending sid still present in the
+      // authoritative list means the host refused — rollback. Absent sids
+      // confirm the close.
+      if (pendingCloses.size > 0) {
+        const present = new Set(frame.sessions.map((s) => s.id));
+        for (const sid of Array.from(pendingCloses.keys())) {
+          if (present.has(sid)) rollbackClose(sid, "主机仍持有该会话");
+          else resolveClose(sid);
+        }
+      }
       setSessions(frame.sessions);
       if (!activeSid() && frame.sessions.length > 0) {
         setActiveSid(frame.sessions[0]!.id);
@@ -81,6 +124,16 @@ export function createSessionsStore(
       // The host publishes git.status on change, but late clients miss
       // the first emit — request for any sid we don't yet have.
       requestGitStatusForMissing(frame.sessions);
+      return;
+    }
+
+    if (frame.t === "error") {
+      // Host rejected a command. If it references a sid with a pending
+      // close, roll that close back. Other error payloads are ignored
+      // here — they surface elsewhere.
+      if (frame.sid && pendingCloses.has(frame.sid)) {
+        rollbackClose(frame.sid, frame.message || frame.code);
+      }
       return;
     }
 
@@ -144,14 +197,30 @@ export function createSessionsStore(
    * Optimistically remove the session locally and tell the host to close it.
    * Flips activeSid to the next available session when the active one is
    * dropped. Caller is responsible for any confirm() dialog.
+   *
+   * Rollback (B15-A): snapshots the session and starts a 10s timer. The
+   * next `session.list` reconciles — if the sid is still present, or an
+   * `error` frame with that sid arrives, we restore the snapshot and
+   * surface a toast. The timer is a safety net for hosts that never reply.
    */
   function closeSession(sid: string): void {
+    const prev = sessions().find((x) => x.id === sid);
+    const wasActive = activeSid() === sid;
     client.closeSession(sid);
     setSessions((s) => s.filter((x) => x.id !== sid));
-    if (activeSid() === sid) {
+    if (wasActive) {
       const next = sessions().find((x) => x.id !== sid);
       setActiveSid(next?.id ?? null);
     }
+    if (!prev) return;
+    // Clear any in-flight close for the same sid before starting a new one.
+    const existing = pendingCloses.get(sid);
+    if (existing) clearTimeout(existing.timer);
+    const timer = setTimeout(
+      () => rollbackClose(sid, "请求超时"),
+      CLOSE_TIMEOUT_MS,
+    );
+    pendingCloses.set(sid, { session: prev, wasActive, timer });
   }
 
   /**
@@ -253,6 +322,8 @@ export function createSessionsStore(
     activeSessionProjectId,
 
     dispose: () => {
+      for (const snap of pendingCloses.values()) clearTimeout(snap.timer);
+      pendingCloses.clear();
       unsubFrame();
     },
   };

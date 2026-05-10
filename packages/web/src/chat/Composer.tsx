@@ -57,6 +57,8 @@ export interface ComposerProps {
   onDraftChange?: (text: string) => void;
   /** Initial draft value (from CRDT shared text hydration). */
   initialDraft?: string;
+  /** When true, draws a faint accent ring to signal a remote collaborator edit. */
+  remoteEditing?: boolean;
 }
 
 const MAX_HEIGHT_PX = 192; // 8 rows × 24px line-height
@@ -138,6 +140,7 @@ export function Composer(props: ComposerProps): JSX.Element {
         ? "border-border-subtle opacity-60"
         : "border-border-subtle focus-within:border-accent " +
           "focus-within:shadow-[0_0_0_3px_rgba(218,119,86,0.15)]",
+      props.remoteEditing ? "ring-2 ring-accent/20" : "",
     ].join(" ");
 
   return (

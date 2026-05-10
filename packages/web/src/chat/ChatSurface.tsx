@@ -65,13 +65,30 @@ export function ChatSurface(props: ChatSurfaceProps): JSX.Element {
   const isMobile = useIsMobile();
 
   // --- streaming message store (per-sid) ----------------------------------
-  const stream = createStreamingMessages(props.client, () => props.sid);
+  const stream = createStreamingMessages(props.client, () => props.sid, () => props.sessions);
   onCleanup(() => stream.dispose());
 
   // --- draft + CRDT share --------------------------------------------------
   const [draft, setDraft] = createSignal("");
   const [sharedKey, setSharedKey] = createSignal(0);
+  const [remoteEditActive, setRemoteEditActive] = createSignal(false);
   let shared: SharedText | null = null;
+  // Last value we wrote locally (via onDraftChange/setValue). Y.Text#observe
+  // fires for BOTH local and remote transactions, so we filter out the echo
+  // by comparing the observed value against this ref.
+  let lastLocalValue = "";
+  let remoteEditTimer: ReturnType<typeof setTimeout> | null = null;
+  function flashRemoteEdit(): void {
+    setRemoteEditActive(true);
+    if (remoteEditTimer) clearTimeout(remoteEditTimer);
+    remoteEditTimer = setTimeout(() => {
+      setRemoteEditActive(false);
+      remoteEditTimer = null;
+    }, 2000);
+  }
+  onCleanup(() => {
+    if (remoteEditTimer) clearTimeout(remoteEditTimer);
+  });
 
   // Re-create shared text per sid.
   createMemo(() => {
@@ -79,8 +96,14 @@ export function ChatSurface(props: ChatSurfaceProps): JSX.Element {
     shared?.destroy();
     const s = createSharedText(props.client, sid, "input-draft");
     shared = s;
-    setDraft(s.getValue());
-    const off = s.observe((v) => setDraft(v));
+    const initial = s.getValue();
+    lastLocalValue = initial;
+    setDraft(initial);
+    const off = s.observe((v) => {
+      setDraft(v);
+      if (v !== lastLocalValue) flashRemoteEdit();
+      lastLocalValue = v;
+    });
     onCleanup(() => {
       off();
       s.destroy();
@@ -91,6 +114,7 @@ export function ChatSurface(props: ChatSurfaceProps): JSX.Element {
   void sharedKey;
 
   function onDraftChange(v: string): void {
+    lastLocalValue = v;
     setDraft(v);
     shared?.setValue(v);
   }
@@ -136,6 +160,7 @@ export function ChatSurface(props: ChatSurfaceProps): JSX.Element {
     }
     if (props.onSend) props.onSend(text);
     else props.client.write(props.sid, text + "\r");
+    lastLocalValue = "";
     shared?.setValue("");
     setDraft("");
   }
@@ -181,12 +206,18 @@ export function ChatSurface(props: ChatSurfaceProps): JSX.Element {
         }
         composerSlot={
           <div class="flex flex-col">
+            <Show when={remoteEditActive()}>
+              <div class="text-[11px] text-accent font-sans mx-4 mb-1">
+                👥 协作者正在编辑…
+              </div>
+            </Show>
             <Composer
               sid={props.sid}
               client={props.client}
               onSend={onSend}
               initialDraft={draft()}
               onDraftChange={onDraftChange}
+              remoteEditing={remoteEditActive()}
               placeholder="发送消息…"
               attachSlot={<AttachButton onClick={() => setInjectOpen(true)} />}
               voiceSlot={

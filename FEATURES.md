@@ -361,9 +361,26 @@
   - `pnpm -r typecheck` ✅;`pnpm -F @rcc/web build` ✅(1374 modules,1m26s)。
 
 **batch 15** · 数据一致性:
-- B15-A 乐观更新回滚(approval / session.close)
-- B15-B 并发同 session 多端输入冲突处理(CRDT 已有,UI 提示)
-- B15-C 时钟漂移导致 replay 窗口失败的降级提示
+- B15-A 乐观更新回滚(approval / session.close)✅ (batch 15 · 2026-05-10)
+  - `packages/web/src/primitives/Toast.tsx`(新建 129 LOC):app 级轻量通知原语。module-level signal 队列 + `toast(msg, { tone, duration })` 函数 + `<ToastContainer />` JSX。`tone: "info" | "warn" | "danger"` 切 border + 左侧 3px 条纹色。4s 自动消散 + ✕ 手动关闭。响应式定位:移动端底部居中、desktop 底右。全部 semantic token(`bg-bg-surface` / `border-border-subtle` / `text-text-primary` / `bg-accent|warn|danger`)。
+  - `packages/web/src/stores/sessionsStore.ts`(+70 LOC net):`pendingCloses: Map<sid, { session, wasActive, timer }>` 跟踪乐观关闭。`closeSession(sid)` 先 snapshot 再本地移除,10s 兜底 timer;下一次 `session.list` 若仍含该 sid → 回滚 + toast `关闭失败 · 主机仍持有该会话`;收到 `error` 帧(`code/message/sid?`)且 `sid` 命中 → 回滚 + toast 带 server message;timer fire → 回滚 + toast `请求超时`。resolved 即 drop 出 map。dispose 清所有 timer。
+  - `packages/web/src/stores/approvalsStore.ts`(+89 LOC net):`ApprovalHistoryItem` 新增 `provisional?: boolean` 字段。`pendingResponses: Map<id, { request, approve, timer }>` 跟踪乐观应答。`respond()` 先 push `provisional: true` 到 history + 10s timer;新的 `approval.request`(不同 id)→ 之前 pending 视为 host moved on,清 provisional 标记;`approval.cleared` 匹配 pending id → 同上;`error` 帧按 `frame.sid` 匹配 → 回滚(drop provisional row,`setCurrent(p.request)` 若当前 slot 空闲,toast `审批未送达 · <reason> · 请重试`);timer fire → 同 rollback 路径;`session.exited` → 将该 sid 下所有 pending 当成 resolved。
+  - `packages/web/src/App.tsx`(+2 LOC):import + `<ToastContainer />` 挂在 authed `<Show>` 内根部。
+  - 约束核对:无新 npm dep;仅 Solid primitives;语义 token;未触 `chat/*` / `MainPane.tsx` / `ChatSurface.tsx`;Toast 129 LOC(< 150 budget);sessionsStore +70(目标 < 60,略超 10 行主要为 `session.list` 协调 + `error` 帧处理);approvalsStore +89(目标 < 80,略超 9 行主要为 4 类 frame 分支的 rollback 协调)。
+  - Error 检测机制:protocol 的 `error` 帧 `{ t: "error", code: string, message: string, sid?: string }` —— 两个 store 都订阅 `error` 并按 `frame.sid` 匹配到各自的 pending map。approval 的 `error` 帧无 approval id,只能按 sid 匹配(best-effort,命中第一个)。
+  - 断网边界用例:用户点 Approve → 乐观写 history + provisional + 10s timer。WS 立即掉线 → 帧到不了 host、也收不到回执;10s 后 timer fire → `rollbackResponse()` drop provisional row + `setCurrent(p.request)` 若 slot 空闲 + toast `审批未送达 · 请求超时 · 请重试`。重连后用户可继续在重新出现的 banner 上点 Approve/Deny。
+  - `pnpm -F @rcc/web typecheck` ✅;`pnpm -F @rcc/web build` ✅(1375 modules,1m23s)。
+- B15-B 并发同 session 多端输入冲突处理(CRDT 已有,UI 提示)✅ (batch 15 · 2026-05-10)
+  - `packages/web/src/chat/ChatSurface.tsx`(+29 LOC net):新增 `remoteEditActive` 信号 + `lastLocalValue` ref + `remoteEditTimer` + `flashRemoteEdit()`(2s 自动清,连续 remote 编辑会 reset 定时器)。`onDraftChange` 和 `onSend` 的 `shared?.setValue("")` 之前都会先写 `lastLocalValue = v`;CRDT observer 里 `v !== lastLocalValue → flashRemoteEdit()`(Y.Text#observe 对 local/remote 都会触发,靠 ref diff 过滤本地 echo)。`onCleanup` 清定时器。composer 上方条件渲染小 chip `👥 协作者正在编辑…`(`text-accent text-[11px] mx-4 mb-1`,用语义 token)。
+  - `packages/web/src/chat/Composer.tsx`(+2 LOC):新增 optional `remoteEditing?: boolean` prop,`outerCls()` 里 truthy 时加 `ring-2 ring-accent/20` 淡环,无焦点时也能看到协作提示。
+  - caret 跳跃未处理:Y.Text 不跟踪光标位置,remote edit 命中 textarea 时光标可能跳 —— 按任务描述"可接受,只暴露协作状态"不动 caret 逻辑。
+  - 无新 dep;未触碰 `crdt.ts`/`streaming.ts`/`blocks/*`;typecheck ✅;`pnpm -F @rcc/web build` ✅(1374 modules,59.64s)。
+- B15-C 时钟漂移导致 replay 窗口失败的降级提示 ✅ (batch 15 · 2026-05-10)
+  - 协议层:`ChatReplay` 扩展 optional `oldestSeq?: number`,向后兼容(`packages/protocol/src/index.ts` +9 LOC 含注释)。
+  - host:`Session` / `SdkSession` / `DeadSession` 的 `replayChatFrames` 返回值统一加 `oldestSeq`;从 `recentChatFrames.since(0)[0].seq` 取最旧保留帧,空环回退到 `current`(代表"完全追上")。两处 broadcast 站(`chat.replay` / `session.attach.chatSince`)透传字段。`packages/host/src/session.ts` +12 LOC, `sdk-session.ts` +5 LOC, `index.ts` +2 LOC。
+  - `session.ts` 顶部注释补环形缓冲不变式(CAPACITY=500,lostCount>0 → re-hydrate,web 会 toast)。
+  - web:`createStreamingMessages` 新增 optional `sessionsAccessor` 形参,`chat.replay` 分支在任何 pending / orphan mutation **之前**校验 `frame.sid` 在已知 sessions 中;不在则静默丢弃。`lostCount > 0` 时先 `toast("会话快照回放窗口溢出 · 已重新加载", { tone: "warn" })` 再发 `chat.list.request`,toast 在 early-return 分支内只触发一次(不随 lostCount=0 的逐帧 re-dispatch)。`packages/web/src/chat/streaming.ts` +10 LOC, `ChatSurface.tsx` +1 LOC(传 sessions)。
+  - 不新增 npm dep,不新增协议 frame;host 改动 < 25 LOC,web 改动 < 20 LOC;未触碰 chat UI 组件。typecheck ✅(host+web);`pnpm -F @rcc/web build` ✅(45.77s)。
 
 **验收**: 手动杀 host / 拔网线 / 同 session 两端输入,UI 不崩溃,信息清晰。tag `v0.1.9`。
 

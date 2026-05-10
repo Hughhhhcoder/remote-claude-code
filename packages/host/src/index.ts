@@ -1158,6 +1158,7 @@ function handle(ws: WebSocket, state: WsState, frame: Frame): void {
             sid: s.id,
             frames: replay.frames.map((f) => f.frame),
             lostCount: replay.lostCount,
+            oldestSeq: replay.oldestSeq,
           });
         }
         attach(ws, state, s, frame.since ?? null);
@@ -1332,6 +1333,7 @@ function handle(ws: WebSocket, state: WsState, frame: Frame): void {
           sid: s.id,
           frames: replay.frames.map((f) => f.frame),
           lostCount: replay.lostCount,
+          oldestSeq: replay.oldestSeq,
         });
       }
       attach(ws, state, s, frame.since ?? null);
