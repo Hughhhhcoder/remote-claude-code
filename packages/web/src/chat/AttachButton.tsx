@@ -1,4 +1,5 @@
 import type { JSX } from "solid-js";
+import { t } from "../i18n/index.ts";
 
 /**
  * AttachButton — triggers the ContextInjector overlay. Stateless; the
@@ -33,8 +34,8 @@ export function AttachButton(props: AttachButtonProps): JSX.Element {
         if (!props.disabled) props.onClick();
       }}
       disabled={props.disabled}
-      aria-label="附加上下文"
-      title={props.title ?? "附加上下文"}
+      aria-label={t("chat.attachAria")}
+      title={props.title ?? t("chat.attachAria")}
     >
       <span class="font-sans text-[18px] leading-none" aria-hidden="true">+</span>
     </button>

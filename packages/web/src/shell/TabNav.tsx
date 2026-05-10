@@ -1,4 +1,5 @@
 import { For, Show, type JSX } from "solid-js";
+import { t, tt } from "../i18n/index.ts";
 
 /**
  * TabNav — Phase 2-C bottom tab bar for compact layouts (< 1024px).
@@ -29,25 +30,14 @@ export interface TabNavProps {
 interface TabDef {
   key: TabKey;
   icon: string;
-  label: string;
-  ariaLabel: string;
+  labelKey: "tabnav.chat" | "tabnav.files" | "tabnav.approvals" | "tabnav.settings";
 }
 
 const TABS: readonly TabDef[] = [
-  { key: "chat", icon: "💬", label: "对话", ariaLabel: "对话" },
-  { key: "files", icon: "📁", label: "文件", ariaLabel: "文件" },
-  {
-    key: "approvals",
-    icon: "📋",
-    label: "审批",
-    ariaLabel: "审批",
-  },
-  {
-    key: "settings",
-    icon: "⚙",
-    label: "设置",
-    ariaLabel: "设置",
-  },
+  { key: "chat", icon: "💬", labelKey: "tabnav.chat" },
+  { key: "files", icon: "📁", labelKey: "tabnav.files" },
+  { key: "approvals", icon: "📋", labelKey: "tabnav.approvals" },
+  { key: "settings", icon: "⚙", labelKey: "tabnav.settings" },
 ] as const;
 
 export function TabNav(props: TabNavProps): JSX.Element {
@@ -56,7 +46,7 @@ export function TabNav(props: TabNavProps): JSX.Element {
   return (
     <nav
       role="navigation"
-      aria-label="主导航"
+      aria-label={t("tabnav.mainNav")}
       class={[
         // Base: fixed bottom strip, blurred, above main scroll content.
         "fixed inset-x-0 bottom-0 z-20",
@@ -83,8 +73,8 @@ export function TabNav(props: TabNavProps): JSX.Element {
 
             const ariaFull = () =>
               tab.key === "approvals" && props.pendingApprovals > 0
-                ? `${tab.ariaLabel},${props.pendingApprovals} 待处理`
-                : tab.ariaLabel;
+                ? tt("tabnav.tabWithPending", { label: t(tab.labelKey), n: props.pendingApprovals })
+                : t(tab.labelKey);
 
             return (
               <li class="flex-1 min-w-0">
@@ -111,7 +101,7 @@ export function TabNav(props: TabNavProps): JSX.Element {
                   >
                     {tab.icon}
                   </span>
-                  <span class="leading-none">{tab.label}</span>
+                  <span class="leading-none">{t(tab.labelKey)}</span>
                   <Show when={showBadge()}>
                     <span
                       class={

@@ -1,7 +1,8 @@
 import { createMemo, For, Show, type JSX } from "solid-js";
 import { Portal } from "solid-js/web";
 import { useShortcuts, type Shortcut, type ShortcutCategory } from "../hooks/useKeyboardShortcuts.ts";
-import { useIsMobile } from "../useIsMobile.ts";
+import { useIsMobile } from "../hooks/useMediaQuery.ts";
+import { t } from "../i18n/index.ts";
 
 /**
  * ShortcutHelp — overlay showing every registered keyboard shortcut (B17-A).
@@ -19,12 +20,12 @@ export interface ShortcutHelpProps {
   onClose: () => void;
 }
 
-const CATEGORY_LABEL: Record<ShortcutCategory, string> = {
-  nav: "导航",
-  session: "会话",
-  chat: "对话",
-  app: "应用",
-};
+const CATEGORY_LABEL: () => Record<ShortcutCategory, string> = () => ({
+  nav: t("shortcuts.group.nav"),
+  session: t("shortcuts.group.session"),
+  chat: t("shortcuts.group.chat"),
+  app: t("shortcuts.group.app"),
+});
 
 const CATEGORY_ORDER: ShortcutCategory[] = ["nav", "session", "chat", "app"];
 
@@ -98,7 +99,7 @@ export function ShortcutHelp(props: ShortcutHelpProps): JSX.Element {
         <div
           role="dialog"
           aria-modal="true"
-          aria-label="键盘快捷键"
+          aria-label={t("shortcuts.ariaLabel")}
           class={panelClass()}
           style={isMobile() ? { "padding-bottom": "env(safe-area-inset-bottom)" } : undefined}
           onClick={(e) => e.stopPropagation()}
@@ -112,12 +113,12 @@ export function ShortcutHelp(props: ShortcutHelpProps): JSX.Element {
 
           <div class="flex items-center justify-between gap-3 px-5 py-4 border-b border-border-subtle shrink-0">
             <h2 class="font-serif text-lg font-medium text-text-primary m-0">
-              键盘快捷键
+              {t("shortcuts.title")}
             </h2>
             <button
               type="button"
               class="text-text-muted hover:text-text-primary text-sm px-2 py-1 rounded"
-              aria-label="关闭"
+              aria-label={t("shortcuts.close")}
               onClick={() => props.onClose()}
             >
               ✕
@@ -130,7 +131,7 @@ export function ShortcutHelp(props: ShortcutHelpProps): JSX.Element {
                 <Show when={(grouped().get(cat) ?? []).length > 0}>
                   <div class="py-1">
                     <div class="sticky top-0 z-10 px-4 pt-2 pb-1 text-[10px] uppercase tracking-widest text-text-muted font-sans bg-bg-surface">
-                      {CATEGORY_LABEL[cat]}
+                      {CATEGORY_LABEL()[cat]}
                     </div>
                     <For each={grouped().get(cat)!}>
                       {(s) => <ShortcutRow shortcut={s} />}
@@ -141,14 +142,14 @@ export function ShortcutHelp(props: ShortcutHelpProps): JSX.Element {
             </For>
             <Show when={shortcuts().length === 0}>
               <div class="p-6 text-center text-xs text-text-muted">
-                暂无已注册的快捷键
+                {t("shortcuts.empty")}
               </div>
             </Show>
           </div>
 
           <div class="px-4 py-2 border-t border-border-subtle flex items-center gap-3 font-mono text-[11px] text-text-muted shrink-0">
-            <span>按 Esc 关闭</span>
-            <span class="ml-auto">按 ? 再按一次关闭</span>
+            <span>{t("shortcuts.hintEsc")}</span>
+            <span class="ml-auto">{t("shortcuts.hintQuestion")}</span>
           </div>
         </div>
       </Portal>

@@ -339,7 +339,8 @@ function resolveVarRef(key: string, vars: Record<string, string>): string {
   if (key.startsWith("env:")) {
     const envKey = key.slice(4);
     const env: Record<string, string | undefined> | undefined =
-      (globalThis as any).process?.env ?? undefined;
+      (globalThis as unknown as { process?: { env?: Record<string, string | undefined> } })
+        .process?.env ?? undefined;
     if (env && typeof env[envKey] === "string") return env[envKey] as string;
     return "";
   }

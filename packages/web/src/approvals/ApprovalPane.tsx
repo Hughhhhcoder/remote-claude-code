@@ -4,6 +4,7 @@ import { createApprovalsStore, type Pending, type ApprovalHistoryItem } from "..
 import { authenticateForApproval, isWebAuthnAvailable } from "../webauthn.ts";
 import Button from "../primitives/Button.tsx";
 import { ApprovalCard, type ApprovalRecord } from "./ApprovalCard.tsx";
+import { t } from "../i18n/index.ts";
 
 /**
  * ApprovalPane — list view of pending + recent approvals.
@@ -121,7 +122,7 @@ export function ApprovalPane(props: ApprovalPaneProps): JSX.Element {
         const token = await authenticateForApproval(props.device.id, c.id);
         sendResponse(c, true, token);
       } catch (err) {
-        setAuthError((err as Error).message || "passkey 验证失败");
+        setAuthError((err as Error).message || t("approvals.passkeyFailed"));
       } finally {
         setAuthing(false);
       }
@@ -139,7 +140,7 @@ export function ApprovalPane(props: ApprovalPaneProps): JSX.Element {
   return (
     <div class="flex flex-col h-full bg-bg-page text-text-primary">
       <header class="shrink-0 flex items-center gap-3 px-4 h-12 border-b border-border-subtle">
-        <h2 class="font-sans text-sm font-semibold">审批</h2>
+        <h2 class="font-sans text-sm font-semibold">{t("approvals.heading")}</h2>
         <Show when={pending().length > 0}>
           <span class="text-[11px] px-2 py-0.5 rounded-full border border-danger text-danger font-sans font-medium">
             {pending().length}
@@ -148,7 +149,7 @@ export function ApprovalPane(props: ApprovalPaneProps): JSX.Element {
         <div class="ml-auto flex items-center gap-1">
           <Show when={props.onClose}>
             <Button variant="ghost" size="sm" onClick={() => props.onClose?.()}>
-              关闭
+              {t("approvals.close")}
             </Button>
           </Show>
         </div>
@@ -165,14 +166,14 @@ export function ApprovalPane(props: ApprovalPaneProps): JSX.Element {
           when={!empty()}
           fallback={
             <div class="h-full flex items-center justify-center text-text-muted text-sm font-sans">
-              没有待处理审批
+              {t("approvals.empty")}
             </div>
           }
         >
           <Show when={pending().length > 0}>
             <section>
               <div class="sticky top-0 z-10 bg-bg-page/95 backdrop-blur px-4 py-1.5 text-[11px] uppercase tracking-wider text-text-muted font-sans border-b border-border-subtle">
-                待处理
+                {t("approvals.pending")}
               </div>
               <div class="px-3 py-3 space-y-3">
                 <For each={pending()}>
@@ -181,7 +182,7 @@ export function ApprovalPane(props: ApprovalPaneProps): JSX.Element {
                   )}
                 </For>
                 <Show when={authing()}>
-                  <div class="text-[12px] text-text-muted px-1">等待生物识别…</div>
+                  <div class="text-[12px] text-text-muted px-1">{t("approvals.waitingBiometric")}</div>
                 </Show>
               </div>
             </section>
@@ -189,7 +190,7 @@ export function ApprovalPane(props: ApprovalPaneProps): JSX.Element {
           <Show when={history().length > 0}>
             <section>
               <div class="sticky top-0 z-10 bg-bg-page/95 backdrop-blur px-4 py-1.5 text-[11px] uppercase tracking-wider text-text-muted font-sans border-b border-border-subtle">
-                最近
+                {t("approvals.recent")}
               </div>
               <div class="px-3 py-2 space-y-1.5">
                 <For each={history()}>

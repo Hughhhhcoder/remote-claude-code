@@ -9,6 +9,7 @@ import {
 } from "solid-js";
 import type { AuditEntry, ChatMessage } from "@rcc/protocol";
 import type { RccClient } from "../client";
+import { t, tt } from "../i18n/index.ts";
 
 /**
  * SessionTimeline — read-only vertical timeline of events for one session.
@@ -83,25 +84,25 @@ function previewOf(m: ChatMessage): string {
 }
 
 function roleLabel(role: ChatMessage["role"]): string {
-  if (role === "user") return "你";
-  if (role === "assistant") return "助手";
-  return "系统";
+  if (role === "user") return t("timeline.role.user");
+  if (role === "assistant") return t("timeline.role.assistant");
+  return t("timeline.role.system");
 }
 
 function auditLabel(kind: string): string {
   // Map common kinds to a short, human label. Unknown kinds fall back to the
   // raw kind string which is already reasonably readable.
   const table: Record<string, string> = {
-    "session.new": "会话创建",
-    "session.close": "会话关闭",
-    "session.exited": "进程退出",
-    "session.resume": "会话恢复",
-    "session.fork": "会话分叉",
-    "share.create": "创建分享",
-    "share.revoke": "撤销分享",
-    "approval.granted": "批准工具调用",
-    "approval.denied": "拒绝工具调用",
-    "config.session.update": "会话配置更新",
+    "session.new": t("timeline.event.sessionNew"),
+    "session.close": t("timeline.event.sessionClose"),
+    "session.exited": t("timeline.event.sessionExited"),
+    "session.resume": t("timeline.event.sessionResume"),
+    "session.fork": t("timeline.event.sessionFork"),
+    "share.create": t("timeline.event.shareCreate"),
+    "share.revoke": t("timeline.event.shareRevoke"),
+    "approval.granted": t("timeline.event.approvalGranted"),
+    "approval.denied": t("timeline.event.approvalDenied"),
+    "config.session.update": t("timeline.event.configUpdate"),
   };
   return table[kind] ?? kind;
 }
@@ -128,7 +129,7 @@ export function SessionTimeline(props: SessionTimelineProps): JSX.Element {
       if (done) return;
       done = true;
       unsub();
-      setError("审计日志加载超时");
+      setError(t("timeline.auditTimeout"));
       setLoaded(true);
     }, 3000);
     const unsub = props.client.on((frame) => {
@@ -176,7 +177,7 @@ export function SessionTimeline(props: SessionTimelineProps): JSX.Element {
             key: `t:${m.id}:${seg.tool}:${seg.toolUseId ?? "cli"}`,
             ts: m.timestamp + 1, // keep after parent message in stable sort
             tone: "tool",
-            label: `工具调用 · ${seg.tool}`,
+            label: tt("timeline.toolCall", { tool: seg.tool }),
             detail: seg.input.slice(0, 140),
           });
         }
@@ -203,9 +204,9 @@ export function SessionTimeline(props: SessionTimelineProps): JSX.Element {
   return (
     <div class="flex flex-col gap-3 text-text-primary">
       <div class="text-[12px] text-text-muted">
-        <Show when={loaded()} fallback={<span>加载审计日志…</span>}>
+        <Show when={loaded()} fallback={<span>{t("timeline.loadingAudit")}</span>}>
           <span>
-            共 {nodes().length} 个事件
+            {tt("timeline.totalEvents", { n: nodes().length })}
             <Show when={error()}>
               <span class="ml-2 text-danger">· {error()}</span>
             </Show>
@@ -218,14 +219,14 @@ export function SessionTimeline(props: SessionTimelineProps): JSX.Element {
         fallback={
           <div class="text-center text-text-muted text-sm py-10">
             <Show when={loaded()} fallback={<span>…</span>}>
-              <span>暂无事件</span>
+              <span>{t("timeline.noEvents")}</span>
             </Show>
           </div>
         }
       >
         <ol
           class="relative pl-5 m-0 list-none"
-          aria-label="会话时间线"
+          aria-label={t("timeline.ariaLabel")}
         >
           {/* Vertical rail — pulled inside safe-area so it lines up with dots. */}
           <div

@@ -4,6 +4,7 @@ import type { MobileTab } from "../stores/uiStore.ts";
 import { ApprovalPane } from "../approvals/ApprovalPane.tsx";
 import { MobileSettingsPane } from "./MobileSettingsPane.tsx";
 import type { createPrefsStore } from "../prefs.ts";
+import { t } from "../i18n/index.ts";
 
 const FileBrowser = lazy(() =>
   import("../FileBrowser.tsx").then((m) => ({ default: m.FileBrowser })),
@@ -47,7 +48,7 @@ export function MobileTabRouter(props: MobileTabRouterProps): JSX.Element {
         <div class="h-full min-h-0 overflow-y-auto bg-bg-page p-3">
           <Suspense
             fallback={
-              <div class="text-text-muted text-sm py-8 text-center">加载文件浏览器...</div>
+              <div class="text-text-muted text-sm py-8 text-center">{t("mobile.loadingFiles")}</div>
             }
           >
             <FileBrowser

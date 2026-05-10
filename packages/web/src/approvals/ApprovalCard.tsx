@@ -1,6 +1,7 @@
 import { createSignal, Show, type JSX } from "solid-js";
 import Button from "../primitives/Button.tsx";
 import { haptics } from "../hooks/useHaptics.ts";
+import { t, tt } from "../i18n/index.ts";
 
 /**
  * ApprovalCard — standalone per-approval card used by ApprovalPane.
@@ -56,7 +57,7 @@ function riskFrame(risk: "low" | "medium" | "high", resolved: boolean): string {
 
 function relativeTime(ts: number): string {
   const diff = Date.now() - ts;
-  if (diff < 60_000) return "刚刚";
+  if (diff < 60_000) return t("approvals.justNow");
   if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m`;
   if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h`;
   return `${Math.floor(diff / 86_400_000)}d`;
@@ -64,7 +65,7 @@ function relativeTime(ts: number): string {
 
 function describeRequest(a: ApprovalRecord): string {
   if (a.summary && a.summary.trim()) return a.summary;
-  return `使用 ${a.tool}`;
+  return tt("approvals.usingTool", { tool: a.tool });
 }
 
 function cwdFromRaw(a: ApprovalRecord): string | null {
@@ -157,7 +158,7 @@ export function ApprovalCard(props: ApprovalCardProps): JSX.Element {
           when={!isResolved()}
           fallback={
             <div class="px-4 py-2 border-t border-border-subtle text-[12px] text-text-muted flex items-center gap-2">
-              <span>{props.approval.status === "approved" ? "✓ 已允许" : "✗ 已拒绝"}</span>
+              <span>{props.approval.status === "approved" ? t("approvals.approved") : t("approvals.denied")}</span>
               <Show when={props.approval.resolvedAt}>
                 {(t) => <span class="font-mono text-text-muted">· {relativeTime(t())}</span>}
               </Show>
@@ -175,12 +176,12 @@ export function ApprovalCard(props: ApprovalCardProps): JSX.Element {
                 onChange={(e) => setAllowAlways(e.currentTarget.checked)}
                 class="w-4 h-4 accent-accent"
               />
-              <span>始终允许此工具</span>
+              <span>{t("approvals.alwaysAllow")}</span>
             </label>
-            <Button variant="ghost" size="sm" class="h-11 sm:h-9" onClick={handleDeny}>拒绝</Button>
+            <Button variant="ghost" size="sm" class="h-11 sm:h-9" onClick={handleDeny}>{t("approvals.deny")}</Button>
             <Button variant={risk() === "high" ? "danger" : "primary"} size="sm" class="h-11 sm:h-9" onClick={handleApprove}>
-              <Show when={useFaceId()} fallback={<span>允许</span>}>
-                <span>🔐 Face ID 允许</span>
+              <Show when={useFaceId()} fallback={<span>{t("approvals.allow")}</span>}>
+                <span>{t("approvals.allowFaceId")}</span>
               </Show>
             </Button>
           </div>

@@ -1,5 +1,6 @@
 import { Show, createMemo, type JSX } from "solid-js";
 import { IconButton } from "../primitives/IconButton";
+import { t, tt } from "../i18n/index.ts";
 
 /**
  * TopBar — Phase 2-C responsive header for RCC v0.2.
@@ -75,26 +76,26 @@ interface StatusMeta {
 function statusMeta(s: TopBarStatus): StatusMeta {
   switch (s) {
     case "connected":
-      return { dot: "bg-success", label: "已连接", title: "已连接" };
+      return { dot: "bg-success", label: t("topbar.connected"), title: t("topbar.connected") };
     case "connecting":
       return {
         dot: "bg-warn pulse-soft",
-        label: "连接中",
-        title: "正在连接",
+        label: t("topbar.connecting"),
+        title: t("topbar.connectingTitle"),
       };
     case "slow":
       return {
         dot: "bg-warn pulse-soft",
-        label: "较慢",
-        title: "连接较慢",
+        label: t("topbar.slow"),
+        title: t("topbar.slowTitle"),
       };
     case "readonly":
-      return { dot: "bg-danger", label: "只读", title: "只读模式" };
+      return { dot: "bg-danger", label: t("topbar.readOnly"), title: t("topbar.readOnlyTitle") };
     case "unauthorized":
-      return { dot: "bg-danger", label: "未授权", title: "未授权" };
+      return { dot: "bg-danger", label: t("topbar.unauthorized"), title: t("topbar.unauthorized") };
     case "closed":
     default:
-      return { dot: "bg-danger", label: "已断开", title: "连接已关闭" };
+      return { dot: "bg-danger", label: t("topbar.disconnected"), title: t("topbar.disconnectedTitle") };
   }
 }
 
@@ -144,7 +145,7 @@ function InboxButton(props: {
       <IconButton
         size="md"
         onClick={props.onOpen}
-        aria-label={`打开通知,${props.unread} 未读`}
+        aria-label={tt("topbar.openNotifications", { n: props.unread })}
       >
         <span class="text-[16px] leading-none">🔔</span>
       </IconButton>
@@ -211,7 +212,7 @@ function CompactRow(
       <IconButton
         size="md"
         onClick={props.onOpenDrawer}
-        aria-label="打开侧边栏"
+        aria-label={t("topbar.openSidebar")}
       >
         <span class="text-[18px] leading-none">☰</span>
       </IconButton>
@@ -264,7 +265,7 @@ function DesktopRow(
       {/* Session title */}
       <div class="min-w-0 flex items-center gap-2">
         <span class="text-[13px] font-medium text-text-primary truncate max-w-[240px]">
-          {props.title ?? "未选择会话"}
+          {props.title ?? t("topbar.noSession")}
         </span>
       </div>
 
@@ -296,8 +297,8 @@ function DesktopRow(
               "focus-visible:ring-accent focus-visible:ring-offset-2 " +
               "focus-visible:ring-offset-bg-page rounded-sm px-1"
             }
-            title={`点击复制: ${url()}`}
-            aria-label={`复制隧道地址 ${url()}`}
+            title={tt("topbar.copyTunnelTitle", { url: url() })}
+            aria-label={tt("topbar.copyTunnelAria", { url: url() })}
           >
             <span class="truncate">{url()}</span>
             <span aria-hidden="true" class="text-[10px]">
@@ -331,7 +332,7 @@ function DesktopRow(
       <IconButton
         size="md"
         onClick={props.onOpenSettings}
-        aria-label="打开设置"
+        aria-label={t("topbar.openSettings")}
       >
         <span class="text-[16px] leading-none">⚙</span>
       </IconButton>
@@ -349,9 +350,9 @@ function DesktopRow(
             "focus-visible:ring-accent focus-visible:ring-offset-2 " +
             "focus-visible:ring-offset-bg-page"
           }
-          aria-label="登出"
+          aria-label={t("topbar.signOutAria")}
         >
-          登出
+          {t("topbar.signOut")}
         </button>
       </Show>
     </div>

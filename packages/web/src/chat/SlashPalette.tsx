@@ -8,6 +8,7 @@ import {
   type JSX,
 } from "solid-js";
 import { Portal } from "solid-js/web";
+import { t, tt } from "../i18n/index.ts";
 
 /**
  * SlashPalette — slash-command picker rendered above the Composer.
@@ -143,9 +144,9 @@ export function SlashPalette(props: SlashPaletteProps): JSX.Element {
 
   const header = () => (
     <div class="sticky top-0 z-10 bg-bg-surface px-3 py-2 border-b border-border-subtle flex items-center gap-2 text-[11px] text-text-muted">
-      <span>命令 · 共 {allFiltered().length}</span>
+      <span>{tt("slash.header", { n: allFiltered().length })}</span>
       <span class="ml-auto font-mono text-[10px]">
-        ↑↓ 选择 ↵ 确认 Esc 关闭
+        {t("slash.keyHint")}
       </span>
     </div>
   );
@@ -156,7 +157,7 @@ export function SlashPalette(props: SlashPaletteProps): JSX.Element {
         when={props.commands.length > 0}
         fallback={
           <div class="px-3 py-6 text-center text-xs text-text-muted">
-            无可用命令
+            {t("slash.noAvailable")}
           </div>
         }
       >
@@ -164,7 +165,7 @@ export function SlashPalette(props: SlashPaletteProps): JSX.Element {
           when={filtered().length > 0}
           fallback={
             <div class="px-3 py-6 text-center text-xs text-text-muted">
-              无匹配命令。按 Esc 关闭
+              {t("slash.noMatch")}
             </div>
           }
         >
@@ -208,7 +209,7 @@ export function SlashPalette(props: SlashPaletteProps): JSX.Element {
           </For>
           <Show when={overflow() > 0}>
             <div class="px-3 py-2 text-center text-[11px] text-text-muted border-t border-border-subtle">
-              …还有 {overflow()} 个
+              {tt("slash.overflow", { n: overflow() })}
             </div>
           </Show>
         </Show>

@@ -13,6 +13,7 @@ import { TextBlock } from "./blocks/TextBlock";
 import { CodeBlock } from "./blocks/CodeBlock";
 import { ThinkingBlock } from "./blocks/ThinkingBlock";
 import { MessageActionSheet, type MessageAction } from "./MessageActionSheet";
+import { t, tt } from "../i18n/index.ts";
 
 /**
  * MessageRow — per-message renderer for the Claude-style chat (P4-C).
@@ -59,7 +60,7 @@ function formatTimestamp(ts: number): string {
   if (sameDay) return `${hh}:${mm}`;
   const mo = String(d.getMonth() + 1).padStart(2, "0");
   const dd = String(d.getDate()).padStart(2, "0");
-  return `${mo}月${dd}日 ${hh}:${mm}`;
+  return tt("message.datePattern", { mo, dd, hh, mm });
 }
 
 /**
@@ -160,7 +161,7 @@ function ActionsBar(props: ActionsBarProps): JSX.Element {
         "transition-opacity duration-fast ease-rcc"
       }
       role="menu"
-      aria-label="消息操作"
+      aria-label={t("message.actionsAria")}
     >
       <For each={props.actions}>
         {(a) => (
@@ -220,10 +221,10 @@ export function MessageRow(props: MessageRowProps): JSX.Element {
   }
 
   const handleCopy = (): void => {
-    void writeClipboard(concatText(segments()), "已复制");
+    void writeClipboard(concatText(segments()), t("message.copied"));
   };
   const handleCopyMarkdown = (): void => {
-    void writeClipboard(concatMarkdown(segments()), "已复制 Markdown");
+    void writeClipboard(concatMarkdown(segments()), t("message.copiedMd"));
   };
   const handleQuote = (): void => {
     const quoted = toQuoted(concatText(segments()));
@@ -232,11 +233,11 @@ export function MessageRow(props: MessageRowProps): JSX.Element {
         new CustomEvent(QUOTE_EVENT, { detail: { text: quoted } }),
       );
     }
-    flashToast("已引用到输入框");
+    flashToast(t("message.quoted"));
   };
   const handlePin = (): void => {
     props.onPin?.(props.msg.id);
-    flashToast("已固定");
+    flashToast(t("message.pinned"));
   };
   const handleShareLink = (): void => {
     if (typeof window === "undefined") return;
@@ -253,13 +254,13 @@ export function MessageRow(props: MessageRowProps): JSX.Element {
     const url = new URL(window.location.origin);
     if (sid) url.searchParams.set("sid", sid);
     url.searchParams.set("msg", props.msg.id);
-    void writeClipboard(url.toString(), "已复制分享链接");
+    void writeClipboard(url.toString(), t("message.copiedShare"));
   };
   const handleFork = (): void => {
     if (!props.onFork) return;
     if (
       typeof window !== "undefined" &&
-      !window.confirm("创建新会话,复制到此消息为止的所有对话?")
+      !window.confirm(t("message.forkConfirm"))
     )
       return;
     props.onFork(props.msg.id);
@@ -268,28 +269,28 @@ export function MessageRow(props: MessageRowProps): JSX.Element {
   // --- action list (single source of truth for desktop bar + mobile sheet) -
   const actions = (): MessageAction[] => {
     const list: MessageAction[] = [
-      { id: "copy", label: "复制", icon: "⧉", onSelect: handleCopy },
+      { id: "copy", label: t("message.action.copy"), icon: "⧉", onSelect: handleCopy },
       {
         id: "copy-md",
-        label: "复制为 Markdown",
+        label: t("message.action.copyMd"),
         icon: "⌘",
         onSelect: handleCopyMarkdown,
       },
-      { id: "quote", label: "引用回复", icon: "❝", onSelect: handleQuote },
-      { id: "pin", label: "固定到笔记", icon: "📌", onSelect: handlePin },
+      { id: "quote", label: t("message.action.quote"), icon: "❝", onSelect: handleQuote },
+      { id: "pin", label: t("message.action.pin"), icon: "📌", onSelect: handlePin },
       {
         id: "share",
-        label: "复制分享链接",
+        label: t("message.action.copyShare"),
         icon: "🔗",
         onSelect: handleShareLink,
       },
     ];
     if (props.onFork) {
-      list.push({ id: "fork", label: "从此分叉", icon: "🍴", onSelect: handleFork });
+      list.push({ id: "fork", label: t("message.action.fork"), icon: "🍴", onSelect: handleFork });
     }
     list.push({
       id: "regenerate",
-      label: "重新生成 (批次 7 提供)",
+      label: t("message.action.regenerate"),
       icon: "↻",
       onSelect: () => {},
       disabled: true,
@@ -358,12 +359,12 @@ export function MessageRow(props: MessageRowProps): JSX.Element {
 
   const role = () => props.msg.role;
   const roleLabel = (): string =>
-    role() === "user" ? "用户" : role() === "assistant" ? "助手" : "系统";
+    role() === "user" ? t("message.role.user") : role() === "assistant" ? t("message.role.assistant") : t("message.role.system");
 
   const SrRoleHeader = (): JSX.Element => (
     <span class="sr-only">
       {roleLabel()} · {formatTimestamp(props.msg.timestamp)}
-      {props.msg.streaming ? " · 正在输入" : ""}
+      {props.msg.streaming ? t("message.streaming") : ""}
     </span>
   );
 
@@ -378,7 +379,7 @@ export function MessageRow(props: MessageRowProps): JSX.Element {
               <div
                 class="group flex gap-2 sm:gap-3 my-4 relative"
                 role="article"
-                aria-roledescription="消息"
+                aria-roledescription={t("message.roleDescription")}
                 aria-busy={props.msg.streaming ? "true" : "false"}
                 tabIndex={0}
                 data-message-id={props.msg.id}
@@ -429,7 +430,7 @@ export function MessageRow(props: MessageRowProps): JSX.Element {
             <div
               class="group flex justify-end my-3 relative"
               role="article"
-              aria-roledescription="消息"
+              aria-roledescription={t("message.roleDescription")}
               aria-busy={props.msg.streaming ? "true" : "false"}
               tabIndex={0}
               data-message-id={props.msg.id}
@@ -465,7 +466,7 @@ export function MessageRow(props: MessageRowProps): JSX.Element {
         <div
           class="my-2 text-center"
           role="article"
-          aria-roledescription="系统消息"
+          aria-roledescription={t("message.systemRoleDescription")}
           data-message-id={props.msg.id}
         >
           <SrRoleHeader />

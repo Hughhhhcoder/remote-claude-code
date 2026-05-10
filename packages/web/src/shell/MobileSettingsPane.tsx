@@ -1,5 +1,6 @@
 import { For, type JSX } from "solid-js";
 import type { PrefsStore } from "../prefs.ts";
+import { t, tt } from "../i18n/index.ts";
 
 /**
  * MobileSettingsPane — mobile-only settings tab content.
@@ -39,41 +40,41 @@ export function MobileSettingsPane(props: MobileSettingsPaneProps): JSX.Element 
   const rows: () => Row[] = () => [
     {
       icon: "📥",
-      label: "收件箱",
-      hint: props.pendingApprovals() > 0 ? `${props.pendingApprovals()} 待审批` : undefined,
+      label: t("mobile.settings.inbox"),
+      hint: props.pendingApprovals() > 0 ? tt("mobile.settings.pendingApprovals", { n: props.pendingApprovals() }) : undefined,
       onClick: props.onOpenInbox,
     },
-    { icon: "📱", label: "已配对设备", onClick: props.onOpenDevices },
-    { icon: "🌐", label: "联邦对端", onClick: props.onOpenPeers },
-    { icon: "🛠️", label: "Claude 配置", hint: "skills / hooks / mcp / prompts", onClick: props.onOpenConfig },
+    { icon: "📱", label: t("mobile.settings.pairedDevices"), onClick: props.onOpenDevices },
+    { icon: "🌐", label: t("mobile.settings.peers"), onClick: props.onOpenPeers },
+    { icon: "🛠️", label: t("mobile.settings.claudeConfig"), hint: t("mobile.settings.claudeConfigHint"), onClick: props.onOpenConfig },
   ];
 
   return (
     <div class="p-4 space-y-5 font-sans text-text-primary">
       {/* Host card */}
       <section class="rounded-xl bg-bg-surface border border-border-subtle p-4">
-        <div class="text-xs uppercase tracking-widest text-text-muted">此机</div>
+        <div class="text-xs uppercase tracking-widest text-text-muted">{t("mobile.settings.thisDevice")}</div>
         <div class="mt-1 text-lg font-medium">
-          {props.currentDeviceName() ?? "未命名设备"}
+          {props.currentDeviceName() ?? t("mobile.settings.unnamedDevice")}
         </div>
         <div class="mt-2 text-xs font-mono text-text-secondary break-all">
-          {props.tunnelUrl() ?? "本地连接 (ws://)"}
+          {props.tunnelUrl() ?? t("mobile.settings.localConnection")}
         </div>
       </section>
 
       {/* Appearance */}
       <section class="rounded-xl bg-bg-surface border border-border-subtle">
         <div class="px-4 pt-3 pb-1 text-xs uppercase tracking-widest text-text-muted">
-          外观
+          {t("mobile.settings.appearance")}
         </div>
         <button
           type="button"
           onClick={toggleTheme}
           class="w-full px-4 py-3 text-left flex items-center justify-between min-h-[44px] hover:bg-bg-surface-2 transition"
         >
-          <span class="text-sm">主题</span>
+          <span class="text-sm">{t("mobile.settings.theme")}</span>
           <span class="text-sm text-text-secondary">
-            {theme() === "dark" ? "🌙 深色" : theme() === "light" ? "☀️ 浅色" : "🖥 跟随系统"}
+            {theme() === "dark" ? t("mobile.settings.themeDark") : theme() === "light" ? t("mobile.settings.themeLight") : t("mobile.settings.themeSystem")}
           </span>
         </button>
       </section>
@@ -112,7 +113,7 @@ export function MobileSettingsPane(props: MobileSettingsPaneProps): JSX.Element 
           onClick={props.onSignOut}
           class="w-full px-4 py-3 text-left text-sm text-danger min-h-[44px]"
         >
-          退出并解绑本设备
+          {t("mobile.settings.signOut")}
         </button>
       </section>
     </div>

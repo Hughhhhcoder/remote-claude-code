@@ -1,7 +1,6 @@
 import {
   createContext,
   createSignal,
-  onMount,
   useContext,
   type Accessor,
   type JSX,
@@ -11,6 +10,7 @@ import type { RccClient } from "../client";
 import { EmptyState } from "../primitives/EmptyState";
 import { Textarea } from "../primitives/Textarea";
 import { ChatHeader } from "./ChatHeader";
+import { t } from "../i18n/index.ts";
 
 /**
  * ChatPane — top-level chat surface container (Phase 4-A).
@@ -90,12 +90,6 @@ export function ChatPane(props: ChatPaneProps): JSX.Element {
     scrollEl,
   };
 
-  onMount(() => {
-    // Signal mount so the P4-B integrator can confirm wiring during batch 6.
-    // eslint-disable-next-line no-console
-    console.log("[ChatPane] mounted sid=", props.sid);
-  });
-
   return (
     <ChatPaneContext.Provider value={ctxValue}>
       <div class="h-full flex flex-col bg-bg-page min-h-0">
@@ -119,13 +113,13 @@ export function ChatPane(props: ChatPaneProps): JSX.Element {
           class="flex-1 min-h-0 overflow-y-auto"
           data-chat-scroll="true"
           role="region"
-          aria-label="对话内容"
+          aria-label={t("chat.aria.content")}
         >
           <div class="mx-auto max-w-[760px] w-full px-4 md:px-6 py-6">
             {props.messagesSlot ?? (
               <EmptyState
-                title="暂无消息"
-                description="发送第一条消息开始对话"
+                title={t("chat.empty.title")}
+                description={t("chat.empty.description")}
               />
             )}
           </div>
@@ -135,7 +129,7 @@ export function ChatPane(props: ChatPaneProps): JSX.Element {
         <div
           class="shrink-0 border-t border-border-subtle bg-bg-page"
           role="region"
-          aria-label="消息输入"
+          aria-label={t("chat.aria.input")}
         >
           <div class="mx-auto max-w-[760px] w-full px-4 py-3">
             {props.composerSlot ?? <PlaceholderComposer />}

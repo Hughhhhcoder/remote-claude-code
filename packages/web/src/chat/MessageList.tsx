@@ -20,6 +20,7 @@ import { useChatPane } from "./ChatPane";
 import { MessageRow } from "./MessageRow";
 import { LazyContent } from "./LazyContent";
 import { estimateMessageSize, HEAVY_MESSAGE_BYTES } from "./MessageList.perf";
+import { t, tt } from "../i18n/index.ts";
 
 export interface MessageListProps {
   messages: ChatMessage[];
@@ -262,7 +263,7 @@ export function MessageList(props: MessageListProps): JSX.Element {
 
   // --- Render -------------------------------------------------------------
   const logAriaLabel = (): string =>
-    `对话已加载,${props.messages.length} 条消息`;
+    tt("messageList.loaded", { n: props.messages.length });
 
   return (
     <div
@@ -273,7 +274,7 @@ export function MessageList(props: MessageListProps): JSX.Element {
       aria-label={logAriaLabel()}
     >
       <Show when={props.messages.length === 0}>
-        <div class="text-center text-xs text-text-muted py-8">等待回复…</div>
+        <div class="text-center text-xs text-text-muted py-8">{t("messageList.waitingReply")}</div>
       </Show>
 
       <Show when={hiddenCount() > 0}>
@@ -282,9 +283,9 @@ export function MessageList(props: MessageListProps): JSX.Element {
             type="button"
             class="text-xs text-text-secondary hover:text-text-primary border border-border-subtle rounded-full px-3 py-1.5 bg-bg-surface"
             onClick={onExpandOlder}
-            aria-label={`显示更早消息,共 ${hiddenCount()} 条`}
+            aria-label={tt("messageList.showEarlierAria", { n: hiddenCount() })}
           >
-            显示更早消息 ({hiddenCount()})
+            {tt("messageList.showEarlier", { n: hiddenCount() })}
           </button>
         </div>
       </Show>
@@ -326,7 +327,7 @@ export function MessageList(props: MessageListProps): JSX.Element {
                     onClick={() => expandHeavy(msg.id)}
                     class="my-6 py-2 px-3 rounded border border-border-subtle bg-bg-surface text-[11px] text-text-muted font-mono block w-full text-left hover:text-text-secondary"
                   >
-                    [折叠] 历史消息 · {size} bytes · 点击展开
+                    {tt("messageList.collapsed", { size, n: size })}
                   </button>
                 }
               >
@@ -347,7 +348,7 @@ export function MessageList(props: MessageListProps): JSX.Element {
           class="fixed sm:absolute bottom-20 right-3 sm:right-4 sm:bottom-4 z-10 bg-accent text-bg-page rounded-full px-3 py-1.5 text-xs shadow-md hover:bg-accent-hover"
           aria-label="Jump to latest messages"
         >
-          {newCount()} 条新消息 ↓
+          {tt("messageList.newMessages", { n: newCount() })}
         </button>
       </Show>
     </div>

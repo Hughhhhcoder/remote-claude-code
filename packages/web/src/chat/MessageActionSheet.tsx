@@ -1,5 +1,6 @@
 import { For, type JSX } from "solid-js";
 import { Dialog } from "../primitives/Dialog";
+import { t } from "../i18n/index.ts";
 
 /**
  * MessageActionSheet — mobile bottom-sheet action list opened via long-press
@@ -37,7 +38,7 @@ export function MessageActionSheet(props: MessageActionSheetProps): JSX.Element 
     <Dialog
       open={props.open}
       onClose={props.onClose}
-      title={props.title ?? "消息操作"}
+      title={props.title ?? t("chat.msgActionTitle")}
       size="sm"
     >
       <ul class="flex flex-col gap-1 -mx-1" role="menu">

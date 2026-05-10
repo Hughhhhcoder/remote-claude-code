@@ -7,6 +7,7 @@ import {
   type JSX,
 } from "solid-js";
 import { Portal } from "solid-js/web";
+import { t, tt } from "../i18n/index.ts";
 
 /**
  * MentionPopover — @-mention autocomplete rendered above the Composer.
@@ -54,10 +55,10 @@ const KIND_ICON: Record<MentionKind, string> = {
   dir: "📁",
 };
 
-const KIND_LABEL: Record<MentionKind, string> = {
-  session: "会话",
-  file: "文件",
-  dir: "目录",
+const kindLabel = (k: MentionKind): string => {
+  if (k === "session") return t("mention.session");
+  if (k === "file") return t("mention.file");
+  return t("mention.dir");
 };
 
 export function MentionPopover(props: MentionPopoverProps): JSX.Element {
@@ -124,12 +125,12 @@ export function MentionPopover(props: MentionPopoverProps): JSX.Element {
 
   const header = () => (
     <div class="sticky top-0 z-10 bg-bg-surface px-3 py-2 border-b border-border-subtle flex items-center gap-2 text-[11px] text-text-muted">
-      <span>提及 · {props.items.length}</span>
+      <span>{tt("mention.header", { n: props.items.length })}</span>
       <Show when={props.loading}>
-        <span class="text-accent">载入中…</span>
+        <span class="text-accent">{t("mention.loading")}</span>
       </Show>
       <span class="ml-auto font-mono text-[10px]">
-        ↑↓ 选择 ↵ 确认 Esc 关闭
+        {t("mention.keyHint")}
       </span>
     </div>
   );
@@ -140,8 +141,8 @@ export function MentionPopover(props: MentionPopoverProps): JSX.Element {
         when={props.items.length > 0}
         fallback={
           <div class="px-3 py-6 text-center text-xs text-text-muted">
-            <Show when={props.loading} fallback={<span>无匹配结果。按 Esc 关闭</span>}>
-              <span>搜索中…</span>
+            <Show when={props.loading} fallback={<span>{t("mention.noMatch")}</span>}>
+              <span>{t("mention.searching")}</span>
             </Show>
           </div>
         }
@@ -176,7 +177,7 @@ export function MentionPopover(props: MentionPopoverProps): JSX.Element {
                 </Show>
               </div>
               <span class="text-[10px] text-text-muted shrink-0">
-                {KIND_LABEL[item.kind]}
+                {kindLabel(item.kind)}
               </span>
             </div>
           )}
@@ -188,7 +189,7 @@ export function MentionPopover(props: MentionPopoverProps): JSX.Element {
   const desktopPanel = () => (
     <div
       role="listbox"
-      aria-label="提及候选"
+      aria-label={t("mention.candidatesAria")}
       class="rounded-md border border-border-subtle bg-bg-surface shadow-lg overflow-hidden max-h-[240px] flex flex-col"
     >
       {header()}
@@ -205,7 +206,7 @@ export function MentionPopover(props: MentionPopoverProps): JSX.Element {
       />
       <div
         role="listbox"
-        aria-label="提及候选"
+        aria-label={t("mention.candidatesAria")}
         class="fixed inset-x-0 bottom-0 z-50 rounded-t-xl bg-bg-surface shadow-[0_-4px_24px_rgba(0,0,0,0.15)] max-h-[70vh] flex flex-col"
         style={{ "padding-bottom": "env(safe-area-inset-bottom)" }}
       >

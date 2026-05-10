@@ -1,7 +1,7 @@
 import { createEffect, createSignal, onCleanup, Show } from "solid-js";
 import type { ApprovalRisk, FrameByT } from "@rcc/protocol";
 import type { RccClient } from "./client.ts";
-import { useIsMobile } from "./useIsMobile.ts";
+import { useIsMobile } from "./hooks/useMediaQuery.ts";
 import { authenticateForApproval, isWebAuthnAvailable } from "./webauthn.ts";
 
 type Pending = FrameByT<"approval.request">;

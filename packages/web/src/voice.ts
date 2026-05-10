@@ -34,7 +34,11 @@ export interface DictationHandle {
 type AnySpeechCtor = new () => any;
 
 function getSpeechCtor(): AnySpeechCtor | null {
-  const w = window as any;
+  // reason: SpeechRecognition / webkitSpeechRecognition are vendor globals not in lib.dom
+  const w = window as unknown as {
+    SpeechRecognition?: AnySpeechCtor;
+    webkitSpeechRecognition?: AnySpeechCtor;
+  };
   return (w.SpeechRecognition as AnySpeechCtor | undefined)
     ?? (w.webkitSpeechRecognition as AnySpeechCtor | undefined)
     ?? null;
@@ -54,7 +58,7 @@ export function isSpeechSupported(): boolean {
 export function hasMediaRecorder(): boolean {
   return typeof navigator !== "undefined"
     && !!navigator.mediaDevices?.getUserMedia
-    && typeof (window as any).MediaRecorder !== "undefined";
+    && typeof (window as unknown as { MediaRecorder?: unknown }).MediaRecorder !== "undefined";
 }
 
 export async function startDictation(opts: DictationOpts): Promise<DictationHandle> {
@@ -229,7 +233,9 @@ async function startRecorder(opts: DictationOpts): Promise<DictationHandle> {
 }
 
 function pickMime(): string | null {
-  const MR = (window as any).MediaRecorder;
+  // reason: MediaRecorder is not universally typed in all TS lib targets we ship
+  const MR = (window as unknown as { MediaRecorder?: { isTypeSupported?: (m: string) => boolean } })
+    .MediaRecorder;
   if (!MR || !MR.isTypeSupported) return null;
   const candidates = [
     "audio/webm;codecs=opus",

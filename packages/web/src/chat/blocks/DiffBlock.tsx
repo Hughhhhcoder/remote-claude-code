@@ -7,7 +7,7 @@ import {
   type JSX,
 } from "solid-js";
 import { parseDiff, type DLine, type Hunk, type LineKind, type Parsed } from "./parseDiff";
-import { useIsMobile } from "../../useIsMobile";
+import { useIsMobile } from "../../hooks/useMediaQuery";
 
 /**
  * DiffBlock — unified diff renderer with:

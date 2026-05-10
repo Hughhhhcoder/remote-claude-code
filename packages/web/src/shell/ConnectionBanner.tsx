@@ -3,6 +3,7 @@ import type { ConnStatus } from "../client";
 import { Button } from "../primitives/Button";
 import { Spinner } from "../primitives/Spinner";
 import { hasOfflineCache } from "../hooks/useOfflineHydrate";
+import { t, tt } from "../i18n/index.ts";
 
 /**
  * ConnectionBanner — user-visible strip that replaces the tiny TopBar status
@@ -75,7 +76,7 @@ export function ConnectionBanner(props: ConnectionBannerProps): JSX.Element {
           class="h-9 sm:h-8 flex items-center gap-2 px-4 font-sans text-[13px] bg-bg-surface text-text-muted border-b border-border-subtle"
         >
           <Spinner size="sm" color="muted" />
-          <span class="truncate">连接中…</span>
+          <span class="truncate">{t("connection.connecting")}</span>
         </div>
       </Show>
 
@@ -89,14 +90,14 @@ export function ConnectionBanner(props: ConnectionBannerProps): JSX.Element {
           <span class="truncate flex-1 min-w-0">
             <Show
               when={secondsLeft() > 0}
-              fallback={<>连接已断开 · 正在重连… (第 {attempt()} 次尝试)</>}
+              fallback={<>{tt("connection.disconnectedReconnectPending", { attempt: attempt() })}</>}
             >
-              连接已断开 · {secondsLeft()} 秒后重连 (第 {attempt()} 次尝试)
+              {tt("connection.disconnectedReconnectIn", { seconds: secondsLeft(), attempt: attempt() })}
             </Show>
           </span>
           <Show when={showOfflineHint()}>
             <span class="shrink-0 text-[11px] text-text-muted font-normal hidden sm:inline">
-              🔌 离线模式 · 显示最近缓存
+              {t("connection.offlineCached")}
             </span>
           </Show>
           <Show when={props.onReconnectNow}>
@@ -106,7 +107,7 @@ export function ConnectionBanner(props: ConnectionBannerProps): JSX.Element {
               class="h-7 shrink-0"
               onClick={() => props.onReconnectNow?.()}
             >
-              立即重连
+              {t("connection.reconnectNow")}
             </Button>
           </Show>
         </div>
@@ -119,11 +120,11 @@ export function ConnectionBanner(props: ConnectionBannerProps): JSX.Element {
         >
           <span aria-hidden="true">✗</span>
           <span class="truncate flex-1 min-w-0">
-            无法连接到 host · 请检查网络
+            {t("connection.unreachable")}
           </span>
           <Show when={showOfflineHint()}>
             <span class="shrink-0 text-[11px] text-text-muted font-normal hidden sm:inline">
-              🔌 离线模式 · 显示最近缓存
+              {t("connection.offlineCached")}
             </span>
           </Show>
           <Show when={props.onReconnectNow}>
@@ -133,7 +134,7 @@ export function ConnectionBanner(props: ConnectionBannerProps): JSX.Element {
               class="h-7 shrink-0"
               onClick={() => props.onReconnectNow?.()}
             >
-              立即重试
+              {t("connection.retryNow")}
             </Button>
           </Show>
         </div>
@@ -145,7 +146,7 @@ export function ConnectionBanner(props: ConnectionBannerProps): JSX.Element {
           class="h-9 sm:h-8 flex items-center gap-2 px-4 font-sans text-[13px] bg-accent-bg border-b border-accent/30 text-accent"
         >
           <span aria-hidden="true">👁</span>
-          <span class="truncate">只读模式 · 无法编辑</span>
+          <span class="truncate">{t("connection.readOnly")}</span>
         </div>
       </Show>
     </Show>

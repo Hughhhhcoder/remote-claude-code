@@ -3,7 +3,6 @@ import { createSignal, onCleanup } from "solid-js";
 /**
  * useMediaQuery — reactive Solid signal bound to a CSS media query.
  *
- * Mirrors the pattern in `../useIsMobile.ts`:
  *   - SSR-safe: returns `() => false` when `window.matchMedia` is unavailable.
  *   - Uses `addEventListener("change", …)` when present, falls back to the
  *     legacy `addListener` for older Safari / JSDOM.

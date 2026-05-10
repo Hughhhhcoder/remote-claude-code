@@ -13,6 +13,7 @@ import { AttachButton } from "./AttachButton";
 import { createStreamingMessages } from "./streaming";
 import { registerOfflineHtmlWindowHook } from "./exportOfflineHtml";
 import { loadCachedMessages } from "../hooks/useOfflineHydrate";
+import { t, tt } from "../i18n/index.ts";
 
 /**
  * ChatSurface — wires Phase-4 components into a single drop-in replacement
@@ -60,6 +61,12 @@ export interface ChatSurfaceProps {
    * viewport so the user can step through hits within the active session.
    */
   searchQuery?: string;
+  /**
+   * [B33-A] Read-only surface: hides composer, skips CRDT draft/voice/injector
+   * wiring. Used by SharedReadonlyView for share-token guests where the WS
+   * connection is readonly anyway — the composer would just fail on send.
+   */
+  readOnly?: boolean;
 }
 
 /**
@@ -123,6 +130,10 @@ export function ChatSurface(props: ChatSurfaceProps): JSX.Element {
   // Re-create shared text per sid.
   createMemo(() => {
     const sid = props.sid;
+    if (props.readOnly) {
+      // Read-only surface: no composer, no CRDT draft sync. Leave draft as "".
+      return;
+    }
     shared?.destroy();
     const s = createSharedText(props.client, sid, "input-draft");
     shared = s;
@@ -182,9 +193,9 @@ export function ChatSurface(props: ChatSurfaceProps): JSX.Element {
     if (match && DESTRUCTIVE_SLASH.has(match[1].toLowerCase())) {
       const name = match[1].toLowerCase();
       // Native confirm is acceptable for this batch; future batch swaps in a Dialog.
-      if (!window.confirm(`清空当前对话上下文? (/${name})`)) {
+      if (!window.confirm(tt("chat.clearConfirm", { name }))) {
         onDraftChange(text); // restore draft so user can edit without re-typing
-        flashCancelNotice(`已取消 /${name}`);
+        flashCancelNotice(tt("chat.cancelledCmd", { name }));
         return;
       }
     }
@@ -238,13 +249,13 @@ export function ChatSurface(props: ChatSurfaceProps): JSX.Element {
       if (e.key !== "Escape" || e.defaultPrevented) return;
       if (document.querySelector('[role="dialog"][aria-modal="true"]')) return;
       const active = document.activeElement as HTMLElement | null;
-      if (active?.getAttribute("aria-label") === "输入消息") return;
+      if (active?.getAttribute("aria-label") === t("chat.inputAria")) return;
       if (active) {
         const tag = active.tagName;
         if (tag === "INPUT" || tag === "TEXTAREA" || active.isContentEditable) return;
       }
       const composer = document.querySelector<HTMLTextAreaElement>(
-        'textarea[aria-label="输入消息"]',
+        `textarea[aria-label="${t("chat.inputAria")}"]`,
       );
       if (composer) composer.focus();
     };
@@ -353,14 +364,14 @@ export function ChatSurface(props: ChatSurfaceProps): JSX.Element {
                   "text-[11px] text-text-secondary font-sans shadow-sm",
                 ].join(" ")}
                 role="status"
-                aria-label="会话内搜索结果"
+                aria-label={t("chat.searchResultsAria")}
               >
                 <button
                   type="button"
                   class="px-1 text-text-muted hover:text-text-primary disabled:opacity-40"
                   onClick={() => stepMatch(-1)}
                   disabled={matchingIds().length === 0}
-                  aria-label="上一个匹配"
+                  aria-label={t("chat.prevMatch")}
                 >
                   ‹
                 </button>
@@ -374,7 +385,7 @@ export function ChatSurface(props: ChatSurfaceProps): JSX.Element {
                   class="px-1 text-text-muted hover:text-text-primary disabled:opacity-40"
                   onClick={() => stepMatch(1)}
                   disabled={matchingIds().length === 0}
-                  aria-label="下一个匹配"
+                  aria-label={t("chat.nextMatch")}
                 >
                   ›
                 </button>
@@ -383,10 +394,15 @@ export function ChatSurface(props: ChatSurfaceProps): JSX.Element {
           </div>
         }
         composerSlot={
+          props.readOnly ? (
+            // Read-only surface: empty element (not undefined — else ChatPane
+            // falls back to its PlaceholderComposer). B33-A.
+            <></>
+          ) : (
           <div class="flex flex-col">
             <Show when={remoteEditActive()}>
               <div class="text-[11px] text-accent font-sans mx-4 mb-1">
-                👥 协作者正在编辑…
+                {t("chat.collabEditing")}
               </div>
             </Show>
             <Composer
@@ -400,7 +416,7 @@ export function ChatSurface(props: ChatSurfaceProps): JSX.Element {
               onToggleView={props.onToggleViewMode}
               mentionSessions={props.sessions}
               mentionCwd={props.session?.cwd}
-              placeholder="发送消息…"
+              placeholder={t("chat.composerPlaceholder")}
               attachSlot={<AttachButton onClick={() => setInjectOpen(true)} />}
               voiceSlot={
                 <VoiceButton
@@ -428,6 +444,7 @@ export function ChatSurface(props: ChatSurfaceProps): JSX.Element {
               </div>
             </Show>
           </div>
+          )
         }
       />
 

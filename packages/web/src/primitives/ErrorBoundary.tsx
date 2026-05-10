@@ -1,4 +1,5 @@
 import { ErrorBoundary as SolidErrorBoundary, createSignal, Show, type JSX } from "solid-js";
+import { t, tt } from "../i18n/index.ts";
 
 /**
  * ErrorBoundary — wraps Solid's built-in <ErrorBoundary> with a friendly
@@ -119,11 +120,11 @@ export function ErrorBoundary(props: ErrorBoundaryProps): JSX.Element {
                   class="font-serif text-[28px] sm:text-[32px] font-medium text-text-primary m-0"
                   style={{ "font-family": "var(--font-serif)" }}
                 >
-                  出现了一个错误
+                  {t("error.heading")}
                 </h1>
                 <Show when={props.scope}>
                   <p class="text-sm text-text-muted m-0">
-                    范围：{props.scope}
+                    {tt("error.scope", { scope: props.scope ?? "" })}
                   </p>
                 </Show>
               </div>
@@ -146,7 +147,7 @@ export function ErrorBoundary(props: ErrorBoundaryProps): JSX.Element {
                     >
                       ▸
                     </span>
-                    <span>{showDetails() ? "隐藏详情" : "显示详情"}</span>
+                    <span>{showDetails() ? t("error.hideDetails") : t("error.showDetails")}</span>
                   </span>
                   <span class="text-[12px] font-mono text-text-muted truncate max-w-[60%]">
                     {report().name}
@@ -171,21 +172,21 @@ export function ErrorBoundary(props: ErrorBoundaryProps): JSX.Element {
                   onClick={copy}
                   class="inline-flex items-center justify-center min-h-[44px] px-4 rounded-md text-sm text-text-secondary hover:text-text-primary hover:bg-bg-surfaceStrong transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
                 >
-                  {copied() ? "✓ 已复制" : "复制错误信息"}
+                  {copied() ? t("error.copied") : t("error.copyInfo")}
                 </button>
                 <button
                   type="button"
                   onClick={reset}
                   class="inline-flex items-center justify-center min-h-[44px] px-4 rounded-md text-sm text-text-secondary hover:text-text-primary hover:bg-bg-surfaceStrong border border-border-subtle transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
                 >
-                  重置
+                  {t("error.reset")}
                 </button>
                 <button
                   type="button"
                   onClick={refresh}
                   class="inline-flex items-center justify-center min-h-[44px] px-4 rounded-md text-sm font-medium bg-accent text-white hover:bg-accent-hover transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-bg-page"
                 >
-                  刷新页面
+                  {t("error.reload")}
                 </button>
               </div>
             </div>

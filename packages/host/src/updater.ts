@@ -256,7 +256,8 @@ export class Updater {
       const total = Number(resp.headers.get("content-length") ?? "0");
       const hash = createHash("sha256");
       let bytes = 0;
-      const nodeStream = Readable.fromWeb(resp.body as any);
+      // reason: Readable.fromWeb's types vary across node versions; resp.body is a web ReadableStream
+      const nodeStream = Readable.fromWeb(resp.body as unknown as import("node:stream/web").ReadableStream);
       const out = createWriteStream(tmpPath);
       let lastEmit = 0;
       nodeStream.on("data", (chunk: Buffer) => {

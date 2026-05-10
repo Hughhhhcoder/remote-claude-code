@@ -13,6 +13,7 @@ import { IconButton } from "../primitives/IconButton";
 import { useIsMobile } from "../hooks/useMediaQuery";
 import { haptics } from "../hooks/useHaptics";
 import { MentionPopover, type MentionItem } from "./MentionPopover";
+import { t } from "../i18n/index.ts";
 
 /**
  * Composer — pill-shaped chat input (Phase 4-I).
@@ -493,7 +494,7 @@ export function Composer(props: ComposerProps): JSX.Element {
       </Show>
 
       <span id={hintId} class="sr-only">
-        按回车发送,Shift+回车换行,Cmd+↑ 调出上一条消息,Cmd+/ 切换对话/终端视图,@ 提及会话或文件
+        {t("composer.hint")}
       </span>
 
       <div class={outerCls()}>
@@ -512,7 +513,7 @@ export function Composer(props: ComposerProps): JSX.Element {
           aria-disabled={props.disabled ? "true" : "false"}
           aria-describedby={hintId}
           placeholder={props.placeholder ?? ""}
-          aria-label="输入消息"
+          aria-label={t("composer.inputAria")}
           class={
             "flex-1 min-w-0 resize-none bg-transparent outline-none " +
             "font-serif text-[15px] leading-[1.55] text-text-primary " +
@@ -548,7 +549,7 @@ export function Composer(props: ComposerProps): JSX.Element {
 
         <IconButton
           size="md"
-          aria-label="发送消息"
+          aria-label={t("composer.sendAria")}
           onClick={submit}
           disabled={props.disabled || draft().trim().length === 0}
           aria-disabled={

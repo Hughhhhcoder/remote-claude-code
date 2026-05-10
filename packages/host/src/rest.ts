@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import type { PermissionMode, SessionMeta, Frame } from "@rcc/protocol";
-import { PermissionMode as PermissionModeSchema } from "@rcc/protocol";
+import type { PermissionMode, SessionMeta, Frame, ProjectColor } from "@rcc/protocol";
+import { PermissionMode as PermissionModeSchema, PROJECT_COLORS } from "@rcc/protocol";
 import type { SessionRegistry, AnySession } from "./session.ts";
 import type { ProjectStore } from "./projects.ts";
 import type { TrustStore, PairedDevice } from "./trust.ts";
@@ -26,7 +26,7 @@ import {
   saveSubagent,
   deleteSubagent,
 } from "./subagents.ts";
-import { listHooks, writeHook, deleteHook } from "./hooks.ts";
+import { listHooks, writeHook, deleteHook, HOOK_EVENT_NAMES, type HookEventName, type HookAction } from "./hooks.ts";
 import {
   listPermissions,
   addRule as permAddRule,
@@ -105,6 +105,16 @@ function readJsonBody<T>(req: IncomingMessage): Promise<T> {
 function getPath(url: string): string {
   const q = url.indexOf("?");
   return q >= 0 ? url.slice(0, q) : url;
+}
+
+function asProjectColor(v: unknown): ProjectColor | null {
+  if (typeof v !== "string") return null;
+  return (PROJECT_COLORS as readonly string[]).includes(v) ? (v as ProjectColor) : null;
+}
+
+function asHookEvent(v: unknown): HookEventName | null {
+  if (typeof v !== "string") return null;
+  return (HOOK_EVENT_NAMES as readonly string[]).includes(v) ? (v as HookEventName) : null;
 }
 
 function sessionMetaLite(s: AnySession): SessionMeta {
@@ -342,7 +352,7 @@ async function routeProjects(
       const p = await ctx.projects.create({
         name: body.name,
         cwd: body.cwd,
-        color: (body.color as any) ?? undefined,
+        color: asProjectColor(body.color) ?? undefined,
       });
       ctx.broadcast({ v: 1, t: "project.list", projects: ctx.projects.list() });
       writeJson(res, 201, { project: p });
@@ -467,6 +477,9 @@ async function routeMcp(
       return true;
     }
     try {
+      // reason: REST body declares arrays for env/headers; addMcp expects Record.
+      // This endpoint's behavior with arrays is preserved intentionally pending a
+      // dedicated REST shape fix.
       await addMcp({
         name: body.name,
         scope: body.scope,
@@ -476,7 +489,7 @@ async function routeMcp(
         url: body.url,
         env: body.env,
         headers: body.headers,
-      } as any);
+      } as unknown as Parameters<typeof addMcp>[0]);
       const detail = await getMcp(body.name);
       writeJson(res, 201, { server: detail });
     } catch (err: any) {
@@ -673,12 +686,17 @@ async function routeHooks(
       return true;
     }
     try {
+      const ev = asHookEvent(body.event);
+      if (!ev) {
+        writeError(res, 400, "invalid_event", `unknown hook event: ${body.event}`);
+        return true;
+      }
       await writeHook(
         body.scope,
-        body.event as any,
+        ev,
         typeof body.index === "number" ? body.index : -1,
         body.matcher,
-        body.hooks as any,
+        body.hooks as HookAction[],
         ctx.defaultCwd,
       );
       const hooks = await listHooks("all", ctx.defaultCwd);
@@ -698,7 +716,12 @@ async function routeHooks(
       return true;
     }
     try {
-      const ok = await deleteHook(scope, event as any, index, ctx.defaultCwd);
+      const ev = asHookEvent(event);
+      if (!ev) {
+        writeError(res, 400, "invalid_event", `unknown hook event: ${event}`);
+        return true;
+      }
+      const ok = await deleteHook(scope, ev, index, ctx.defaultCwd);
       writeJson(res, ok ? 200 : 404, ok ? { ok: true } : { error: "not_found", code: "not_found" });
     } catch (err: any) {
       writeError(res, 400, "hook_delete_failed", err?.message ?? "failed");
@@ -789,14 +812,16 @@ async function routeStarters(
       return true;
     }
     try {
+      // reason: REST body declares loose shapes (any[] / string); starters.save
+      // and PermissionMode enforce the real constraints at call time.
       const s = await ctx.starters.save({
         id: body.id,
         name: body.name,
         description: body.description,
         systemPrompt: body.systemPrompt,
         enableSkills: body.enableSkills,
-        firstSteps: body.firstSteps as any,
-        permissionMode: body.permissionMode as any,
+        firstSteps: body.firstSteps as Parameters<typeof ctx.starters.save>[0]["firstSteps"],
+        permissionMode: body.permissionMode as Parameters<typeof ctx.starters.save>[0]["permissionMode"],
         icon: body.icon,
         color: body.color,
       });

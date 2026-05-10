@@ -1,7 +1,7 @@
 import { createSignal, createMemo, lazy, onCleanup, onMount, Show } from "solid-js";
 import type { SessionMeta } from "@rcc/protocol";
 import { RccClient, defaultWsUrl, type ConnStatus } from "./client.ts";
-import { ChatView } from "./ChatView.tsx";
+import { ChatSurface } from "./chat/ChatSurface.tsx";
 // Lazy-load TerminalView so xterm only ships when the terminal view is opened.
 const TerminalView = lazy(() =>
   import("./TerminalView.tsx").then((m) => ({ default: m.TerminalView })),
@@ -127,7 +127,16 @@ export function SharedReadonlyView(props: Props) {
                 <div class="flex-1 min-h-0 relative">
                   <Show
                     when={viewMode() === "terminal" && sess().driver !== "sdk"}
-                    fallback={<ChatView client={client} sid={sess().id} />}
+                    fallback={
+                      <ChatSurface
+                        client={client}
+                        sid={sess().id}
+                        session={sess()}
+                        sessions={sessions()}
+                        commands={[]}
+                        readOnly
+                      />
+                    }
                   >
                     <TerminalView client={client} sid={sess().id} />
                   </Show>

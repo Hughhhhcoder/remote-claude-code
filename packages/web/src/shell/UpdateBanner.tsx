@@ -1,5 +1,6 @@
 import { Show, type JSX } from "solid-js";
 import { useUpdateWaiting, applyUpdate, dismissUpdate } from "../sw-registration";
+import { t } from "../i18n/index.ts";
 
 /**
  * UpdateBanner — shows when a new Service Worker is installed and waiting.
@@ -24,7 +25,7 @@ export function UpdateBanner(): JSX.Element {
           "max-w-[calc(100vw-32px)] sm:max-w-md w-full"
         }
       >
-        <span class="flex-1 text-sm font-sans">有新版本可用</span>
+        <span class="flex-1 text-sm font-sans">{t("update.available")}</span>
         <div class="flex items-center gap-2 shrink-0">
           <button
             type="button"
@@ -37,7 +38,7 @@ export function UpdateBanner(): JSX.Element {
               "focus-visible:ring-offset-2 focus-visible:ring-offset-accent"
             }
           >
-            立即更新
+            {t("update.applyNow")}
           </button>
           <button
             type="button"
@@ -49,9 +50,9 @@ export function UpdateBanner(): JSX.Element {
               "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-bg-page " +
               "focus-visible:ring-offset-2 focus-visible:ring-offset-accent"
             }
-            aria-label="稍后更新"
+            aria-label={t("update.laterAria")}
           >
-            稍后
+            {t("update.later")}
           </button>
         </div>
       </div>

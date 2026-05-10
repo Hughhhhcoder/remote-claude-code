@@ -11,6 +11,7 @@ import { SessionRow } from "../sessions/SessionRow.tsx";
 import { ProjectHeader } from "../sessions/ProjectHeader.tsx";
 import { usePullToRefresh } from "../hooks/usePullToRefresh.ts";
 import { useIsMobile } from "../hooks/useMediaQuery.ts";
+import { t, tt } from "../i18n/index.ts";
 
 /**
  * Sidebar — single responsive sidebar for RCC v0.2.
@@ -190,7 +191,7 @@ export function Sidebar(props: SidebarProps): JSX.Element {
         "h-full flex flex-col bg-bg-page font-sans",
         "text-text-primary",
       ].join(" ")}
-      aria-label="会话导航"
+      aria-label={t("sidebar.sessionsNavAria")}
     >
       {/* Header: new-session, new-project, search */}
       <div class="shrink-0 p-3 border-b border-border-subtle space-y-2">
@@ -201,7 +202,7 @@ export function Sidebar(props: SidebarProps): JSX.Element {
           onClick={() => props.onNewSession()}
         >
           <span aria-hidden="true">+</span>
-          <span>新建会话</span>
+          <span>{t("sidebar.newSessionBtn")}</span>
         </Button>
         <Button
           variant="secondary"
@@ -210,14 +211,14 @@ export function Sidebar(props: SidebarProps): JSX.Element {
           onClick={props.onNewProject}
         >
           <span aria-hidden="true">+</span>
-          <span>新建项目</span>
+          <span>{t("sidebar.newProjectBtn")}</span>
         </Button>
         <TextInput
           value={props.search.query}
           onInput={(v) => props.search.onChange(v)}
           type="search"
-          placeholder="搜索会话"
-          aria-label="搜索会话"
+          placeholder={t("sidebar.searchPlaceholderShort")}
+          aria-label={t("sidebar.searchAria")}
         />
       </div>
 
@@ -246,10 +247,10 @@ export function Sidebar(props: SidebarProps): JSX.Element {
             aria-live="polite"
             aria-label={
               ptr.state() === "refreshing"
-                ? "刷新会话中"
+                ? t("sidebar.refreshing")
                 : ptr.state() === "success"
-                  ? "会话已更新"
-                  : "下拉刷新"
+                  ? t("sidebar.refreshed")
+                  : t("sidebar.pullToRefresh")
             }
           >
             <Show
@@ -286,7 +287,7 @@ export function Sidebar(props: SidebarProps): JSX.Element {
               {/* Projects */}
               <div class="flex items-center justify-between px-2 py-2">
                 <div class="text-[10px] uppercase tracking-widest text-text-muted">
-                  项目
+                  {t("sidebar.projectsHeader")}
                 </div>
                 <button
                   type="button"
@@ -295,16 +296,16 @@ export function Sidebar(props: SidebarProps): JSX.Element {
                     "text-[11px] text-text-muted hover:text-text-primary",
                     "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded-sm px-1",
                   ].join(" ")}
-                  title="管理项目"
+                  title={t("sidebar.manageProjectsTitle")}
                 >
-                  管理
+                  {t("sidebar.manage")}
                 </button>
               </div>
               <Show
                 when={props.projects.length > 0}
                 fallback={
                   <div class="px-2 py-4 text-[12px] text-text-muted">
-                    暂无项目
+                    {t("sidebar.noProjectsShort")}
                   </div>
                 }
               >
@@ -333,7 +334,7 @@ export function Sidebar(props: SidebarProps): JSX.Element {
                             when={sess().length > 0}
                             fallback={
                               <div class="pl-4 px-2 py-1 text-[11px] text-text-muted italic">
-                                暂无会话
+                                {t("sidebar.noSessionsShort")}
                               </div>
                             }
                           >
@@ -378,7 +379,7 @@ export function Sidebar(props: SidebarProps): JSX.Element {
               <Show when={props.peers.length > 0}>
                 <div class="flex items-center justify-between px-2 py-2 mt-2 border-t border-border-subtle">
                   <div class="text-[10px] uppercase tracking-widest text-text-muted">
-                    远程 peers
+                    {t("sidebar.remotePeersShort")}
                   </div>
                   <button
                     type="button"
@@ -387,9 +388,9 @@ export function Sidebar(props: SidebarProps): JSX.Element {
                       "text-[11px] text-text-muted hover:text-text-primary",
                       "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded-sm px-1",
                     ].join(" ")}
-                    title="管理远程"
+                    title={t("sidebar.manageRemoteTitle")}
                   >
-                    管理
+                    {t("sidebar.manage")}
                   </button>
                 </div>
                 <For each={props.peers}>
@@ -414,10 +415,10 @@ export function Sidebar(props: SidebarProps): JSX.Element {
                             ].join(" ")}
                             title={
                               pr.connected
-                                ? "已连接"
-                                : pr.error ?? "离线"
+                                ? t("sidebar.connectedShort")
+                                : pr.error ?? t("sidebar.offlineShort")
                             }
-                            aria-label={pr.connected ? "已连接" : "离线"}
+                            aria-label={pr.connected ? t("sidebar.connectedShort") : t("sidebar.offlineShort")}
                           />
                           <span class="text-[11px] text-text-muted shrink-0">
                             {sess().length}
@@ -433,7 +434,7 @@ export function Sidebar(props: SidebarProps): JSX.Element {
                           fallback={
                             <Show when={pr.connected}>
                               <div class="pl-4 px-2 py-1 text-[11px] text-text-muted italic">
-                                暂无会话
+                                {t("sidebar.noSessionsShort")}
                               </div>
                             </Show>
                           }
@@ -483,9 +484,9 @@ export function Sidebar(props: SidebarProps): JSX.Element {
                     "font-sans text-[12px] text-text-muted",
                     "hover:text-text-primary hover:bg-bg-surfaceStrong",
                   ].join(" ")}
-                  title="切换归档会话可见"
+                  title={t("sidebar.toggleArchivedTitle")}
                 >
-                  {showArchived() ? "隐藏归档" : `显示归档 (${archivedCount()})`}
+                  {showArchived() ? t("sidebar.hideArchived") : tt("sidebar.showArchived", { n: archivedCount() })}
                 </button>
               </Show>
             </>
@@ -494,13 +495,13 @@ export function Sidebar(props: SidebarProps): JSX.Element {
           {/* Search results */}
           <div class="px-2 py-2">
             <div class="text-[10px] uppercase tracking-widest text-text-muted pb-1">
-              搜索结果 ({props.search.results!.length})
+              {tt("sidebar.searchResultsCount", { n: props.search.results!.length })}
             </div>
             <Show
               when={props.search.results!.length > 0}
               fallback={
                 <div class="text-[12px] text-text-muted py-2">
-                  无匹配结果
+                  {t("sidebar.noMatchResults")}
                 </div>
               }
             >
@@ -550,22 +551,22 @@ export function Sidebar(props: SidebarProps): JSX.Element {
         <FooterAction
           onClick={props.onOpenConfig}
           icon="⚙"
-          label="配置"
+          label={t("sidebar.configLabel")}
         />
         <FooterAction
           onClick={props.onOpenMarket}
           icon="⇩"
-          label="市场"
+          label={t("sidebar.marketplaceLabel")}
         />
         <FooterAction
           onClick={props.onOpenDevices}
           icon="⚿"
-          label="设备"
+          label={t("sidebar.devicesLabel")}
         />
         <FooterAction
           onClick={props.onManageProjects}
           icon="▤"
-          label="项目管理"
+          label={t("sidebar.projectsManageLabel")}
         />
       </div>
     </nav>

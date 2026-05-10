@@ -6,6 +6,7 @@ import {
   errorMessage,
   type DictationHandle,
 } from "../voice.ts";
+import { t } from "../i18n/index.ts";
 
 /**
  * VoiceButton — toggles voice dictation. Stateless w.r.t. the composer
@@ -84,7 +85,7 @@ export function VoiceButton(props: VoiceButtonProps): JSX.Element {
       });
     } catch (err: any) {
       console.warn("[voice] start failed", err);
-      props.onError?.("无法启动语音输入");
+      props.onError?.(t("voice.startFailed"));
       reset();
     }
   }
@@ -104,10 +105,10 @@ export function VoiceButton(props: VoiceButtonProps): JSX.Element {
 
   const tooltip = () => {
     if (props.title) return props.title;
-    if (!supported()) return "此设备不支持语音输入";
-    if (recording() && mode() === "recorder") return "录音中 · 停止后 Whisper 转写";
-    if (recording()) return "停止语音输入";
-    return "语音输入";
+    if (!supported()) return t("voice.unsupported");
+    if (recording() && mode() === "recorder") return t("voice.recording");
+    if (recording()) return t("voice.stop");
+    return t("voice.start");
   };
 
   return (
@@ -116,7 +117,7 @@ export function VoiceButton(props: VoiceButtonProps): JSX.Element {
       class={cls()}
       onClick={toggle}
       disabled={props.disabled || !supported()}
-      aria-label="语音输入"
+      aria-label={t("voice.aria")}
       aria-pressed={recording()}
       title={tooltip()}
     >

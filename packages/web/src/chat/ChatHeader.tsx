@@ -16,6 +16,7 @@ import {
   exportPrint,
 } from "./exportChat";
 import { SessionTimeline } from "./SessionTimeline";
+import { t } from "../i18n/index.ts";
 
 /**
  * ChatHeader — top chrome for the chat surface.
@@ -162,8 +163,8 @@ export function ChatHeader(props: ChatHeaderProps): JSX.Element {
         <Show when={props.client}>
           <IconButton
             size="sm"
-            aria-label="会话时间线"
-            title="会话时间线"
+            aria-label={t("chat.header.timelineAria")}
+            title={t("chat.header.timelineTitle")}
             onClick={() => setTimelineOpen(true)}
           >
             <span aria-hidden="true">🕐</span>
@@ -175,8 +176,8 @@ export function ChatHeader(props: ChatHeaderProps): JSX.Element {
         <IconButton
           size="sm"
           ref={(el) => (exportBtnRef = el)}
-          aria-label="导出对话"
-          title="导出对话"
+          aria-label={t("chat.header.exportAria")}
+          title={t("chat.header.exportTitle")}
           aria-haspopup="menu"
           aria-expanded={exportOpen() ? "true" : "false"}
           onClick={() => setExportOpen((v) => !v)}
@@ -215,20 +216,20 @@ export function ChatHeader(props: ChatHeaderProps): JSX.Element {
         placement="bottom-end"
         class="min-w-[180px] py-1"
       >
-        <div role="menu" aria-label="导出对话">
+        <div role="menu" aria-label={t("chat.header.exportMenuAria")}>
           <ExportMenuItem
             label="Markdown (.md)"
-            hint="可读格式，保留代码块"
+            hint={t("chat.header.exportMdHint")}
             onSelect={() => runExport("md")}
           />
           <ExportMenuItem
             label="JSON (.json)"
-            hint="原始结构化数据"
+            hint={t("chat.header.exportJsonHint")}
             onSelect={() => runExport("json")}
           />
           <ExportMenuItem
-            label="打印 / PDF"
-            hint="使用系统打印对话框"
+            label={t("chat.header.exportPrint")}
+            hint={t("chat.header.exportPrintHint")}
             onSelect={() => runExport("print")}
           />
         </div>
@@ -240,7 +241,7 @@ export function ChatHeader(props: ChatHeaderProps): JSX.Element {
         <Dialog
           open={timelineOpen()}
           onClose={() => setTimelineOpen(false)}
-          title="会话时间线"
+          title={t("chat.header.timelineTitle")}
           size="md"
         >
           <SessionTimeline

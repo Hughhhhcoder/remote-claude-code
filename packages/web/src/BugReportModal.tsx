@@ -21,6 +21,7 @@ import type { SessionsStore } from "./stores/sessionsStore.ts";
 import { loadToken } from "./auth.ts";
 import { loadCachedMessages } from "./hooks/useOfflineHydrate.ts";
 import { toast } from "./primitives/Toast.tsx";
+import { t, tt } from "./i18n/index.ts";
 import {
   buildBugReport,
   serializeBundle,
@@ -89,7 +90,7 @@ function downloadJson(text: string, filename: string): void {
     document.body.removeChild(a);
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   } catch (err) {
-    toast(`下载失败: ${err instanceof Error ? err.message : "unknown"}`, {
+    toast(tt("bug.downloadFailed", { err: err instanceof Error ? err.message : "unknown" }), {
       tone: "danger",
     });
   }
@@ -185,7 +186,7 @@ export function BugReportModal(props: Props) {
     const text = serialized();
     if (!text) return;
     const ok = await copyToClipboard(text);
-    toast(ok ? "已复制到剪贴板" : "复制失败,请手动下载", {
+    toast(ok ? t("bug.copied") : t("bug.copyFailed"), {
       tone: ok ? "info" : "warn",
     });
   }
@@ -206,13 +207,13 @@ export function BugReportModal(props: Props) {
           <div class="flex items-center justify-between px-5 py-3 border-b border-zinc-900">
             <div class="flex items-center gap-2 text-sm font-medium">
               <span>🐞</span>
-              <span>报告 Bug</span>
+              <span>{t("bug.title")}</span>
             </div>
             <button
               class="text-zinc-500 hover:text-zinc-200 text-sm"
               onClick={props.onClose}
-              title="关闭"
-              aria-label="关闭"
+              title={t("bug.close")}
+              aria-label={t("bug.close")}
             >
               ✕
             </button>
@@ -220,9 +221,7 @@ export function BugReportModal(props: Props) {
 
           <div class="p-5 space-y-4 overflow-y-auto">
             <div class="text-xs text-zinc-400 leading-relaxed">
-              生成一份诊断快照(JSON),包含最近 100 条审计日志、会话列表摘要、客户端偏好、
-              浏览器信息和版本信息。令牌、密码、密钥、长哈希和绝对路径会被自动脱敏。
-              不会上传任何数据 —— 你自行粘贴或附在反馈里。
+              {t("bug.description")}
             </div>
 
             <label class="flex items-start gap-2 text-xs text-zinc-300 cursor-pointer select-none">
@@ -236,22 +235,21 @@ export function BugReportModal(props: Props) {
                 }}
               />
               <span>
-                <div class="text-zinc-200">包含当前会话的聊天记录(最近 50 条)</div>
+                <div class="text-zinc-200">{t("bug.includeChat")}</div>
                 <div class="text-[11px] text-zinc-500 mt-0.5">
-                  聊天内容可能含有提示词、文件路径、代码片段等。仅在复现问题时勾选,
-                  并在提交前自行检查 JSON 内容。
+                  {t("bug.includeChatHint")}
                 </div>
               </span>
             </label>
 
             <div class="rounded-lg border border-zinc-800 bg-zinc-900/50">
               <div class="flex items-center justify-between px-3 py-2 border-b border-zinc-800 text-[11px] text-zinc-500">
-                <span>预览</span>
+                <span>{t("bug.preview")}</span>
                 <Show when={bundle()}>
                   <span class="font-mono">
-                    {(serialized().length / 1024).toFixed(1)} KB · {bundle()?.auditEntries.length ?? 0} 条审计
+                    {tt("bug.previewStats", { size: (serialized().length / 1024).toFixed(1), n: bundle()?.auditEntries.length ?? 0 })}
                     <Show when={bundle()?.chatHistory.included}>
-                      <span> · {bundle()?.chatHistory.messageCount} 条消息</span>
+                      <span>{tt("bug.previewMessages", { n: bundle()?.chatHistory.messageCount ?? 0 })}</span>
                     </Show>
                   </span>
                 </Show>
@@ -260,8 +258,8 @@ export function BugReportModal(props: Props) {
                 when={!busy() && serialized()}
                 fallback={
                   <div class="px-3 py-4 text-[11px] text-zinc-500">
-                    <Show when={busy()} fallback={<span>准备中…</span>}>
-                      <span>收集中…</span>
+                    <Show when={busy()} fallback={<span>{t("bug.preparing")}</span>}>
+                      <span>{t("bug.collecting")}</span>
                     </Show>
                   </div>
                 }
@@ -271,7 +269,7 @@ export function BugReportModal(props: Props) {
                 >
                   {serialized().slice(0, 1200)}
                   <Show when={serialized().length > 1200}>
-                    <span class="text-zinc-600">{"\n…（截断预览,完整数据请下载/复制）"}</span>
+                    <span class="text-zinc-600">{t("bug.truncated")}</span>
                   </Show>
                 </pre>
               </Show>
@@ -288,14 +286,14 @@ export function BugReportModal(props: Props) {
               onClick={() => void onCopy()}
               disabled={busy() || !serialized()}
             >
-              复制到剪贴板
+              {t("bug.copy")}
             </button>
             <button
               class="px-3 py-1.5 rounded-lg text-xs border border-accent-500/50 bg-accent-500/15 text-accent-300 hover:bg-accent-500/25 disabled:opacity-40 disabled:cursor-not-allowed"
               onClick={onDownload}
               disabled={busy() || !serialized()}
             >
-              下载 JSON
+              {t("bug.download")}
             </button>
           </div>
         </div>

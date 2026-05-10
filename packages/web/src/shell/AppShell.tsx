@@ -8,6 +8,7 @@ import {
 } from "solid-js";
 import { Dialog } from "../primitives/Dialog";
 import { useIsCompact, useIsMobile } from "../hooks/useMediaQuery";
+import { t } from "../i18n/index.ts";
 
 /**
  * AppShell — Phase 2-A responsive frame for RCC v0.2.
@@ -125,7 +126,7 @@ export function AppShell(props: AppShellProps): JSX.Element {
             "font-sans text-sm",
           ].join(" ")}
         >
-          跳至主内容
+          {t("a11y.skipToMain")}
         </a>
 
         {/* ----- TopBar ---------------------------------------------------

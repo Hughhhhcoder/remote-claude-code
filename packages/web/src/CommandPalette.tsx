@@ -7,7 +7,7 @@ import type {
   SubagentSummary,
 } from "@rcc/protocol";
 import type { RccClient } from "./client.ts";
-import { useIsMobile } from "./useIsMobile.ts";
+import { useIsMobile } from "./hooks/useMediaQuery.ts";
 
 export interface PaletteAction {
   id: string;

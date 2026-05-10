@@ -28,6 +28,18 @@ export function t(key: keyof Dict): string {
   return (d && d[key]) ?? dicts.en[key] ?? (key as string);
 }
 
+/**
+ * Template variant of {@link t}. Looks up the key, then substitutes `{name}`
+ * placeholders with values from `vars`. Unknown placeholders are left as-is,
+ * so typos are visible rather than blank.
+ */
+export function tt(key: keyof Dict, vars: Record<string, string | number>): string {
+  const raw = t(key);
+  return raw.replace(/\{(\w+)\}/g, (_, name) =>
+    name in vars ? String(vars[name]) : `{${name}}`,
+  );
+}
+
 export function setLocale(lang: string) {
   if (!(lang in dicts)) return;
   try {
