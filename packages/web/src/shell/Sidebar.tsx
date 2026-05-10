@@ -9,6 +9,8 @@ import { Button } from "../primitives/Button.tsx";
 import { TextInput } from "../primitives/TextInput.tsx";
 import { SessionRow } from "../sessions/SessionRow.tsx";
 import { ProjectHeader } from "../sessions/ProjectHeader.tsx";
+import { usePullToRefresh } from "../hooks/usePullToRefresh.ts";
+import { useIsMobile } from "../hooks/useMediaQuery.ts";
 
 /**
  * Sidebar — single responsive sidebar for RCC v0.2.
@@ -67,6 +69,13 @@ export interface SidebarProps {
   onOpenDevices: () => void;
   onManageProjects: () => void;
   onManagePeers: () => void;
+  /**
+   * [B29-A] Invoked when the user completes a pull-to-refresh gesture on
+   * the mobile sessions list. The caller should trigger a fresh
+   * `session.list` frame on the websocket. Optional; when omitted the
+   * gesture is inert.
+   */
+  onRefreshSessions?: () => void | Promise<void>;
 }
 
 const PEER_DOT: Record<string, string> = {
@@ -161,6 +170,20 @@ export function Sidebar(props: SidebarProps): JSX.Element {
 
   const hasSearch = () => !!props.search.results;
 
+  // [B29-A] Pull-to-refresh — mobile only; desktop users have the reconnect
+  // banner + hello handshake to resync. `handlers` are no-ops off-touch so
+  // wheel scrolling is untouched.
+  const isMobile = useIsMobile();
+  const ptr = usePullToRefresh({
+    onRefresh: async () => {
+      if (props.onRefreshSessions) {
+        await props.onRefreshSessions();
+      }
+    },
+    threshold: 64,
+    maxOffset: 120,
+  });
+
   return (
     <nav
       class={[
@@ -199,7 +222,63 @@ export function Sidebar(props: SidebarProps): JSX.Element {
       </div>
 
       {/* Middle: results OR projects+peers */}
-      <div class="flex-1 overflow-y-auto scrollbar p-2">
+      <div
+        ref={(el) => ptr.ref(isMobile() ? el : null)}
+        class="relative flex-1 overflow-y-auto scrollbar p-2"
+        onPointerDown={isMobile() ? ptr.handlers.onPointerDown : undefined}
+        onPointerMove={isMobile() ? ptr.handlers.onPointerMove : undefined}
+        onPointerUp={isMobile() ? ptr.handlers.onPointerUp : undefined}
+        onPointerCancel={isMobile() ? ptr.handlers.onPointerCancel : undefined}
+        style={{
+          transform: ptr.offset() > 0 ? `translateY(${ptr.offset()}px)` : undefined,
+          transition:
+            ptr.state() === "dragging" ? "none" : "transform 200ms ease-out",
+        }}
+      >
+        {/* Pull-to-refresh indicator — floats above the scroll content. */}
+        <Show when={isMobile() && ptr.state() !== "idle"}>
+          <div
+            class="pointer-events-none absolute inset-x-0 flex items-center justify-center"
+            style={{
+              top: `-${ptr.threshold}px`,
+              height: `${ptr.threshold}px`,
+            }}
+            aria-live="polite"
+            aria-label={
+              ptr.state() === "refreshing"
+                ? "刷新会话中"
+                : ptr.state() === "success"
+                  ? "会话已更新"
+                  : "下拉刷新"
+            }
+          >
+            <Show
+              when={ptr.state() === "success"}
+              fallback={
+                <span
+                  class={[
+                    "inline-block w-5 h-5 rounded-full border-2 border-text-muted border-t-accent",
+                    ptr.state() === "refreshing" ? "animate-spin" : "",
+                  ].join(" ")}
+                  style={{
+                    opacity: String(
+                      Math.min(1, ptr.offset() / ptr.threshold),
+                    ),
+                    transform:
+                      ptr.state() === "dragging"
+                        ? `rotate(${(ptr.offset() / ptr.threshold) * 360}deg)`
+                        : undefined,
+                  }}
+                  aria-hidden="true"
+                />
+              }
+            >
+              <span class="text-success text-[16px]" aria-hidden="true">
+                ✓
+              </span>
+            </Show>
+          </div>
+        </Show>
         <Show
           when={hasSearch()}
           fallback={

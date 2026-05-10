@@ -1,6 +1,7 @@
 import { createSignal, onCleanup } from "solid-js";
 import type { Workflow, WorkflowStep } from "@rcc/protocol";
 import type { RccClient } from "./client.ts";
+import { haptics } from "./hooks/useHaptics.ts";
 
 export interface WorkflowRunRequest {
   workflow: Workflow;
@@ -277,6 +278,9 @@ export function createWorkflowRunner(client: RccClient) {
             hasFailure: s.hasFailure || failed,
           });
           steps = snapshot;
+          // [B29-B] subtle buzz on every successful step completion so users
+          // running a long workflow on their phone know it's progressing.
+          if (!failed) haptics.light();
         } else {
           steps = snapshot;
         }

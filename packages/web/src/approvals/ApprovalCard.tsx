@@ -1,5 +1,6 @@
 import { createSignal, Show, type JSX } from "solid-js";
 import Button from "../primitives/Button.tsx";
+import { haptics } from "../hooks/useHaptics.ts";
 
 /**
  * ApprovalCard — standalone per-approval card used by ApprovalPane.
@@ -83,8 +84,14 @@ export function ApprovalCard(props: ApprovalCardProps): JSX.Element {
   const isResolved = () => props.approval.status !== "pending";
   const useFaceId = () => risk() === "high" && !!props.device?.hasPasskey && !isResolved();
 
-  const handleApprove = () => props.onApprove(props.approval.id, { allowAlways: allowAlways() });
-  const handleDeny = () => props.onDeny(props.approval.id);
+  const handleApprove = () => {
+    haptics.success(); // [B29-B]
+    props.onApprove(props.approval.id, { allowAlways: allowAlways() });
+  };
+  const handleDeny = () => {
+    haptics.warn(); // [B29-B]
+    props.onDeny(props.approval.id);
+  };
 
   return (
     <Show

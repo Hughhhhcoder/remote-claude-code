@@ -185,9 +185,8 @@ export function TopBar(props: TopBarProps): JSX.Element {
       class={
         "w-full bg-bg-page/95 backdrop-blur " +
         "border-b border-border-subtle font-sans " +
-        "sticky top-0 z-30"
+        "sticky top-0 z-30 safe-area-padding-top safe-area-padding-x"
       }
-      style={{ "padding-top": "env(safe-area-inset-top)" }}
     >
       <Show
         when={!props.isCompact}

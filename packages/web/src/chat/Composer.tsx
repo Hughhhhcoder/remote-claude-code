@@ -11,6 +11,7 @@ import type { RccClient } from "../client";
 import type { FileEntry, SessionMeta } from "@rcc/protocol";
 import { IconButton } from "../primitives/IconButton";
 import { useIsMobile } from "../hooks/useMediaQuery";
+import { haptics } from "../hooks/useHaptics";
 import { MentionPopover, type MentionItem } from "./MentionPopover";
 
 /**
@@ -382,6 +383,7 @@ export function Composer(props: ComposerProps): JSX.Element {
     const text = raw.replace(/^\s+|\s+$/g, "");
     if (text.length === 0) return;
     props.onSend(text);
+    haptics.light(); // [B29-B] subtle buzz on send (no-op iOS / pref-gated)
     setDraft("");
     props.onDraftChange?.("");
     closeMention();

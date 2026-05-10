@@ -23,6 +23,26 @@
       "url": "url"
     }
   },
+  "shortcuts": [
+    {
+      "name": "新建会话",
+      "short_name": "新建",
+      "description": "直接打开新建会话向导",
+      "url": "/?action=new-session",
+      "icons": [
+        { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" }
+      ]
+    },
+    {
+      "name": "收件箱",
+      "short_name": "收件箱",
+      "description": "查看审批与通知",
+      "url": "/?action=inbox",
+      "icons": [
+        { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" }
+      ]
+    }
+  ],
   "icons": [
     {
       "src": "/icon-192.png",

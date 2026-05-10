@@ -33,6 +33,47 @@ const LOCALE_LABELS: Record<string, string> = {
   en: "English",
 };
 
+// [B29-C] Common escape-sequence presets for the "+ 添加按键" picker. These
+// are the sequences we expect most users to want on the mobile key bar; the
+// raw `send` strings use real control bytes so decodeSendEscapes is not needed.
+const ESC_CHAR = "\x1b";
+const KEY_PRESETS: ReadonlyArray<UiCustomKey & { group: string }> = [
+  // Navigation
+  { group: "nav", label: "↑", send: `${ESC_CHAR}[A`, hint: "history / up" },
+  { group: "nav", label: "↓", send: `${ESC_CHAR}[B`, hint: "history / down" },
+  { group: "nav", label: "←", send: `${ESC_CHAR}[D` },
+  { group: "nav", label: "→", send: `${ESC_CHAR}[C` },
+  { group: "nav", label: "Home", send: `${ESC_CHAR}[H` },
+  { group: "nav", label: "End", send: `${ESC_CHAR}[F` },
+  { group: "nav", label: "PgUp", send: `${ESC_CHAR}[5~` },
+  { group: "nav", label: "PgDn", send: `${ESC_CHAR}[6~` },
+  // Editing
+  { group: "edit", label: "Esc", send: ESC_CHAR },
+  { group: "edit", label: "Tab", send: "\t" },
+  { group: "edit", label: "⇧Tab", send: `${ESC_CHAR}[Z`, hint: "plan mode toggle" },
+  { group: "edit", label: "Enter", send: "\r" },
+  { group: "edit", label: "Del", send: `${ESC_CHAR}[3~` },
+  // Control
+  { group: "ctrl", label: "^C", send: "\x03", hint: "interrupt" },
+  { group: "ctrl", label: "^D", send: "\x04", hint: "eof / exit" },
+  { group: "ctrl", label: "^L", send: "\x0c", hint: "clear" },
+  { group: "ctrl", label: "^Z", send: "\x1a", hint: "suspend" },
+  { group: "ctrl", label: "^R", send: "\x12", hint: "reverse search" },
+  // Slash commands / prefixes
+  { group: "char", label: "/", send: "/" },
+  { group: "char", label: "!", send: "!" },
+  { group: "char", label: "?", send: "?" },
+  { group: "char", label: "@", send: "@" },
+  { group: "char", label: "#", send: "#" },
+];
+
+const PRESET_GROUP_LABELS: Record<string, string> = {
+  nav: "方向与翻页",
+  edit: "编辑",
+  ctrl: "控制序列",
+  char: "字符 / 前缀",
+};
+
 export function SettingsModal(props: Props) {
   return (
     <Show when={props.open}>
@@ -62,6 +103,7 @@ export function SettingsModal(props: Props) {
             <LanguageSection />
             <AppearanceSection />
             <ShowThinkingSection store={props.store} />
+            <HapticsSection store={props.store} />
             <AccentSection store={props.store} />
             <FontScaleSection store={props.store} />
             <QuietHoursSection client={props.client} />
@@ -153,6 +195,35 @@ function ShowThinkingSection(props: { store: PrefsStore }) {
   );
 }
 
+/**
+ * [B29-B] Subtle haptic feedback on key interactions (message send, approval
+ * approve/deny, long-press action-sheet). Uses navigator.vibrate() — no-op on
+ * iOS Safari / older browsers, so this switch primarily controls Android and
+ * modern Chromium. Default on.
+ */
+function HapticsSection(props: { store: PrefsStore }) {
+  return (
+    <section>
+      <div class="text-[10px] uppercase tracking-widest text-zinc-500 mb-2">
+        触感反馈
+      </div>
+      <div class="flex items-center justify-between gap-3">
+        <div class="min-w-0">
+          <div class="text-sm text-zinc-200">启用震动反馈</div>
+          <div class="text-[11px] text-zinc-500">
+            发送消息、批准/拒绝、长按菜单时轻微震动。iOS Safari 不支持此 API,开关无效。
+          </div>
+        </div>
+        <Toggle
+          checked={props.store.prefs().haptics !== false}
+          onChange={(v) => props.store.update({ haptics: v })}
+          aria-label="启用震动反馈"
+        />
+      </div>
+    </section>
+  );
+}
+
 function AccentSection(props: { store: PrefsStore }) {
   return (
     <section>
@@ -219,6 +290,10 @@ function KeysSection(props: { store: PrefsStore }) {
     return k.length > 0 ? k : [...DEFAULT_CUSTOM_KEYS];
   };
 
+  // [B29-C] Preset picker: when non-null the panel is open and the user
+  // can click a preset to append it to the custom key list.
+  const [pickerOpen, setPickerOpen] = createSignal(false);
+
   function replaceAt(idx: number, patch: Partial<UiCustomKey>) {
     const current = keys().slice();
     const existing = current[idx];
@@ -238,6 +313,19 @@ function KeysSection(props: { store: PrefsStore }) {
     props.store.update({ customKeys: current });
   }
 
+  // [B29-C] Swap item at idx with idx+dir. Clamped at list edges (no-op).
+  function moveAt(idx: number, dir: -1 | 1) {
+    const current = keys().slice();
+    const target = idx + dir;
+    if (target < 0 || target >= current.length) return;
+    const a = current[idx];
+    const b = current[target];
+    if (!a || !b) return;
+    current[idx] = b;
+    current[target] = a;
+    props.store.update({ customKeys: current });
+  }
+
   function add() {
     const current = keys().slice();
     if (current.length >= 32) return;
@@ -245,20 +333,92 @@ function KeysSection(props: { store: PrefsStore }) {
     props.store.update({ customKeys: current });
   }
 
+  // [B29-C] Append a preset from the picker. Dedup by `send` so users can't
+  // accidentally stack three Esc keys. Silently no-op if already present or
+  // at the 32-key cap.
+  function addPreset(p: UiCustomKey) {
+    const current = keys().slice();
+    if (current.length >= 32) return;
+    if (current.some((k) => k.send === p.send)) {
+      setPickerOpen(false);
+      return;
+    }
+    current.push({ label: p.label, send: p.send, hint: p.hint });
+    props.store.update({ customKeys: current });
+    setPickerOpen(false);
+  }
+
+  const atCap = () => keys().length >= 32;
+
   return (
     <section>
       <div class="flex items-center justify-between mb-2">
         <div class="text-[10px] uppercase tracking-widest text-zinc-500">{t("settings.keys")}</div>
-        <button
-          class="text-[11px] px-2 py-0.5 rounded border border-zinc-800 text-zinc-400 hover:text-zinc-100 hover:border-zinc-700"
-          onClick={add}
-          disabled={keys().length >= 32}
-        >
-          {t("settings.addKey")}
-        </button>
+        <div class="flex items-center gap-1.5">
+          <button
+            class="text-[11px] px-2 py-0.5 rounded border border-zinc-800 text-zinc-400 hover:text-zinc-100 hover:border-zinc-700 disabled:opacity-40 disabled:cursor-not-allowed"
+            onClick={() => setPickerOpen((v) => !v)}
+            disabled={atCap()}
+            title="从常用转义序列中添加"
+          >
+            + 添加按键
+          </button>
+          <button
+            class="text-[11px] px-2 py-0.5 rounded border border-zinc-800 text-zinc-400 hover:text-zinc-100 hover:border-zinc-700 disabled:opacity-40 disabled:cursor-not-allowed"
+            onClick={add}
+            disabled={atCap()}
+            title="添加空白键位,手动填写 send"
+          >
+            {t("settings.addKey")}
+          </button>
+        </div>
       </div>
+      <Show when={pickerOpen()}>
+        <div class="mb-2 p-2 rounded-lg bg-zinc-900/60 border border-zinc-800 space-y-2">
+          <div class="flex items-center justify-between">
+            <div class="text-[11px] text-zinc-400">选择要添加的按键 · 已有的会被跳过</div>
+            <button
+              class="text-[11px] text-zinc-500 hover:text-zinc-200"
+              onClick={() => setPickerOpen(false)}
+            >
+              ✕
+            </button>
+          </div>
+          <For each={Object.keys(PRESET_GROUP_LABELS)}>
+            {(group) => (
+              <div>
+                <div class="text-[10px] uppercase tracking-widest text-zinc-600 mb-1">
+                  {PRESET_GROUP_LABELS[group]}
+                </div>
+                <div class="flex flex-wrap gap-1.5">
+                  <For each={KEY_PRESETS.filter((p) => p.group === group)}>
+                    {(p) => {
+                      const already = () => keys().some((k) => k.send === p.send);
+                      return (
+                        <button
+                          class={`text-[11px] px-2 py-1 rounded border font-mono ${
+                            already()
+                              ? "border-zinc-900 bg-zinc-900 text-zinc-600 cursor-default"
+                              : "border-zinc-800 text-zinc-300 hover:text-zinc-100 hover:border-accent-500"
+                          }`}
+                          onClick={() => !already() && addPreset(p)}
+                          disabled={already()}
+                          title={p.hint ?? p.label}
+                        >
+                          {p.label}
+                        </button>
+                      );
+                    }}
+                  </For>
+                </div>
+              </div>
+            )}
+          </For>
+        </div>
+      </Show>
       <div class="space-y-1.5">
-        <div class="grid grid-cols-[80px_1fr_1fr_28px] gap-2 text-[10px] text-zinc-600 px-1">
+        <div class="grid grid-cols-[32px_80px_1fr_1fr_28px] gap-2 text-[10px] text-zinc-600 px-1">
+          <div>排序</div>
           <div>label</div>
           <div>send (支持 \x1b \r \t \\)</div>
           <div>hint</div>
@@ -272,9 +432,13 @@ function KeysSection(props: { store: PrefsStore }) {
             {(k, i) => (
               <KeyRow
                 k={k}
+                isFirst={i() === 0}
+                isLast={i() === keys().length - 1}
                 onLabel={(v) => replaceAt(i(), { label: v })}
                 onSend={(v) => replaceAt(i(), { send: v })}
                 onHint={(v) => replaceAt(i(), { hint: v })}
+                onMoveUp={() => moveAt(i(), -1)}
+                onMoveDown={() => moveAt(i(), 1)}
                 onRemove={() => removeAt(i())}
               />
             )}
@@ -372,9 +536,13 @@ function QuietHoursSection(props: { client: RccClient }) {
 
 function KeyRow(props: {
   k: UiCustomKey;
+  isFirst: boolean;
+  isLast: boolean;
   onLabel: (v: string) => void;
   onSend: (v: string) => void;
   onHint: (v: string) => void;
+  onMoveUp: () => void;
+  onMoveDown: () => void;
   onRemove: () => void;
 }) {
   const [sendDraft, setSendDraft] = createSignal(encodeSendEscapes(props.k.send));
@@ -387,7 +555,27 @@ function KeyRow(props: {
   }
 
   return (
-    <div class="grid grid-cols-[80px_1fr_1fr_28px] gap-2 items-center">
+    <div class="grid grid-cols-[32px_80px_1fr_1fr_28px] gap-2 items-center">
+      <div class="flex flex-col items-center justify-center -my-0.5">
+        <button
+          class="text-zinc-600 hover:text-zinc-200 text-[10px] leading-none py-0.5 disabled:opacity-20 disabled:cursor-not-allowed"
+          onClick={props.onMoveUp}
+          disabled={props.isFirst}
+          title="上移"
+          aria-label="上移"
+        >
+          ▲
+        </button>
+        <button
+          class="text-zinc-600 hover:text-zinc-200 text-[10px] leading-none py-0.5 disabled:opacity-20 disabled:cursor-not-allowed"
+          onClick={props.onMoveDown}
+          disabled={props.isLast}
+          title="下移"
+          aria-label="下移"
+        >
+          ▼
+        </button>
+      </div>
       <input
         value={props.k.label}
         onInput={(e) => props.onLabel(e.currentTarget.value.slice(0, 32))}

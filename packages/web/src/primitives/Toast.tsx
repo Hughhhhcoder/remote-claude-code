@@ -114,6 +114,7 @@ export function ToastContainer(): JSX.Element {
           "fixed z-[70] pointer-events-none flex flex-col gap-2",
           "bottom-4 left-1/2 -translate-x-1/2 w-[min(360px,calc(100vw-2rem))]",
           "md:left-auto md:right-4 md:translate-x-0",
+          "safe-area-margin-bottom",
         ].join(" ")}
       >
         <For each={items()}>

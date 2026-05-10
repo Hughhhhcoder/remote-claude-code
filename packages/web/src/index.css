@@ -221,3 +221,50 @@ body,
   }
 }
 
+/*
+ * [B29-B] Safe-area utilities — combine `env(safe-area-inset-*)` with a
+ * min fallback so content doesn't sit under the Dynamic Island notch or the
+ * home-indicator bar on iOS PWAs. `max()` picks the larger of the provided
+ * fallback and the real inset; on browsers without env() the fallback wins.
+ *
+ * Use `.safe-area-padding-top` on the top chrome (TopBar), `.*-bottom` on
+ * sticky footers / composers, `.*-x` for left/right gutters in landscape
+ * (iPhone with rounded corners), and `.safe-area-padding` for all four.
+ */
+.safe-area-padding-top {
+  padding-top: max(env(safe-area-inset-top, 0px), 0px);
+}
+.safe-area-padding-bottom {
+  padding-bottom: max(env(safe-area-inset-bottom, 0px), 0px);
+}
+.safe-area-padding-left {
+  padding-left: max(env(safe-area-inset-left, 0px), 0px);
+}
+.safe-area-padding-right {
+  padding-right: max(env(safe-area-inset-right, 0px), 0px);
+}
+.safe-area-padding-x {
+  padding-left: max(env(safe-area-inset-left, 0px), 0px);
+  padding-right: max(env(safe-area-inset-right, 0px), 0px);
+}
+.safe-area-padding {
+  padding-top: max(env(safe-area-inset-top, 0px), 0px);
+  padding-bottom: max(env(safe-area-inset-bottom, 0px), 0px);
+  padding-left: max(env(safe-area-inset-left, 0px), 0px);
+  padding-right: max(env(safe-area-inset-right, 0px), 0px);
+}
+/* Variants with an 8px floor for chrome that already has its own padding
+   baseline (e.g. toast container, modal close button). max() ensures we
+   never shrink below the design minimum even when env() is 0. */
+.safe-area-padding-bottom-8 {
+  padding-bottom: max(env(safe-area-inset-bottom, 0px), 0.5rem);
+}
+.safe-area-padding-top-8 {
+  padding-top: max(env(safe-area-inset-top, 0px), 0.5rem);
+}
+.safe-area-margin-bottom {
+  margin-bottom: max(env(safe-area-inset-bottom, 0px), 0px);
+}
+.safe-area-margin-top {
+  margin-top: max(env(safe-area-inset-top, 0px), 0px);
+}

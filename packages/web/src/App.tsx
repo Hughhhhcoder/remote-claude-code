@@ -58,6 +58,20 @@ function readShareTokenFromLocation(): string | null {
   }
 }
 
+// [B29-C] PWA manifest shortcuts target /?action=new-session | /?action=inbox
+// Read once at mount, clear the query param so refresh doesn't re-trigger.
+function readActionFromLocation(): "new-session" | "inbox" | null {
+  try {
+    const u = new URL(window.location.href);
+    if (u.pathname !== "/") return null;
+    const a = u.searchParams.get("action");
+    if (a === "new-session" || a === "inbox") return a;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 // B21-C: Web Share Target. Browsers navigate to /share?title=&text=&url= when
 // the user picks rcc from a share sheet. We pull the params once, clear the
 // URL, and later pre-fill the active session's composer draft.
@@ -244,6 +258,14 @@ export function App() {
   // Global keyboard shortcuts (B17-A). Cmd+K remains owned by CommandPalette.
   onMount(() => {
     initShortcutSystem();
+    // [B29-C] PWA shortcut launch: read ?action= once and fire the matching
+    // UI action. We clear the query param so a reload doesn't re-fire.
+    const pendingAction = readActionFromLocation();
+    if (pendingAction) {
+      try { window.history.replaceState(null, "", "/"); } catch { /* ignore */ }
+      if (pendingAction === "new-session") onNewSession();
+      else if (pendingAction === "inbox") uiStore.setInboxOpen(true);
+    }
     const focusSel = (sel: string) => () => {
       const el = document.querySelector<HTMLElement>(sel);
       el?.focus();
@@ -392,6 +414,18 @@ export function App() {
       onOpenDevices={() => uiStore.setDevicesOpen(true)}
       onManageProjects={() => uiStore.setProjectsModalOpen(true)}
       onManagePeers={() => uiStore.setPeersModalOpen(true)}
+      onRefreshSessions={() => {
+        // [B29-A] Poke the host with an empty session.list frame; the
+        // federation path rebroadcasts a fresh merged list, and the direct
+        // path is a no-op (safe) — either way the store will update once
+        // the next session.list arrives. The pull-to-refresh hook animates
+        // the spinner for ~250ms so the user gets feedback either way.
+        try {
+          client.send({ v: 1, t: "session.list", sessions: [] });
+        } catch {
+          /* WS closed — banner will take it from here. */
+        }
+      }}
     />
   );
 

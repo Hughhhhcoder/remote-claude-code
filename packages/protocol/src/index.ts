@@ -1640,6 +1640,15 @@ export const UiPrefs = z.object({
    * back-compat — old hosts / persisted prefs omit the field entirely.
    */
   showThinking: z.boolean().default(false),
+  /**
+   * [B29-B] Subtle vibration feedback on key interactions (message send,
+   * approval approve/deny, workflow step complete, long-press action open).
+   * Implemented via navigator.vibrate() — no-op on iOS Safari / older
+   * browsers. Default true because the underlying API silently fails where
+   * unsupported, so turning it on for everyone is safe and old clients that
+   * didn't ship the feature just never fire the call.
+   */
+  haptics: z.boolean().default(true),
 });
 export type UiPrefs = z.infer<typeof UiPrefs>;
 

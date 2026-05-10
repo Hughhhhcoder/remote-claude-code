@@ -1,5 +1,6 @@
 import { createMemo, createSignal, createUniqueId, For, Show, type JSX } from "solid-js";
 import { detectLanguage } from "./detectLanguage";
+import { useTouchGestures, hasTouchCapability } from "../../hooks/useTouchGestures.ts";
 
 /**
  * CodeBlock — fenced code segment with a header strip (language + actions) and
@@ -230,6 +231,13 @@ export function CodeBlock(props: CodeBlockProps): JSX.Element {
   const showCopy = () => props.copyable !== false;
   const showFileLink = () => typeof props.filePath === "string" && props.filePath.length > 0;
 
+  // [B29-A] Pinch-to-zoom on touch devices — two-finger pinch on the <pre>
+  // scales font-size within [12, 20]px. Gated by coarse-pointer so desktop
+  // text selection is untouched; single-finger drags are ignored inside the
+  // hook. Font-size is per-block session state (no host roundtrip).
+  const touchEnabled = hasTouchCapability();
+  const pinch = useTouchGestures({ min: 12, max: 20, initial: 13 });
+
   return (
     <div class="my-3 rounded-md border border-border-subtle bg-codeBg overflow-hidden">
       <div class="flex items-center justify-between gap-2 px-3 py-1.5 border-b border-border-subtle bg-bg-surface text-[11px] font-mono text-text-muted">
@@ -272,7 +280,17 @@ export function CodeBlock(props: CodeBlockProps): JSX.Element {
         </div>
       </div>
       <div class="relative" id={bodyId}>
-        <pre class="overflow-x-auto p-3 text-[13px] leading-[1.6] font-mono">
+        <pre
+          class="overflow-x-auto p-3 leading-[1.6] font-mono"
+          style={{
+            "font-size": `${pinch.fontSize()}px`,
+            "touch-action": touchEnabled ? "pinch-zoom" : undefined,
+          }}
+          onPointerDown={touchEnabled ? pinch.onPointerDown : undefined}
+          onPointerMove={touchEnabled ? pinch.onPointerMove : undefined}
+          onPointerUp={touchEnabled ? pinch.onPointerUp : undefined}
+          onPointerCancel={touchEnabled ? pinch.onPointerUp : undefined}
+        >
           <code>
             <Show
               when={lineNumbers()}

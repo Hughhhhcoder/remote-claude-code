@@ -8,6 +8,7 @@ import {
 } from "solid-js";
 import type { ChatMessage, ChatSegment } from "@rcc/protocol";
 import { IconButton } from "../primitives/IconButton";
+import { haptics } from "../hooks/useHaptics";
 import { TextBlock } from "./blocks/TextBlock";
 import { CodeBlock } from "./blocks/CodeBlock";
 import { ThinkingBlock } from "./blocks/ThinkingBlock";
@@ -316,6 +317,7 @@ export function MessageRow(props: MessageRowProps): JSX.Element {
     longPressTimer = setTimeout(() => {
       longPressTimer = null;
       pressStart = null;
+      haptics.medium(); // [B29-B] confirm long-press fired
       setSheetOpen(true);
     }, LONG_PRESS_MS);
   };
