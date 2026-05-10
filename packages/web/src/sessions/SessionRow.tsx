@@ -1,4 +1,4 @@
-import { Show, type JSX } from "solid-js";
+import { Show, createMemo, type JSX } from "solid-js";
 import type { SessionMeta, GitStatusData } from "@rcc/protocol";
 import { Chip } from "../primitives/Chip.tsx";
 
@@ -43,12 +43,21 @@ function remoteTint(color: string | undefined): string {
 }
 
 export function SessionRow(props: SessionRowProps): JSX.Element {
-  const isExited = () => props.session.status === "exited";
-  const isRemote = () => !!props.session.peerId;
-  const displayTitle = () =>
-    props.session.summary?.title ??
-    props.session.title ??
-    props.session.id;
+  const isExited = createMemo(() => props.session.status === "exited");
+  const isRemote = createMemo(() => !!props.session.peerId);
+  const displayTitle = createMemo(
+    () =>
+      props.session.summary?.title ??
+      props.session.title ??
+      props.session.id,
+  );
+  // Tooltip text — bullets.map().join() is O(n) string work; only re-run
+  // when summary/bullets change, not on every parent tick.
+  const titleTooltip = createMemo(() =>
+    props.session.summary
+      ? props.session.summary.bullets.map((b) => `• ${b}`).join("\n")
+      : displayTitle(),
+  );
 
   return (
     <div
@@ -106,11 +115,7 @@ export function SessionRow(props: SessionRowProps): JSX.Element {
                   ? "text-text-primary"
                   : "text-text-primary/90",
             ].join(" ")}
-            title={
-              props.session.summary
-                ? props.session.summary.bullets.map((b) => `• ${b}`).join("\n")
-                : displayTitle()
-            }
+            title={titleTooltip()}
           >
             {displayTitle()}
           </div>

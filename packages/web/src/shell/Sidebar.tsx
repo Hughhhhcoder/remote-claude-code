@@ -198,8 +198,12 @@ export function Sidebar(props: SidebarProps): JSX.Element {
               >
                 <For each={props.projects}>
                   {(p) => {
-                    const sess = () => sessionsByProject().get(p.id) ?? [];
-                    const collapsed = () => props.collapsedProjects.has(p.id);
+                    const sess = createMemo(
+                      () => sessionsByProject().get(p.id) ?? [],
+                    );
+                    const collapsed = createMemo(() =>
+                      props.collapsedProjects.has(p.id),
+                    );
                     return (
                       <div class="mb-2">
                         <ProjectHeader
@@ -266,7 +270,9 @@ export function Sidebar(props: SidebarProps): JSX.Element {
                 </div>
                 <For each={props.peers}>
                   {(pr) => {
-                    const sess = () => sessionsByPeer().get(pr.id) ?? [];
+                    const sess = createMemo(
+                      () => sessionsByPeer().get(pr.id) ?? [],
+                    );
                     return (
                       <div class="mb-2">
                         <div class="flex items-center gap-1.5 px-2 py-2 rounded-md hover:bg-bg-surfaceStrong min-h-[40px]">

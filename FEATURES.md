@@ -436,9 +436,9 @@
 - B18-C 分析剩余大 chunk,定向拆分
 
 **batch 19** · 运行时:
-- B19-A WS 消息批量合并 frame(减少 render 次数)
-- B19-B sidebar 重渲染定点(createMemo 全面铺开)
-- B19-C visualViewport 高频事件节流
+- B19-A WS 消息批量合并 frame(减少 render 次数) — ✅ 完成。`packages/web/src/client.ts` 在 ws `onmessage` 中改为入队 + `queueMicrotask` flush,flush 内用 Solid `batch()` 包裹 listener 派发;FIFO 保序,listener 集合在 flush 开始时快照(中途 unsub 不影响当前 tick,新增 listener 下一 tick 生效),每个 listener 独立 try/catch 不相互短路。hello 这类一次带来 sessions+devices+peers+projects+prefs 的突发帧现在合并成一次渲染。
+- B19-B sidebar 重渲染定点(createMemo 全面铺开) — ✅ 完成。`Sidebar.tsx` 原已 memo 化 `sessionsByProject` / `sessionsByPeer`,本批把 `<For>` 回调内每次渲染都要调用 3-4 次的两个 per-project 派生(`sess = sessionsByProject().get(p.id) ?? []`、`collapsed = collapsedProjects.has(p.id)`)与 peer `sess` 改为 `createMemo`,避免同一回调内 `sess().length` / `For each={sess()}` / 空态 fallback 等多点重复读 Map/Set。`SessionRow.tsx` 把 `isExited`/`isRemote`/`displayTitle` 从裸 getter 改为 `createMemo`,并把 title 属性里 `summary.bullets.map(...).join("\n")` 这块 O(n) 字符串拼接也 memo 化(仅在 summary 变化时重算,而不是每次父组件 tick)。无行为变化,typecheck + build 通过。
+- B19-C visualViewport 高频事件节流 — ✅ 完成。`useVisualViewportBottom` 的 resize/scroll 监听改为 rAF 合并(每帧最多一次布局读),iOS 软键盘动画期间的连续事件不再触发抖动;`streaming.ts` rAF coalescer 审计通过(dedupe、dispose/clear/sid-switch 均取消 rAF,无泄漏)。
 
 **batch 20** · 网络:
 - B20-A gzip / brotli 响应 + 长缓存静态资源

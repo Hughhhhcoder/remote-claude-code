@@ -1,5 +1,6 @@
 import { tryDecode, encode, type Frame, type PermissionMode, type SessionDriver, type SessionMeta, type TunnelInfo } from "@rcc/protocol";
 import sodium from "libsodium-wrappers";
+import { batch } from "solid-js";
 import { loadE2EKey } from "./auth.ts";
 
 export type Listener = (frame: Frame) => void;
@@ -117,6 +118,12 @@ export class RccClient {
   /** Per-connection inbound replay window. Reset on every (re)connect. Only
    * consulted when the received frame is an E2E envelope. */
   private replay = new ReplayWindow();
+  /** [B19-A] Frames queued during the current microtask. Drained + dispatched
+   * to listeners inside a Solid `batch()` so all reactive stores that react
+   * to a single burst (hello + session.list + approvals) update in one render.
+   * Order is FIFO within a flush; across flushes is the ws arrival order. */
+  private pendingFrames: Frame[] = [];
+  private flushScheduled = false;
 
   sessions: SessionMeta[] = [];
   tunnel: TunnelInfo | null = null;
@@ -285,7 +292,11 @@ export class RccClient {
       if (frame.t === "pty.out") {
         this.lastSeq.set(frame.sid, frame.seq);
       }
-      for (const l of this.listeners) l(frame);
+      // [B19-A] Queue listener dispatch instead of firing synchronously. When
+      // the host emits multiple frames in one tick (common on hello), this
+      // lets Solid batch every store's reactive update into one render.
+      this.pendingFrames.push(frame);
+      this.scheduleFlush();
     });
 
     this.ws.addEventListener("close", (ev) => {
@@ -425,6 +436,33 @@ export class RccClient {
     if (this.status === s) return;
     this.status = s;
     for (const l of this.statusListeners) l(s);
+  }
+
+  /** [B19-A] Coalesce listener dispatch. All frames received inside the same
+   * microtask tick fan out to listeners inside a single Solid `batch()` so
+   * reactive stores update once per burst instead of once per frame. Snapshot
+   * the listener set so unsubscribes mid-flush don't skip peers; errors in
+   * one listener don't short-circuit the others. */
+  private scheduleFlush(): void {
+    if (this.flushScheduled) return;
+    this.flushScheduled = true;
+    queueMicrotask(() => {
+      this.flushScheduled = false;
+      const frames = this.pendingFrames;
+      this.pendingFrames = [];
+      const ls = [...this.listeners];
+      batch(() => {
+        for (const frame of frames) {
+          for (const l of ls) {
+            try {
+              l(frame);
+            } catch (err) {
+              console.error("[rcc] listener error", err);
+            }
+          }
+        }
+      });
+    });
   }
 
   private sendNow(frame: Frame): void {
