@@ -10,9 +10,35 @@ RCC wraps the local `claude` CLI (or the Claude Agent SDK) inside a small daemon
 
 ## Quickstart
 
+### Install (one-liner, macOS / Linux)
+
 ```sh
-# 1. Install deps (Node >= 20, pnpm 9.x)
-pnpm install
+# Just install:
+curl -fsSL https://raw.githubusercontent.com/Hughhhhcoder/remote-claude-code/main/scripts/install.sh | sh
+
+# Install + boot host locally + open browser:
+curl -fsSL https://raw.githubusercontent.com/Hughhhhcoder/remote-claude-code/main/scripts/install.sh | sh -s -- --start --open
+
+# Install + boot with a public Cloudflare tunnel URL (use from any device, any network):
+curl -fsSL https://raw.githubusercontent.com/Hughhhhcoder/remote-claude-code/main/scripts/install.sh | sh -s -- --tunnel --open
+```
+
+The installer:
+1. Verifies (and optionally installs via `brew` / `nvm`) Node ≥ 20
+2. Warns if `claude` CLI isn't on PATH (install: https://docs.claude.com/en/docs/claude-code)
+3. Downloads the signed tarball from the latest GitHub release, verifies sha256
+4. Extracts to `~/.rcc/install/rcc-<ver>/` and symlinks `rcc` / `rcc-cli` / `rcc-admin` into `~/.local/bin/`
+5. Appends `~/.local/bin` to your shell's PATH (zsh / bash / fish) unless you pass `--no-path`
+6. Optionally boots the host, grabs the URL + pairing code, and opens your browser
+
+Update later with `rcc update` (same tarball flow).
+
+### From source (devs / auditors)
+
+```sh
+git clone https://github.com/Hughhhhcoder/remote-claude-code.git
+cd remote-claude-code
+pnpm install       # Node >= 20, pnpm 9.x
 
 # 2. Run host daemon (shell 1) and web frontend (shell 2)
 pnpm dev:host       # :7777 — daemon, WS + REST

@@ -26,11 +26,27 @@ Pick one:
 # A · One-liner (recommended)
 curl -fsSL https://raw.githubusercontent.com/Hughhhhcoder/remote-claude-code/main/scripts/install.sh | sh
 
+# A+ · Install, boot locally, open browser
+curl -fsSL https://raw.githubusercontent.com/Hughhhhcoder/remote-claude-code/main/scripts/install.sh | sh -s -- --start --open
+
+# A++ · Install, spin up a public Cloudflare tunnel, open browser (use from anywhere)
+curl -fsSL https://raw.githubusercontent.com/Hughhhhcoder/remote-claude-code/main/scripts/install.sh | sh -s -- --tunnel --open
+
 # B · From source (developers / if you want to read the code)
 git clone https://github.com/Hughhhhcoder/remote-claude-code.git
 cd remote-claude-code
 pnpm install
 ```
+
+The one-liner:
+1. Checks Node ≥ 20 (with `--install-node` auto-installs via `brew` on macOS or `nvm` on Linux)
+2. Warns if the `claude` CLI isn't on PATH
+3. Downloads the latest GitHub release tarball and verifies sha256
+4. Extracts to `~/.rcc/install/rcc-<ver>/` and symlinks `rcc` / `rcc-cli` / `rcc-admin` to `~/.local/bin`
+5. Appends `~/.local/bin` to your shell's PATH (zsh / bash / fish) — pass `--no-path` to opt out
+6. With `--start` / `--tunnel`, runs the host in the background, captures the URL + pairing code; with `--open`, launches the browser
+
+All flags: `--start --tunnel --open --install-node --no-path --yes`. See `sh install.sh --help` for details.
 
 Verify:
 

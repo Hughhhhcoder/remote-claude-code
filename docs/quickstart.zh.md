@@ -26,11 +26,27 @@
 # A · 一键脚本(推荐)
 curl -fsSL https://raw.githubusercontent.com/Hughhhhcoder/remote-claude-code/main/scripts/install.sh | sh
 
+# A+ · 装完立即启动 + 开浏览器(本地)
+curl -fsSL https://raw.githubusercontent.com/Hughhhhcoder/remote-claude-code/main/scripts/install.sh | sh -s -- --start --open
+
+# A++ · 装完 + 起公网 Cloudflare 隧道 + 开浏览器(手机通用)
+curl -fsSL https://raw.githubusercontent.com/Hughhhhcoder/remote-claude-code/main/scripts/install.sh | sh -s -- --tunnel --open
+
 # B · 从源码(开发者 / 想看代码)
 git clone https://github.com/Hughhhhcoder/remote-claude-code.git
 cd remote-claude-code
 pnpm install
 ```
+
+一键脚本会:
+1. 验证 Node ≥ 20;没装或版本太低,加 `--install-node` 会自动 `brew install node`(macOS) 或走 `nvm`(Linux)
+2. 检查 `claude` CLI 是否在 PATH,没装就提示去装
+3. 从 GitHub Release 下载 tarball,校验 sha256
+4. 解包到 `~/.rcc/install/rcc-<ver>/`,符号链接到 `~/.local/bin/{rcc,rcc-cli,rcc-admin}`
+5. 自动把 `~/.local/bin` 加到 zsh / bash / fish 的 PATH(加 `--no-path` 可跳过)
+6. `--start` / `--tunnel` 时后台启 host,抓 URL + 配对码,`--open` 时自动开浏览器
+
+所有 flag: `--start --tunnel --open --install-node --no-path --yes`,跑 `sh install.sh --help` 看详细说明。
 
 验证:
 
