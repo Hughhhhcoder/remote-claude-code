@@ -298,6 +298,14 @@ if [ "$MAJOR" -lt 20 ]; then
   echo "rcc: node $MAJOR detected, need >= 20" >&2
   exit 1
 fi
+# Subcommands handled by update.js (no host boot).
+case "\${1-}" in
+  update|version|--version|-v)
+    export RCC_INSTALL_DIR="$DIR"
+    export RCC_SELF_PATH="$0"
+    exec node --no-deprecation "$DIR/lib/host/update.js" "$@"
+    ;;
+esac
 export RCC_WEB_DIST="\${RCC_WEB_DIST:-$DIR/lib/web/dist}"
 exec node --no-deprecation "$DIR/lib/host/index.js" "$@"
 `;

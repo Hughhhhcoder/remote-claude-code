@@ -24,7 +24,7 @@ Pick one:
 
 ```sh
 # A · One-liner (recommended)
-curl -fsSL https://raw.githubusercontent.com/Hughhhhcoder/remote-claude-code/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Hughhhhcoder/remote-claude-code/main/scripts/install.sh | sh
 
 # B · From source (developers / if you want to read the code)
 git clone https://github.com/Hughhhhcoder/remote-claude-code.git
@@ -35,10 +35,24 @@ pnpm install
 Verify:
 
 ```sh
-rcc --version    # if you used the installer
+rcc version      # installer path; prints "rcc 1.0.0 (darwin-arm64)"
 # or from source:
-pnpm dev:host    # should print "host listening on :7777"
+pnpm dev:host    # should print "[rcc-host] listening on http://localhost:7777"
 ```
+
+---
+
+## 1.5 · Self-update (installer paths only)
+
+```sh
+rcc update                   # install latest release
+rcc update --check           # check without modifying anything
+rcc update --version=1.0.0   # force-install a specific version (rollback or reinstall)
+```
+
+Downloads the platform-matching tarball from GitHub Releases, verifies sha256, swaps symlinks. Keeps the previous install for rollback (`~/.rcc/install/`).
+
+Source-tree installs update with `git pull && pnpm install`.
 
 ---
 

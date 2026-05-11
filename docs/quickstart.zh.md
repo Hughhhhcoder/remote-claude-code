@@ -24,7 +24,7 @@
 
 ```sh
 # A · 一键脚本(推荐)
-curl -fsSL https://raw.githubusercontent.com/Hughhhhcoder/remote-claude-code/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Hughhhhcoder/remote-claude-code/main/scripts/install.sh | sh
 
 # B · 从源码(开发者 / 想看代码)
 git clone https://github.com/Hughhhhcoder/remote-claude-code.git
@@ -35,10 +35,24 @@ pnpm install
 验证:
 
 ```sh
-rcc --version    # 一键脚本路径
+rcc version      # 一键脚本路径,打印 "rcc 1.0.0 (darwin-arm64)"
 # 或源码:
-pnpm dev:host    # 应打印 "host listening on :7777"
+pnpm dev:host    # 应打印 "[rcc-host] listening on http://localhost:7777"
 ```
+
+---
+
+## 1.5 · 自我更新(只对一键脚本安装有效)
+
+```sh
+rcc update          # 装最新 release
+rcc update --check  # 只查有没有新版,不改系统
+rcc update --version=1.0.0   # 强制回退 / 重装指定版本
+```
+
+更新过程:从 GitHub Releases 下载 `rcc-<ver>-<平台>.tar.gz`,校验 sha256,原地切换符号链接。保留上一版以便回滚(`~/.rcc/install/` 目录下)。
+
+源码安装方式用 `git pull && pnpm install` 即可。
 
 ---
 
