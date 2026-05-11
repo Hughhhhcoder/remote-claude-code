@@ -48,7 +48,28 @@ for arg in "$@"; do
     --no-path)      SKIP_PATH=1 ;;
     --yes|-y)       ASSUME_YES=1 ;;
     --help|-h)
-      sed -n '2,20p' "$0" 2>/dev/null || sed -n '2,20p' "$(command -v "$0")"
+      cat <<'HELP'
+RCC installer
+
+Usage:
+  curl -fsSL .../install.sh | sh
+  curl -fsSL .../install.sh | sh -s -- --start --open
+  curl -fsSL .../install.sh | sh -s -- --tunnel --open
+
+Flags:
+  --start          boot the host after install
+  --tunnel         boot with RCC_TUNNEL=try (public trycloudflare URL); implies --start
+  --open           open the URL in the browser after host comes up (needs --start or --tunnel)
+  --install-node   auto-install Node 20 via Homebrew (macOS) or nvm (Linux)
+  --no-path        don't modify shell rc files (skip PATH autoconfig)
+  --yes, -y        answer yes to prompts (auto-enabled when piped from curl)
+
+Env:
+  RCC_VERSION=1.0.0             pin a specific tag
+  RCC_REPO=owner/repo           use a fork
+  RCC_PREFIX=$HOME/.rcc         install root
+  RCC_BIN_DIR=$HOME/.local/bin  symlink dir
+HELP
       exit 0
       ;;
     *)
